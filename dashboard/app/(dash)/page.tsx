@@ -11,8 +11,10 @@ import {
 } from "@/lib/data";
 import { day, inr, num, shortId, when } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+// Cache the analytics render for 60s (ISR) instead of re-querying Supabase on
+// every navigation. Usage stats don't need to be second-fresh, and this makes
+// repeat visits + prefetched links load instantly.
+export const revalidate = 60;
 
 type Ev = {
   device_id: string;

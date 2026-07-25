@@ -3,8 +3,7 @@ import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
 import { getSummary, recent } from "@/lib/data";
 import { inr, num, when } from "@/lib/format";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = 60; // ISR: instant repeat loads, data ≤60s stale.
 
 type Payment = {
   id: number;

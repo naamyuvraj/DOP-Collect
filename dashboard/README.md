@@ -23,7 +23,17 @@ Run in the SQL editor, in order:
 1. `../admin/schema.sql` — analytics tables + views.
 2. `../admin/schema_management.sql` — `app_keys` + `app_config`.
 
+`.env.local` (optional, for the Assistant):
+- `SYNAP_MCP_URL`, `SYNAP_TOKEN` — Maximem Synap memory. Without them the
+  assistant still answers; it just won't remember across sessions.
+- The assistant uses the Groq keys in the `app_keys` table (API Keys page). For
+  local dev before any key is stored, set `GROQ_KEYS=gsk_a,gsk_b`.
+
 ## Pages
+- **Assistant** — an analytics agent (Groq tool-calling + Maximem Synap memory).
+  Ask in plain English about installs, activity, revenue, and key health; it
+  fetches live numbers via a fixed set of read-only tools (never free-form SQL
+  against the service_role key), remembers what you care about, and refuses PII.
 - **Overview** — installs, active users, syncs, queries, revenue, charts.
 - **Users & Devices** — every install with last-seen + status.
 - **Activity** — the latest events.
