@@ -1,0 +1,37 @@
+# DOP Collect — Admin Dashboard
+
+Next.js 14 admin dashboard for DOP Collect: analytics, users/devices, activity,
+API-key management, payments, and remote app config. The Supabase **service_role
+key stays server-side only** (API routes / server components) — it never reaches
+the browser.
+
+## Setup
+```bash
+cd dashboard
+cp .env.local.example .env.local     # fill in the values (see below)
+npm install
+npm run dev                          # http://localhost:3939
+```
+
+`.env.local`:
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — Supabase → Settings → API.
+- `DASHBOARD_PASSWORD` — the login password.
+- `AUTH_SECRET` — a long random string (session cookie value).
+
+## Supabase
+Run in the SQL editor, in order:
+1. `../admin/schema.sql` — analytics tables + views.
+2. `../admin/schema_management.sql` — `app_keys` + `app_config`.
+
+## Pages
+- **Overview** — installs, active users, syncs, queries, revenue, charts.
+- **Users & Devices** — every install with last-seen + status.
+- **Activity** — the latest events.
+- **API Keys** — live Groq key health + a managed key store (for a future proxy).
+- **Payments** — revenue + transactions.
+- **App Config** — feature flags, force-update, announcement banner (read by the
+  app at runtime, no rebuild needed).
+
+## Deploy (Vercel)
+Point Vercel at the `dashboard/` directory and set the same four env vars in the
+project settings. Auth + the service key both stay server-side.

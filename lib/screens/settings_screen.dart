@@ -28,7 +28,7 @@ class SettingsScreen extends StatefulWidget {
   /// spotlight targets).
   final Future<void> Function()? onTour;
 
-  static const _version = '0.9.4 · analytics';
+  static const _version = '0.9.5 · analytics live';
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
