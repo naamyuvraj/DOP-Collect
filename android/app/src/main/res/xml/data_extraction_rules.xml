@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: keep the local RD database and stored credentials out of
+     cloud backup and device-to-device transfer. This is a private, on-device
+     agent tool; its data (customer accounts, login) must not leave the phone. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DOP Collect · Analytics</title>
+
+<!-- ============================================================= -->
+<!--  Keys load from the git-ignored keys.js (NEVER committed).      -->
+<!--  Copy keys.example.js -> keys.js and paste your URL +           -->
+<!--  service_role key. Without keys.js this shows demo data.        -->
+<!-- ============================================================= -->
+<script src="keys.js" onerror="window.__noKeys=true"></script>
+<script>
+  const SUPABASE_URL = window.SUPABASE_URL || "";
+  const SUPABASE_SERVICE_KEY = window.SUPABASE_SERVICE_KEY || "";
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --canvas:#E7F0E9; --card:#ffffff; --ink:#14201A; --muted:#5B6B62;
+    --faint:#95A69C; --line:#E3ECE5; --green:#21A06A; --greenSoft:#DCF0E5;
+    --yellow:#EFE94C; --focal:#F0EE8F; --red:#E15B5B; --redSoft:#FBE3E3;
+    --blue:#2E3A8C; --blueSoft:#E1E6FA; --amber:#E5A100;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--ink);
+    font-family:'Plus Jakarta Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 18px 60px}
+  header{display:flex;align-items:center;gap:14px;margin:6px 0 20px}
+  .logo{width:46px;height:46px;border-radius:14px;background:var(--ink);color:#fff;
+    display:grid;place-items:center;font-weight:800;font-size:20px}
+  h1{font-size:22px;font-weight:800;margin:0}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .spacer{flex:1}
+  button{font-family:inherit;cursor:pointer;border:none;border-radius:12px;
+    font-weight:700;font-size:13px;padding:10px 16px;background:var(--ink);color:#fff}
+  button.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  .seg{display:inline-flex;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .seg button{background:transparent;color:var(--muted);border-radius:0;padding:8px 14px}
+  .seg button.on{background:var(--ink);color:#fff}
+  .banner{background:var(--focal);border-radius:16px;padding:12px 16px;margin-bottom:18px;
+    font-size:13px;font-weight:600;display:flex;gap:10px;align-items:center}
+  .grid{display:grid;gap:14px}
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .card{background:var(--card);border-radius:20px;padding:18px;
+    box-shadow:0 10px 30px rgba(16,27,18,.05)}
+  .kpi .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:700}
+  .kpi .val{font-size:30px;font-weight:800;margin-top:6px;line-height:1}
+  .kpi .val small{font-size:15px;color:var(--muted);font-weight:700}
+  .kpi.focal{background:var(--focal)}
+  .charts{grid-template-columns:1.4fr 1fr;margin-top:14px}
+  .section-title{font-weight:800;font-size:15px;margin:0 0 12px}
+  canvas{max-width:100%}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--faint);font-weight:700;font-size:11px;
+    text-transform:uppercase;letter-spacing:.05em;padding:8px 8px}
+  td{padding:9px 8px;border-top:1px solid var(--line)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:8px;font-size:11px;font-weight:700}
+  .pill.g{background:var(--greenSoft);color:var(--green)}
+  .pill.b{background:var(--blueSoft);color:var(--blue)}
+  .pill.r{background:var(--redSoft);color:var(--red)}
+  .mono{font-variant-numeric:tabular-nums}
+  .two{grid-template-columns:1fr 1fr;margin-top:14px}
+  @media(max-width:820px){.charts,.two{grid-template-columns:1fr}}
+  .muted{color:var(--muted)}
+  a{color:var(--blue)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">₹</div>
+    <div>
+      <h1>DOP Collect · Analytics</h1>
+      <div class="sub" id="updated">Loading…</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="seg" id="rangeSeg">
+      <button data-d="7">7d</button>
+      <button data-d="30" class="on">30d</button>
+      <button data-d="90">90d</button>
+    </div>
+    <button class="ghost" onclick="loadAll()" style="margin-left:8px">↻ Refresh</button>
+  </header>
+
+  <div class="banner" id="demoBanner" style="display:none">
+    ⚠️ Demo data — paste your Supabase URL + service_role key at the top of this file to go live.
+  </div>
+
+  <div class="grid kpis" id="kpis"></div>
+
+  <div class="grid charts">
+    <div class="card">
+      <p class="section-title">Daily active devices</p>
+      <canvas id="dauChart" height="120"></canvas>
+    </div>
+    <div class="card">
+      <p class="section-title">LLM key usage</p>
+      <canvas id="keyChart" height="120"></canvas>
+    </div>
+  </div>
+
+  <div class="grid two">
+    <div class="card">
+      <p class="section-title">Activity by type</p>
+      <canvas id="eventChart" height="150"></canvas>
+    </div>
+    <div class="card">
+      <p class="section-title">Revenue</p>
+      <canvas id="revChart" height="150"></canvas>
+    </div>
+  </div>
+
+  <div class="grid two">
+    <div class="card">
+      <p class="section-title">Recent activity</p>
+      <div style="overflow-x:auto"><table id="eventsTbl"><thead><tr>
+        <th>When</th><th>Device</th><th>Event</th><th>Details</th></tr></thead><tbody></tbody></table></div>
+    </div>
+    <div class="card">
+      <p class="section-title">Payments</p>
+      <div style="overflow-x:auto"><table id="payTbl"><thead><tr>
+        <th>When</th><th>Plan</th><th>Amount</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const LIVE = SUPABASE_URL && SUPABASE_SERVICE_KEY;
+const sb = LIVE ? supabase.createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY,
+  {auth:{persistSession:false}}) : null;
+let RANGE = 30;
+const charts = {};
+const inr = n => '₹' + Math.round(n||0).toLocaleString('en-IN');
+const fmt = t => new Date(t).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+const dkey = d => d.toISOString().slice(0,10);
+
+document.getElementById('rangeSeg').addEventListener('click', e=>{
+  if(e.target.dataset.d){
+    RANGE = +e.target.dataset.d;
+    [...e.currentTarget.children].forEach(b=>b.classList.toggle('on', b===e.target));
+    loadAll();
+  }
+});
+
+// ---- Data access (Supabase or demo) --------------------------------------
+async function q(table, sel='*', opts={}){
+  if(!LIVE) return demo(table);
+  let query = sb.from(table).select(sel);
+  if(opts.gte) query = query.gte('created_at', opts.gte);
+  if(opts.order) query = query.order(opts.order.col,{ascending:opts.order.asc});
+  if(opts.limit) query = query.limit(opts.limit);
+  const {data,error} = await query;
+  if(error){ console.error(table, error); return []; }
+  return data||[];
+}
+
+async function loadAll(){
+  document.getElementById('demoBanner').style.display = LIVE ? 'none':'flex';
+  const since = new Date(Date.now()-RANGE*864e5).toISOString();
+  const [summary, dau, evTypes, keys, rev, events, pays] = await Promise.all([
+    q('v_summary'), q('v_daily_active'), q('v_events_by_type'),
+    q('v_key_usage'), q('v_revenue_by_day'),
+    q('events','device_id,event,props,created_at',{order:{col:'created_at',asc:false},limit:12}),
+    q('payments','*',{order:{col:'created_at',asc:false},limit:8}),
+  ]);
+  renderKpis(summary[0]||{});
+  renderDau(dau); renderKeys(keys); renderEvents(evTypes); renderRev(rev);
+  renderTable('eventsTbl', events.map(e=>[fmt(e.created_at),
+    (e.device_id||'').slice(0,8), `<span class="pill b">${e.event}</span>`,
+    propStr(e.props)]));
+  renderTable('payTbl', pays.map(p=>[fmt(p.created_at), p.plan||'—',
+    `<b class="mono">${inr(p.amount)}</b>`,
+    `<span class="pill ${p.status==='success'?'g':'r'}">${p.status}</span>`]));
+  document.getElementById('updated').textContent =
+    (LIVE?'Live · ':'Demo · ') + 'updated ' + new Date().toLocaleTimeString('en-IN');
+}
+
+function propStr(p){ if(!p||typeof p!=='object') return '';
+  return Object.entries(p).map(([k,v])=>`${k}:${v}`).join(' · '); }
+
+function renderKpis(s){
+  const cards = [
+    ['Installs', s.installs, null, false],
+    ['Active', s.active_7d, `${s.active_1d||0} today · ${s.active_30d||0}/30d`, true],
+    ['Syncs', s.total_syncs, null, false],
+    ['AI queries', s.total_queries, null, false],
+    ['Revenue', inr(s.revenue), null, false],
+    ['Key calls · 24h', s.key_calls_1d, null, false],
+  ];
+  document.getElementById('kpis').innerHTML = cards.map(([l,v,sub,focal])=>`
+    <div class="card kpi ${focal?'focal':''}">
+      <div class="lbl">${l}</div>
+      <div class="val">${v??0}${sub?`<br><small>${sub}</small>`:''}</div>
+    </div>`).join('');
+}
+
+function mkChart(id,cfg){ if(charts[id])charts[id].destroy();
+  charts[id]=new Chart(document.getElementById(id),cfg); }
+
+function renderDau(rows){
+  rows = rows.slice(-RANGE);
+  mkChart('dauChart',{type:'line',data:{labels:rows.map(r=>r.day.slice(5)),
+    datasets:[{data:rows.map(r=>r.dau),borderColor:'#21A06A',
+      backgroundColor:'rgba(33,160,106,.12)',fill:true,tension:.35,
+      pointRadius:0,borderWidth:2.5}]},options:baseOpts()});
+}
+function renderKeys(rows){
+  mkChart('keyChart',{type:'doughnut',data:{labels:rows.map(r=>'Key '+r.key_index),
+    datasets:[{data:rows.map(r=>r.calls),
+      backgroundColor:['#21A06A','#2E3A8C','#E5A100','#E15B5B','#6D3BD6']}]},
+    options:{plugins:{legend:{position:'bottom',labels:{font:{family:'Plus Jakarta Sans'}}}},
+      cutout:'62%',responsive:true,maintainAspectRatio:true}});
+}
+function renderEvents(rows){
+  rows = rows.slice(0,8);
+  mkChart('eventChart',{type:'bar',data:{labels:rows.map(r=>r.event),
+    datasets:[{data:rows.map(r=>r.n),backgroundColor:'#14201A',borderRadius:6}]},
+    options:baseOpts(true)});
+}
+function renderRev(rows){
+  rows = rows.slice(-RANGE);
+  mkChart('revChart',{type:'bar',data:{labels:rows.map(r=>r.day.slice(5)),
+    datasets:[{data:rows.map(r=>r.revenue),backgroundColor:'#EFE94C',borderRadius:5}]},
+    options:baseOpts()});
+}
+function baseOpts(horizontal){
+  return {indexAxis:horizontal?'y':'x',responsive:true,maintainAspectRatio:true,
+    plugins:{legend:{display:false}},
+    scales:{x:{grid:{display:false},ticks:{font:{family:'Plus Jakarta Sans',size:10},color:'#95A69C'}},
+      y:{grid:{color:'#EEF3EF'},ticks:{font:{family:'Plus Jakarta Sans',size:10},color:'#95A69C'},beginAtZero:true}}};
+}
+
+function renderTable(id,rows){
+  const tb=document.querySelector(`#${id} tbody`);
+  tb.innerHTML = rows.length ? rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')
+    : `<tr><td colspan="4" class="muted" style="padding:18px">No data yet.</td></tr>`;
+}
+
+// ---- Demo data ------------------------------------------------------------
+function demo(table){
+  const days = n => Array.from({length:n},(_,i)=>{
+    const d=new Date(Date.now()-(n-1-i)*864e5); return d; });
+  if(table==='v_summary') return [{installs:34,active_1d:9,active_7d:21,active_30d:31,
+    total_syncs:512,total_queries:1840,revenue:14970,key_calls_1d:63}];
+  if(table==='v_daily_active') return days(RANGE).map(d=>({day:dkey(d),
+    dau:Math.round(6+8*Math.random()+ (d.getDay()%6?2:-2))}));
+  if(table==='v_events_by_type') return [
+    {event:'app_open',n:2140},{event:'assistant_query',n:1840},{event:'sync_done',n:512},
+    {event:'calc_used',n:430},{event:'lot_created',n:210},{event:'list_generated',n:150},
+    {event:'prepare_portal',n:74},{event:'update_applied',n:60}];
+  if(table==='v_key_usage') return [{key_index:0,calls:820},{key_index:1,calls:640},
+    {key_index:2,calls:410},{key_index:3,calls:120}];
+  if(table==='v_revenue_by_day') return days(RANGE).map(d=>({day:dkey(d),
+    revenue: Math.random()<.3?Math.round(99+Math.random()*400):0}));
+  if(table==='events') return [
+    {device_id:'a1b2c3d4',event:'sync_done',props:{accounts:465,secs:82},created_at:new Date(Date.now()-6e5)},
+    {device_id:'a1b2c3d4',event:'assistant_query',props:{source:'local',lang:'hi'},created_at:new Date(Date.now()-9e5)},
+    {device_id:'ff9911aa',event:'lot_created',props:{accounts:5,amount:16500},created_at:new Date(Date.now()-16e5)},
+    {device_id:'ff9911aa',event:'calc_used',props:{scheme:'MIS'},created_at:new Date(Date.now()-22e5)},
+    {device_id:'77aa22bb',event:'app_open',props:{},created_at:new Date(Date.now()-30e5)}];
+  if(table==='payments') return [
+    {plan:'pro_yearly',amount:499,status:'success',created_at:new Date(Date.now()-864e5)},
+    {plan:'pro_monthly',amount:99,status:'success',created_at:new Date(Date.now()-3*864e5)},
+    {plan:'pro_monthly',amount:99,status:'failed',created_at:new Date(Date.now()-5*864e5)}];
+  return [];
+}
+
+loadAll();
+setInterval(()=>{ if(LIVE) loadAll(); }, 60000);
+</script>
+</body>
+</html>

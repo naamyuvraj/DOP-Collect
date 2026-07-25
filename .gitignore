@@ -1,0 +1,36 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+*.keystore
+*.jks
+
+# Recon artifacts — NEVER commit: contain live session cookies
+*.har
+recon/
+
+# Secrets — build-time injected, NEVER commit
+env.json
+env.local.json
+*.env
+
+# Internal strategy notes — keep local
+prod.md
+production-scaling.md
+chat-agent.md
+
+# Dashboard secrets
+admin/keys.js

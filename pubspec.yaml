@@ -1,0 +1,65 @@
+name: dop_collect
+description: Lightweight RD collection app for a DOP agent business.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  # Local, offline-first storage
+  sqflite: ^2.3.3
+  path: ^1.9.0
+  # Date formatting (09-Aug-2026, IST etc.)
+  intl: ^0.19.0
+  # In-app login to the DOP agent portal
+  webview_flutter: ^4.8.0
+  # Elegant typography (Fraunces display serif + Inter sans)
+  google_fonts: ^6.2.1
+  # Parse the portal's server-rendered account tables
+  html: ^0.15.4
+  # Save captured recon HTML / debug dumps
+  path_provider: ^2.1.3
+  # Remember Agent ID / password on the device for auto-fill
+  shared_preferences: ^2.2.3
+  # In-app OTA update check + apply (Shorebird)
+  shorebird_code_push: ^2.0.4
+  # Pick a profile photo from the gallery
+  image_picker: ^1.1.2
+  # On-device OCR to auto-read the login captcha (nothing leaves the phone)
+  google_mlkit_text_recognition: ^0.13.0
+  # Keystore-backed storage for the DOP login (no plaintext credentials)
+  flutter_secure_storage: ^9.2.2
+  # Generate + print/share the DOP RD installment report (lot receipt)
+  pdf: ^3.11.1
+  printing: ^5.13.3
+  share_plus: ^10.1.4
+  # AI assistant — Groq free-tier calls (already in the tree transitively)
+  http: ^1.6.0
+  # AI assistant voice: on-device speech-to-text + text-to-speech (free).
+  # NOTE: native plugins -> the first build that includes these must be a NEW
+  # Shorebird release, not a patch.
+  speech_to_text: ^7.0.0
+  flutter_tts: ^4.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "web/icons/logo.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#0B0D0E"
+  adaptive_icon_foreground: "web/icons/logo.png"
+
+flutter:
+  assets:
+    - shorebird.yaml
+  uses-material-design: true
