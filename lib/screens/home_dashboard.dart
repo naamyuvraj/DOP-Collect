@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../data/account_repository.dart';
 import '../models/rd_account.dart';
 import '../models/summaries.dart';
+import '../services/remote_config.dart';
 import '../theme/app_theme.dart';
 import '../data/app_settings.dart';
 import '../util/format.dart';
@@ -127,6 +128,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
               _header(),
               const SizedBox(height: 18),
               const UpdateBanner(),
+              _announcementBanner(),
               _lastSyncedLine(),
               // Balance hero — hidden by default for privacy; the eye reveals it.
               FocalCard(
@@ -257,6 +259,33 @@ class _HomeDashboardState extends State<HomeDashboard> {
   }
 
   /// "Last synced" trust line — turns amber once the data is over a day old.
+  /// Remote announcement from the admin dashboard (app_config). Hidden unless
+  /// enabled with non-empty text.
+  Widget _announcementBanner() {
+    final a = RemoteConfig.announcement;
+    if (!a.enabled || a.text.trim().isEmpty) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: AppTheme.focal,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.campaign_rounded, size: 20, color: AppTheme.black),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(a.text.trim(),
+                style: AppTheme.body(13,
+                    weight: FontWeight.w600, color: AppTheme.black, height: 1.35)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _lastSyncedLine() {
     if (_lastSyncMs == 0) return const SizedBox(height: 6);
     final when = DateTime.fromMillisecondsSinceEpoch(_lastSyncMs);

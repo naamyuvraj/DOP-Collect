@@ -12,8 +12,10 @@ class SupabaseConfig {
   static const String anonKey =
       String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
 
-  /// Bump on each release so the dashboard can chart versions.
-  static const String buildVersion = '0.9.3+12';
+  /// The running app version. Bump on each patch/release — this drives the
+  /// analytics `app_version` AND the force-update comparison, so keep it in sync
+  /// with SettingsScreen._version.
+  static const String buildVersion = '0.9.36';
 
   static bool get configured => url.isNotEmpty && anonKey.isNotEmpty;
 }

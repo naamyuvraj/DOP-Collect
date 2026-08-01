@@ -29,7 +29,9 @@ class AssistantConfig {
   static const Duration requestTimeout = Duration(seconds: 20);
 
   /// Master switch. When false, only the offline intent engine runs (no cloud).
-  static const bool cloudEnabled = true;
+  /// Set at startup from [RemoteConfig.assistantCloud] so it can be flipped from
+  /// the admin dashboard without an app update.
+  static bool cloudEnabled = true;
 
   /// Privacy toggle set by the user (loaded at startup from AppSettings). When
   /// true, the assistant stays fully offline even if keys are present.

@@ -9,6 +9,7 @@ import '../../data/credentials.dart';
 import '../../data/lot_repository.dart';
 import '../../models/lot.dart';
 import '../../services/analytics.dart';
+import '../../services/remote_config.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/push_button.dart';
@@ -249,7 +250,10 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
   /// Primary actions, as clear labelled buttons (not bare app-bar icons):
   /// see/download the PDF, and — until it's submitted — Submit on Portal.
   Widget _bottomBar() {
-    final canSubmit = kEnablePortalSubmit && !lot.isSubmitted;
+    // Gated by both the compile-time flag AND the remote kill switch, so the
+    // portal automation can be disabled for everyone from the dashboard.
+    final canSubmit =
+        kEnablePortalSubmit && RemoteConfig.portalSubmit && !lot.isSubmitted;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),

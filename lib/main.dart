@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'assistant/assistant_config.dart';
+import 'screens/force_update_screen.dart';
+import 'services/remote_config.dart';
 import 'data/account_repository.dart';
 import 'data/app_settings.dart';
 import 'data/rd_rates_store.dart';
@@ -39,8 +41,14 @@ Future<void> main() async {
   // Honour the privacy toggle (offline-only AI) from the first question.
   AssistantConfig.userOfflineOnly = await AppSettings.offlineOnlyAi();
 
-  // Anonymous analytics: load opt-out, register the install, log the open.
-  await Analytics.init();
+  // Remote config (admin-dashboard controlled): loads instantly from cache,
+  // refreshes in the background. Read the flags it exposes right after.
+  await RemoteConfig.init();
+  AssistantConfig.cloudEnabled = RemoteConfig.assistantCloud;
+
+  // Anonymous analytics: load opt-out (defaulting to the remote-config value for
+  // a brand-new install), register the install, log the open.
+  await Analytics.init(defaultEnabled: RemoteConfig.analyticsDefault);
   unawaited(Analytics.identify());
   unawaited(Analytics.track('app_open'));
 
@@ -93,14 +101,16 @@ class _DopCollectAppState extends State<DopCollectApp> {
         maxScaleFactor: 1.3,
         child: child ?? const SizedBox.shrink(),
       ),
-      home: _onboarded
-          ? MainShell(
-              key: const ValueKey('shell'),
-              repo: widget.repo,
-              lots: widget.lots)
-          : OnboardingLogin(
-              key: const ValueKey('onboarding'),
-              onDone: () => setState(() => _onboarded = true)),
+      home: RemoteConfig.updateRequired
+          ? const ForceUpdateScreen()
+          : _onboarded
+              ? MainShell(
+                  key: const ValueKey('shell'),
+                  repo: widget.repo,
+                  lots: widget.lots)
+              : OnboardingLogin(
+                  key: const ValueKey('onboarding'),
+                  onDone: () => setState(() => _onboarded = true)),
     );
   }
 }

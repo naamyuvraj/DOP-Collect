@@ -20,9 +20,10 @@ class Analytics {
   static bool _identified = false;
   static bool _enabled = true; // mirrors the user's opt-out, loaded at startup
 
-  /// Load the opt-out flag once at startup.
-  static Future<void> init() async {
-    _enabled = await AppSettings.analyticsEnabled();
+  /// Load the opt-out flag once at startup. [defaultEnabled] is the value used
+  /// for a brand-new install that hasn't chosen yet (from remote config).
+  static Future<void> init({bool defaultEnabled = true}) async {
+    _enabled = await AppSettings.analyticsEnabled(orDefault: defaultEnabled);
   }
 
   static void setEnabled(bool v) => _enabled = v;

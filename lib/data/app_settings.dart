@@ -61,8 +61,8 @@ class AppSettings {
 
   /// Anonymous usage analytics (default on). Opt-out from Settings.
   static const _kAnalytics = 'analytics_enabled';
-  static Future<bool> analyticsEnabled() async =>
-      (await SharedPreferences.getInstance()).getBool(_kAnalytics) ?? true;
+  static Future<bool> analyticsEnabled({bool orDefault = true}) async =>
+      (await SharedPreferences.getInstance()).getBool(_kAnalytics) ?? orDefault;
   static Future<void> setAnalyticsEnabled(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(_kAnalytics, v);
 

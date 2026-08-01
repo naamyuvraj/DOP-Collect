@@ -9,6 +9,7 @@ import '../../data/credentials.dart';
 import '../../data/lot_repository.dart';
 import '../../models/lot.dart';
 import '../../services/analytics.dart';
+import '../../services/remote_config.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/glass_pill.dart';
@@ -301,7 +302,10 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
             ),
           // "Submit on Portal" — the primary Lists action, as a clear labeled
           // pill stacked just above "New" (not a bare cloud icon up top).
-          if (_view == 0 && kEnablePortalSubmit && _unsubmitted.isNotEmpty)
+          if (_view == 0 &&
+              kEnablePortalSubmit &&
+              RemoteConfig.portalSubmit &&
+              _unsubmitted.isNotEmpty)
             Positioned(
               left: 20,
               bottom: agentLevelBottom(context) + 66,

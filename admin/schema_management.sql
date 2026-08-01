@@ -31,6 +31,7 @@ create policy "anon read config" on public.app_config
 insert into public.app_config (key, value) values
   ('assistant_cloud',   'true'::jsonb),
   ('analytics_default', 'true'::jsonb),
+  ('portal_submit',     'true'::jsonb),
   ('announcement',      '{"text":"","enabled":false}'::jsonb),
   ('force_update',      '{"version":"","message":"","enabled":false}'::jsonb)
 on conflict (key) do nothing;
