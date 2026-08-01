@@ -22,6 +22,12 @@ android/key.properties
 *.har
 recon/
 
+# Generated / reference RD report PDFs — contain real customer PII, NEVER commit
+*.pdf
+
+# Supabase CLI local temp
+supabase/.temp/
+
 # Secrets — build-time injected, NEVER commit
 env.json
 env.local.json
