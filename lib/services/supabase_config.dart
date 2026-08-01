@@ -15,7 +15,7 @@ class SupabaseConfig {
   /// The running app version. Bump on each patch/release — this drives the
   /// analytics `app_version` AND the force-update comparison, so keep it in sync
   /// with SettingsScreen._version.
-  static const String buildVersion = '0.9.36';
+  static const String buildVersion = '0.9.37';
 
   static bool get configured => url.isNotEmpty && anonKey.isNotEmpty;
 }

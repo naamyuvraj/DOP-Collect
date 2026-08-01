@@ -132,10 +132,38 @@ create or replace view public.v_collections as
   where event = 'list_submitted'
   group by 1 order by 1;
 
+-- Every user/install seen — the SOURCE OF TRUTH for the "Users & Devices" list.
+-- A full outer join so a device shows up if it EITHER registered via identify()
+-- (devices row, carries the agent name) OR has simply sent events (activity is
+-- proof of use even if the identify upsert never landed). Includes an event
+-- count + the freshest activity time.
+create or replace view public.v_devices as
+  select
+    coalesce(d.id, e.device_id)                          as id,
+    d.agent_name,
+    coalesce(d.app_version, e.last_version)              as app_version,
+    d.model,
+    coalesce(d.first_seen, e.first_event)                as first_seen,
+    greatest(d.last_seen, e.last_event)                  as last_seen,
+    coalesce(e.events, 0)                                as events
+  from public.devices d
+  full outer join (
+    select device_id,
+           count(*)                                         as events,
+           min(created_at)                                  as first_event,
+           max(created_at)                                  as last_event,
+           (array_agg(app_version order by created_at desc)
+              filter (where app_version is not null))[1]    as last_version
+    from public.events
+    where device_id is not null
+    group by device_id
+  ) e on e.device_id = d.id
+  order by last_seen desc nulls last;
+
 -- Quick top-line numbers ------------------------------------------------------
 create or replace view public.v_summary as
   select
-    (select count(*) from public.devices)                                         as installs,
+    (select count(*) from public.v_devices)                                       as installs,
     (select count(distinct device_id) from public.events
        where created_at > now() - interval '1 day')                               as active_1d,
     (select count(distinct device_id) from public.events

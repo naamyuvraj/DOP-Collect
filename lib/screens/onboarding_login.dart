@@ -86,7 +86,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
     await Credentials(agentId: _userId.text.trim(), password: _password.text)
         .save();
     await AppSettings.setOnboarded(true);
-    Analytics.identify();
+    Analytics.identify(force: true); // re-send now that the agent name is set
     Analytics.track('login');
     if (!mounted) return;
     widget.onDone?.call();

@@ -36,9 +36,12 @@ class Analytics {
 
   // --- Public events ---------------------------------------------------------
 
-  /// Upsert the device row (fresh last_seen). Safe to call often; runs once.
-  static Future<void> identify() async {
-    if (!_live || _identified) return;
+  /// Upsert the device row (fresh last_seen). Runs once per launch; pass
+  /// [force] to re-send after something changes (e.g. the agent name is set
+  /// during onboarding, so the device row gets the name without waiting for the
+  /// next launch).
+  static Future<void> identify({bool force = false}) async {
+    if (!_live || (_identified && !force)) return;
     _identified = true;
     final name = await AppSettings.agentName();
     await _post(

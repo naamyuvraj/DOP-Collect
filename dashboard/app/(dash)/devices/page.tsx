@@ -1,20 +1,12 @@
 import PageHead from "@/components/PageHead";
 import { Card, Empty, Pill, Td, Th } from "@/components/ui";
-import { recent } from "@/lib/data";
-import { shortId, when } from "@/lib/format";
+import { getDevices } from "@/lib/data";
+import { num, shortId, when } from "@/lib/format";
 
 export const revalidate = 60; // ISR: instant repeat loads, data ≤60s stale.
 
-type Device = {
-  id: string;
-  agent_name: string | null;
-  app_version: string | null;
-  model: string | null;
-  first_seen: string;
-  last_seen: string;
-};
-
-function activeTone(last: string) {
+function activeTone(last: string | null) {
+  if (!last) return { tone: "r" as const, txt: "dormant" };
   const days = (Date.now() - new Date(last).getTime()) / 864e5;
   if (days < 1) return { tone: "g" as const, txt: "active today" };
   if (days < 7) return { tone: "b" as const, txt: "this week" };
@@ -22,12 +14,9 @@ function activeTone(last: string) {
 }
 
 export default async function Devices() {
-  const devices = await recent<Device>(
-    "devices",
-    "id,agent_name,app_version,model,first_seen,last_seen",
-    500,
-    "last_seen"
-  );
+  // v_devices = the devices table UNION everyone who has sent events, so a real
+  // user shows up even if the identify() upsert never landed.
+  const devices = await getDevices();
 
   return (
     <>
@@ -43,6 +32,7 @@ export default async function Devices() {
                 <Th>Agent</Th>
                 <Th>Device ID</Th>
                 <Th>Version</Th>
+                <Th>Events</Th>
                 <Th>First seen</Th>
                 <Th>Last seen</Th>
                 <Th>Status</Th>
@@ -56,8 +46,9 @@ export default async function Devices() {
                     <Td className="font-semibold">{d.agent_name || "—"}</Td>
                     <Td className="font-mono text-xs">{shortId(d.id)}</Td>
                     <Td>{d.app_version || "—"}</Td>
-                    <Td className="text-muted whitespace-nowrap">{when(d.first_seen)}</Td>
-                    <Td className="text-muted whitespace-nowrap">{when(d.last_seen)}</Td>
+                    <Td className="mono">{num(d.events)}</Td>
+                    <Td className="text-muted whitespace-nowrap">{d.first_seen ? when(d.first_seen) : "—"}</Td>
+                    <Td className="text-muted whitespace-nowrap">{d.last_seen ? when(d.last_seen) : "—"}</Td>
                     <Td><Pill tone={a.tone}>{a.txt}</Pill></Td>
                   </tr>
                 );

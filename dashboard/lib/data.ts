@@ -57,6 +57,18 @@ export const getCollections = () =>
     "v_collections"
   );
 
+export type Device = {
+  id: string;
+  agent_name: string | null;
+  app_version: string | null;
+  model: string | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  events: number;
+};
+/// Every user/install seen (devices ∪ event-senders), newest activity first.
+export const getDevices = () => view<Device>("v_devices");
+
 export async function recent<T>(
   table: string,
   cols = "*",
