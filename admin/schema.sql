@@ -76,6 +76,13 @@ alter table public.payments   enable row level security;
 
 -- The app (anon) may INSERT telemetry and keep a device row fresh, nothing else.
 -- (No SELECT policies for anon -> only the service_role key can read the data.)
+-- `drop ... if exists` first so this whole file is safe to re-run (CREATE POLICY
+-- is not idempotent and errors if the policy already exists).
+drop policy if exists "anon insert devices"   on public.devices;
+drop policy if exists "anon update devices"   on public.devices;
+drop policy if exists "anon insert events"    on public.events;
+drop policy if exists "anon insert key_usage" on public.key_usage;
+drop policy if exists "anon insert payments"  on public.payments;
 create policy "anon insert devices"   on public.devices   for insert to anon with check (true);
 create policy "anon update devices"   on public.devices   for update to anon using (true) with check (true);
 create policy "anon insert events"    on public.events    for insert to anon with check (true);
@@ -110,6 +117,21 @@ create or replace view public.v_key_usage as
   from public.key_usage
   group by 1 order by 1;
 
+-- Portal collections: the app's core activity — lists actually made on the DOP
+-- portal, with the rupees collected. Derived from the 'list_submitted' event's
+-- numeric props (amount / accounts), counting only rows that captured a
+-- reference (ok = true). No customer data is involved.
+create or replace view public.v_collections as
+  select date_trunc('day', created_at)::date                         as day,
+         count(*) filter (where (props->>'ok')::boolean)             as lists,
+         coalesce(sum((props->>'accounts')::numeric)
+                    filter (where (props->>'ok')::boolean), 0)       as accounts,
+         coalesce(sum((props->>'amount')::numeric)
+                    filter (where (props->>'ok')::boolean), 0)       as amount
+  from public.events
+  where event = 'list_submitted'
+  group by 1 order by 1;
+
 -- Quick top-line numbers ------------------------------------------------------
 create or replace view public.v_summary as
   select
@@ -123,4 +145,9 @@ create or replace view public.v_summary as
     (select count(*) from public.events where event = 'sync_done')                as total_syncs,
     (select count(*) from public.events where event = 'assistant_query')          as total_queries,
     (select coalesce(sum(amount),0) from public.payments where status='success')  as revenue,
-    (select count(*) from public.key_usage where created_at > now() - interval '1 day') as key_calls_1d;
+    (select count(*) from public.key_usage where created_at > now() - interval '1 day') as key_calls_1d,
+    -- Core activity: lists made on the portal + rupees collected through them.
+    (select count(*) from public.events
+       where event = 'list_submitted' and (props->>'ok')::boolean)                as lists_submitted,
+    (select coalesce(sum((props->>'amount')::numeric),0) from public.events
+       where event = 'list_submitted' and (props->>'ok')::boolean)                as collected_amount;

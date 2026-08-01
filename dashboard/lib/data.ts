@@ -9,6 +9,9 @@ export type Summary = {
   total_queries: number;
   revenue: number;
   key_calls_1d: number;
+  // Core activity: lists made on the DOP portal + rupees collected through them.
+  lists_submitted: number;
+  collected_amount: number;
 };
 
 async function view<T>(name: string): Promise<T[]> {
@@ -33,6 +36,8 @@ export async function getSummary(): Promise<Summary> {
       total_queries: 0,
       revenue: 0,
       key_calls_1d: 0,
+      lists_submitted: 0,
+      collected_amount: 0,
     }
   );
 }
@@ -47,6 +52,10 @@ export const getKeyUsage = () =>
   );
 export const getRevenueByDay = () =>
   view<{ day: string; revenue: number; payments: number }>("v_revenue_by_day");
+export const getCollections = () =>
+  view<{ day: string; lists: number; accounts: number; amount: number }>(
+    "v_collections"
+  );
 
 export async function recent<T>(
   table: string,

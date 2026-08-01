@@ -2,6 +2,7 @@ import PageHead from "@/components/PageHead";
 import { Bars, Donut, TrendArea } from "@/components/charts";
 import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
 import {
+  getCollections,
   getDaily,
   getEventTypes,
   getKeyUsage,
@@ -24,17 +25,19 @@ type Ev = {
 };
 
 export default async function Overview() {
-  const [s, daily, types, keys, rev, events] = await Promise.all([
+  const [s, daily, types, keys, rev, coll, events] = await Promise.all([
     getSummary(),
     getDaily(),
     getEventTypes(),
     getKeyUsage(),
     getRevenueByDay(),
+    getCollections(),
     recent<Ev>("events", "device_id,event,props,created_at", 12),
   ]);
 
   const dailyView = daily.slice(-30).map((d) => ({ ...d, d: day(d.day) }));
   const revView = rev.slice(-30).map((d) => ({ ...d, d: day(d.day) }));
+  const collView = coll.slice(-30).map((d) => ({ ...d, d: day(d.day) }));
   const keyView = keys.map((k) => ({ ...k, name: `Key ${k.key_index}` }));
 
   return (
@@ -43,10 +46,10 @@ export default async function Overview() {
 
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         <Kpi label="Installs" value={num(s.installs)} />
-        <Kpi label="Active" value={num(s.active_7d)} sub={`${num(s.active_1d)} today · ${num(s.active_30d)}/30d`} focal />
+        <Kpi label="Active" value={num(s.active_7d)} sub={`${num(s.active_1d)} today · ${num(s.active_30d)}/30d`} />
+        <Kpi label="Collected" value={inr(s.collected_amount)} sub={`${num(s.lists_submitted)} lists on portal`} focal />
         <Kpi label="Syncs" value={num(s.total_syncs)} />
         <Kpi label="AI queries" value={num(s.total_queries)} />
-        <Kpi label="Revenue" value={inr(s.revenue)} />
         <Kpi label="Key calls · 24h" value={num(s.key_calls_1d)} />
       </div>
 
@@ -68,6 +71,23 @@ export default async function Overview() {
       </div>
 
       <div className="grid gap-3.5 mt-3.5 lg:grid-cols-2">
+        <Card title="Portal collections (₹/day)">
+          {collView.some((c) => c.amount) ? (
+            <Bars data={collView} x="d" y="amount" color="#21A06A" />
+          ) : (
+            <Empty>No lists made on the portal yet.</Empty>
+          )}
+        </Card>
+        <Card title="Lists made on portal">
+          {collView.some((c) => c.lists) ? (
+            <TrendArea data={collView} x="d" y="lists" />
+          ) : (
+            <Empty>No lists made on the portal yet.</Empty>
+          )}
+        </Card>
+      </div>
+
+      <div className="grid gap-3.5 mt-3.5 lg:grid-cols-2">
         <Card title="Activity by type">
           {types.length ? (
             <Bars data={types.slice(0, 8)} x="event" y="n" horizontal />
@@ -75,7 +95,7 @@ export default async function Overview() {
             <Empty>No events yet.</Empty>
           )}
         </Card>
-        <Card title="Revenue">
+        <Card title="Revenue (app subscriptions)">
           {revView.some((r) => r.revenue) ? (
             <Bars data={revView} x="d" y="revenue" color="#EFE94C" />
           ) : (

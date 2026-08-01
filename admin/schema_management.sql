@@ -23,6 +23,7 @@ create table if not exists public.app_config (
 );
 alter table public.app_config enable row level security;
 -- The app may READ config (anon) to honour flags; only service_role writes.
+drop policy if exists "anon read config" on public.app_config;
 create policy "anon read config" on public.app_config
   for select to anon using (true);
 
