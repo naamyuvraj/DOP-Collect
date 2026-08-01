@@ -1,10 +1,12 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
-/// A frosted-glass panel with a soft pastel tint, a light edge highlight and a
-/// 3D drop shadow. Each dashboard section uses its own [tint] for a subtle
-/// coloured shine over the mint canvas.
+/// A soft pastel panel with a light edge highlight and a 3D drop shadow. Each
+/// dashboard section uses its own [tint] for a subtle coloured shine over the
+/// mint canvas.
+///
+/// Deliberately a FLAT translucent tint, not a real-time `BackdropFilter` blur:
+/// four live blurs on the scrolling dashboard janked badly on a ₹9,000 phone,
+/// and over the static gradient the flat fill is visually near-identical.
 class GlassPanel extends StatelessWidget {
   const GlassPanel({
     super.key,
@@ -33,24 +35,21 @@ class GlassPanel extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-          child: Container(
-            padding: padding ?? const EdgeInsets.fromLTRB(14, 14, 14, 16),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  tint.withValues(alpha: 0.55),
-                  tint.withValues(alpha: 0.30),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: const Color(0x80FFFFFF), width: 1.2),
+        child: Container(
+          padding: padding ?? const EdgeInsets.fromLTRB(14, 14, 14, 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                tint.withValues(alpha: 0.85),
+                tint.withValues(alpha: 0.62),
+              ],
             ),
-            child: child,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: const Color(0x80FFFFFF), width: 1.2),
           ),
+          child: child,
         ),
       ),
     );

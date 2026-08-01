@@ -74,7 +74,7 @@ class AssistantAnswer {
         if (rows.isEmpty) return '$label — $_nothing';
         final n = rows.length;
         return _hi
-            ? '$label — $n ${n == 1 ? "khaata" : "khaate"}'
+            ? '$label — $n ${n == 1 ? "खाता" : "खाते"}'
             : '$label — $n ${n == 1 ? "account" : "accounts"}';
       case AnswerKind.detail:
         if (rows.isEmpty) return '$label — $_nothing';

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../calc/po_calc.dart';
 import '../data/account_repository.dart';
 import '../data/app_settings.dart';
 import '../models/rd_account.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
-import '../widgets/push_button.dart';
 import 'portal/sync_screen.dart';
 
 /// Per-account profile — a rich, tile-based view of one RD account, mirroring
@@ -27,13 +27,21 @@ class PortfolioScreen extends StatefulWidget {
 
 class _PortfolioScreenState extends State<PortfolioScreen> {
   String _aslaas = '';
-  int _version = 0; // bumped after a portal detail fetch to re-read the account
+  Future<RdAccount?>? _future;
+  int? _termYears; // user-adjusted maturity time (± stepper); null = default
 
   @override
   void initState() {
     super.initState();
-    AppSettings.aslaas().then((v) => setState(() => _aslaas = v));
+    _future = widget.repo.byAccountNumber(widget.accountNumber);
+    AppSettings.aslaas().then((v) {
+      if (mounted) setState(() => _aslaas = v);
+    });
   }
+
+  void _reload() => setState(() {
+        _future = widget.repo.byAccountNumber(widget.accountNumber);
+      });
 
   /// Pull this account's exact figures (last-deposit date, total deposit,
   /// pending/default installments) from its portal detail page.
@@ -45,21 +53,31 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
         detailSerial: a.serial,
       ),
     ));
-    if (ok == true && mounted) setState(() => _version++);
+    if (ok == true && mounted) _reload();
   }
+
+  void _setTerm(int y) => setState(() => _termYears = y.clamp(1, 20));
+
+  /// Maturity value for the chosen term, using the account's locked rate.
+  int _maturityFor(RdAccount a, int term) => PoCalc.compute(
+        PoScheme.rd,
+        amount: a.denominationAmount.toDouble(),
+        years: term.toDouble(),
+        rate: a.annualRate,
+      ).maturity.round();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Account')),
       body: FutureBuilder<RdAccount?>(
-        key: ValueKey(_version),
-        future: widget.repo.byAccountNumber(widget.accountNumber),
+        future: _future,
         builder: (context, snap) {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
           final a = snap.data!;
+          final term = _termYears ?? a.termYears;
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
@@ -67,58 +85,25 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
               _headerCard(a),
               const SizedBox(height: 14),
               if (!a.hasExactDetail) _exactDetailPrompt(a),
+              _maturityCard(a, term),
+              const SizedBox(height: 12),
               _tileGrid([
                 _tile('Monthly RD', inr(a.denominationAmount)),
                 _tile('Month Paid', '${a.monthsPaid}'),
                 _tile('Short Code', a.serial > 0 ? '${a.serial}' : '—'),
-                _tile('Maturity Time', '${a.termYears} Year'),
                 _tile('Rate', '${a.annualRate}%'),
-                _tile('Paid Amount', inr(a.fullTermAmount)),
-                _tile('Maturity Amount', inr(a.maturityAmount)),
                 _tile('Total Deposited', inr(a.depositedAmount)),
-                _tile('Next Due', a.dueDateIso),
-                _tile('Opened On', a.openingDateIso),
-                _tile('Last Deposit', a.lastDepositIso),
+                _tile('Next Due', a.dueDateLabel),
+                _tile('Opened On', a.openingDateLabel),
+                _tile('Last Deposit', a.lastDepositLabel),
                 _tile('Pending', '${a.installmentsToMaturity}'),
                 _tile('ASLAAS', _aslaas.isEmpty ? '—' : _aslaas),
               ]),
               const SizedBox(height: 18),
               _collectionCard(a),
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  Expanded(
-                    child: PushButton(
-                      color: AppTheme.surface,
-                      foreground: AppTheme.ink,
-                      onPressed: () => _soon('Edit Profile'),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.edit_outlined, size: 18),
-                          SizedBox(width: 8),
-                          Text('Edit Profile'),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: PushButton(
-                      color: AppTheme.black,
-                      onPressed: () => _soon('Add Collection'),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.add, size: 18),
-                          SizedBox(width: 6),
-                          Text('Add Collection'),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              // Edit Profile / Add Collection / WhatsApp CTAs were all
+              // "coming soon" no-ops — hidden until they actually do something,
+              // so every tap here isn't teaching him the buttons are decorative.
             ],
           );
         },
@@ -126,8 +111,91 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     );
   }
 
-  void _soon(String s) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text('$s — coming soon')));
+  /// Maturity Time with a live ± stepper (left) and the recomputed rate / paid /
+  /// maturity figures (right) — like the reference account screen.
+  Widget _maturityCard(RdAccount a, int term) {
+    final maturity = _maturityFor(a, term);
+    final paid = a.denominationAmount * term * 12;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: AppTheme.card(),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('MATURITY TIME', style: AppTheme.label(AppTheme.inkMuted)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    _stepBtn(Icons.remove, AppTheme.red, () => _setTerm(term - 1)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('$term Year',
+                          style: AppTheme.display(18, weight: FontWeight.w800)),
+                    ),
+                    _stepBtn(Icons.add, AppTheme.green, () => _setTerm(term + 1)),
+                  ],
+                ),
+                if (_termYears != null && _termYears != a.termYears) ...[
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () => setState(() => _termYears = null),
+                    child: Text('Reset to ${a.termYears} yr',
+                        style: AppTheme.body(11,
+                            weight: FontWeight.w700, color: AppTheme.accent)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Container(width: 1, height: 76, color: AppTheme.divider),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _kv('Rate', '${a.annualRate}%'),
+                const SizedBox(height: 6),
+                _kv('Paid Amount', inr(paid)),
+                const SizedBox(height: 6),
+                Text('Maturity Amount', style: AppTheme.label(AppTheme.inkMuted)),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(inr(maturity),
+                      style: AppTheme.display(22, weight: FontWeight.w800)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _kv(String label, String value) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: AppTheme.body(12, color: AppTheme.inkMuted)),
+          Text(value, style: AppTheme.body(13.5, weight: FontWeight.w700)),
+        ],
+      );
+
+  Widget _stepBtn(IconData icon, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        child: Icon(icon, color: Colors.white, size: 22),
+      ),
+    );
+  }
 
   /// Last-deposit date, exact total deposit and default/pending installments
   /// live only on the portal's detail page, so offer to pull them for this one
@@ -175,17 +243,6 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                 Text('#${a.accountNumber}',
                     style: AppTheme.body(13, color: AppTheme.inkMuted)),
               ],
-            ),
-          ),
-          GestureDetector(
-            onTap: () => _soon('WhatsApp'),
-            child: Container(
-              width: 46,
-              height: 46,
-              decoration: const BoxDecoration(
-                  color: AppTheme.green, shape: BoxShape.circle),
-              child: const Icon(Icons.chat_rounded,
-                  color: Colors.white, size: 22),
             ),
           ),
         ],

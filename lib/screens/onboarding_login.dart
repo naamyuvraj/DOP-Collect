@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../assets_b64.dart';
 import '../data/app_settings.dart';
 import '../data/credentials.dart';
+import '../services/analytics.dart';
 import '../theme/app_theme.dart';
 import '../widgets/push_button.dart';
 
@@ -85,6 +86,8 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
     await Credentials(agentId: _userId.text.trim(), password: _password.text)
         .save();
     await AppSettings.setOnboarded(true);
+    Analytics.identify();
+    Analytics.track('login');
     if (!mounted) return;
     widget.onDone?.call();
   }

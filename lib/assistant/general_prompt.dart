@@ -20,18 +20,24 @@ Explain the steps plainly when asked ("how to sync", "list kaise banaye",
   agent portal, fills the saved Agent ID + password and reads the captcha
   automatically, then pulls every account in about a minute. Only the captcha
   may need retyping if it misreads.
-- HOME: dashboard totals — First Half / Second Half (pending vs deposited),
-  Defaulters, About to Freeze, Maturity, Advanced Paid, New Accounts. Tap
-  "View" on any card to open that list of accounts.
-- ACCOUNTS tab: every RD account; search by name or number; tap one for its
-  details — monthly RD, months paid, opened on, total deposited, maturity value.
-- GROUPS tab: "Create Lot" builds a collection lot by hand (₹20,000 cash cap,
-  most-unpaid customers first). Tap a saved lot to view it, Print, Share or send
-  on WhatsApp, remove an account, or use "Prepare on portal" — which logs in and
-  automatically ticks that lot's accounts across the portal pages and saves the
-  list. The agent then enters installments + ASLAAS and taps Pay All.
-- LISTS tab: builds ALL the ₹20,000 lists automatically from every account that
-  needs collecting. Expand a list to remove someone, then "Save all to Groups".
+- HOME: a "Monthly Book" balance card at the top — tap the eye icon to hide or
+  show the amount. Below it, dashboard totals: Collection (a 1st-half / 2nd-half
+  toggle showing pending vs deposited), Defaulters, Freezing soon (6 mo), New
+  Accounts, and Portfolio (Maturity, Advanced Paid). Tap "View" on any card to
+  open that list of accounts. Sort any list by amount or due date.
+- ACCOUNTS tab: every RD account; search by name or number; sort by amount or
+  due date; tap one for its details — monthly RD, months paid, opened on, total
+  deposited, maturity value.
+- LISTS tab: this is the single home for lists, with two views. "Lists" holds
+  lists not yet sent to the portal; "Downloads" holds lists already made on the
+  portal. Auto-build all the ₹20,000 lists (most valuable/on-time customers
+  first) or tap "New" (bottom-left) to make one by hand — you can sort accounts
+  by amount or due date, and set an account's installments (adding it twice =
+  2 installments, which earns the advance rebate). "Make all on portal" logs in
+  ONCE and creates every list automatically: it ticks the accounts and pays each
+  as one installment (advance/cheque rows are keyed for the rebate), then saves
+  the official E-Banking reference back onto the list. A made list moves to
+  Downloads, where you Preview it (zoomable PDF), Download it, or Share the PDF.
 - CALCULATOR tab: maturity/interest for any post-office scheme.
 - SETTINGS: ASLAAS number, profile and photo, "Take a tour" (guided walkthrough)
   and the interest calculator.

@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import '../../data/account_repository.dart';
 import '../../services/analytics.dart';
 import '../../data/lot_repository.dart';
+import '../../models/account_sort.dart';
 import '../../models/lot.dart';
+import '../../models/lot_packing.dart';
 import '../../models/rd_account.dart';
-import '../../models/summaries.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
+import '../../widgets/account_sort_bar.dart';
 
 /// Build a lot: accounts open sorted most-unpaid first; add installments per
 /// account with a hard ₹20,000 total cap. Saving stores the lot (as a Group)
@@ -23,8 +25,11 @@ class ListBuilderScreen extends StatefulWidget {
   final AccountRepository accounts;
   final LotRepository lots;
 
-  /// A lot's total must not exceed this.
+  /// A CASH lot's total must not exceed this (cheque lots have no amount cap).
   static const lotCap = 20000;
+
+  /// Max accounts in one list, any mode (portal rule).
+  static const maxAccounts = 50;
 
   @override
   State<ListBuilderScreen> createState() => _ListBuilderScreenState();
@@ -35,9 +40,16 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
   String _query = '';
   Future<List<RdAccount>>? _future;
 
+  /// null = smart priority (on-time & high-value first); else amount/due sort.
+  AccountSort? _sort;
+
   /// accountNumber -> installments selected (>=1 means included).
   final Map<String, int> _selected = {};
   final Map<String, RdAccount> _byNumber = {};
+
+  /// Payment mode: 'Cash' | 'DOP Cheque' | 'Non DOP Cheque'.
+  String _mode = 'Cash';
+  bool get _isCheque => _mode.toLowerCase().contains('cheque');
 
   int get _count => _selected.length;
   int get _total => _selected.entries
@@ -63,29 +75,32 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
       for (final a in list) {
         _byNumber[a.accountNumber] = a;
       }
-      return _sortMostUnpaid(list);
+      return list;
     });
   }
 
-  /// Most-unpaid first: most months overdue, then earliest due date.
-  List<RdAccount> _sortMostUnpaid(List<RdAccount> list) {
-    final now = DateTime.now();
-    final out = [...list];
-    out.sort((a, b) {
-      final byBehind = AccountFilter.monthsBehind(b, now)
-          .compareTo(AccountFilter.monthsBehind(a, now));
-      if (byBehind != 0) return byBehind;
-      return a.nextDueDate.compareTo(b.nextDueDate);
-    });
-    return out;
+  /// Apply the chosen order. Null = smart priority (most valuable + most
+  /// reliable — paid-ahead / on-time first), shared with the auto-packer.
+  List<RdAccount> _applySort(List<RdAccount> list) {
+    if (_sort == null) {
+      final now = DateTime.now();
+      return [...list]..sort((a, b) => LotPacking.priorityCompare(a, b, now));
+    }
+    return [...list]..sort(_sort!.comparator);
   }
 
   void _setInstallments(RdAccount a, int value) {
     final denom = a.denominationAmount;
     final current = _selected[a.accountNumber] ?? 0;
     final prospective = _total - denom * current + denom * (value < 0 ? 0 : value);
-    if (value > 0 && prospective > ListBuilderScreen.lotCap) {
-      _capReached();
+    final addingNew = current == 0 && value > 0;
+    if (addingNew && _selected.length >= ListBuilderScreen.maxAccounts) {
+      _warn('A list can hold at most ${ListBuilderScreen.maxAccounts} accounts.');
+      return;
+    }
+    // Amount cap is CASH-only; cheque lists have no rupee limit.
+    if (!_isCheque && value > 0 && prospective > ListBuilderScreen.lotCap) {
+      _warn('Cash list total can\'t exceed ${inr(ListBuilderScreen.lotCap)}.');
       return;
     }
     setState(() {
@@ -98,30 +113,72 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
     });
   }
 
-  void _capReached() => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('Lot total can\'t exceed ${inr(ListBuilderScreen.lotCap)}.')),
-      );
+  void _warn(String msg) => ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(msg)));
 
   Future<void> _create() async {
     if (_selected.isEmpty) return;
+
+    // Cheque modes: collect each account's cheque number + bank account first.
+    Map<String, ChequeEntry>? cheques;
+    if (_isCheque) {
+      final rows = _selected.entries
+          .map((e) => (
+                account: _byNumber[e.key]!,
+                installments: e.value,
+              ))
+          .toList();
+      cheques = await Navigator.of(context).push<Map<String, ChequeEntry>>(
+        MaterialPageRoute(
+          builder: (_) => ChequeEntryScreen(mode: _mode, rows: rows),
+        ),
+      );
+      if (cheques == null || !mounted) return; // cancelled
+    }
+
+    // Creating a lot marks every selected account "Deposited" for this cycle —
+    // confirm first, since there's no bulk way to undo that mark.
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('Create this list?', style: AppTheme.display(17)),
+        content: Text(
+          '${_selected.length} account${_selected.length == 1 ? '' : 's'} '
+          '(${inr(_total)}, $_mode) will be marked deposited for this cycle.',
+          style: AppTheme.body(13.5, color: AppTheme.inkMuted, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Create')),
+        ],
+      ),
+    );
+    if (ok != true) return;
     final items = _selected.entries.map((e) {
       final a = _byNumber[e.key]!;
+      final chq = cheques?[e.key];
       return LotItem(
         accountNumber: a.accountNumber,
         customerName: a.customerName,
         denomination: a.denominationAmount,
         installments: e.value,
+        chequeNumber: chq?.chequeNo,
+        bankAccountNumber: chq?.bankAccount,
       );
     }).toList();
 
     await widget.lots.save(Lot(
       createdAt: DateTime.now(),
-      mode: 'Cash',
+      mode: _mode,
       items: items,
     ));
-    unawaited(Analytics.track(
-        'lot_created', {'accounts': items.length, 'amount': _total}));
+    unawaited(Analytics.track('lot_created',
+        {'accounts': items.length, 'amount': _total, 'mode': _mode}));
     // Mark the collected accounts Deposited for this cycle.
     for (final n in _selected.keys) {
       await widget.accounts.setStatus(n, CollectionStatus.deposited);
@@ -129,17 +186,20 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
     if (!mounted) return;
     Navigator.of(context).pop(true);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Lot created · ${items.length} accounts · '
-          '${inr(_total)}')),
+      SnackBar(content: Text('List created · ${items.length} accounts · '
+          '${inr(_total)} · $_mode')),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final capPct = (_total / ListBuilderScreen.lotCap).clamp(0.0, 1.0);
+    // Cash fills toward the ₹20k cap; cheque fills toward the 50-account cap.
+    final pct = _isCheque
+        ? (_count / ListBuilderScreen.maxAccounts).clamp(0.0, 1.0)
+        : (_total / ListBuilderScreen.lotCap).clamp(0.0, 1.0);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create Lot'),
+        title: const Text('New list'),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(66),
           child: Container(
@@ -151,19 +211,23 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _headerStat('Selected', '$_count'),
-                    _headerStat('Total',
-                        '${inr(_total)} / ${inr(ListBuilderScreen.lotCap)}'),
+                    _headerStat('Selected',
+                        '$_count / ${ListBuilderScreen.maxAccounts}'),
+                    _headerStat(
+                        'Total',
+                        _isCheque
+                            ? inr(_total)
+                            : '${inr(_total)} / ${inr(ListBuilderScreen.lotCap)}'),
                   ],
                 ),
                 const SizedBox(height: 8),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(6),
                   child: LinearProgressIndicator(
-                    value: capPct,
+                    value: pct,
                     minHeight: 6,
                     backgroundColor: AppTheme.line,
-                    color: capPct >= 1.0 ? AppTheme.red : AppTheme.green,
+                    color: pct >= 1.0 ? AppTheme.red : AppTheme.green,
                   ),
                 ),
               ],
@@ -173,7 +237,16 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
       ),
       body: Column(
         children: [
+          _modeSelector(),
           _searchRow(),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: AccountSortBar(
+              value: _sort,
+              smartLabel: 'Smart',
+              onChanged: (v) => setState(() => _sort = v),
+            ),
+          ),
           Expanded(
             child: FutureBuilder<List<RdAccount>>(
               future: _future,
@@ -181,7 +254,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
                 if (!snap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                final list = snap.data!;
+                final list = _applySort(snap.data!);
                 if (list.isEmpty) {
                   return Center(
                     child: Text('No accounts',
@@ -204,8 +277,46 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
           : FloatingActionButton.extended(
               onPressed: _create,
               icon: const Icon(Icons.playlist_add_check, size: 20),
-              label: Text('Create Lot ($_count)'),
+              label: Text('Create list ($_count)'),
             ),
+    );
+  }
+
+  Widget _modeSelector() {
+    Widget chip(String label, String mode) {
+      final active = _mode == mode;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _mode = mode),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active ? AppTheme.black : AppTheme.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppTheme.line),
+            ),
+            child: Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTheme.body(12.5,
+                    weight: FontWeight.w700,
+                    color: active ? Colors.white : AppTheme.ink)),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(13, 12, 13, 0),
+      child: Row(
+        children: [
+          chip('Cash', 'Cash'),
+          chip('DOP Cheque', 'DOP Cheque'),
+          chip('Non-DOP', 'Non DOP Cheque'),
+        ],
+      ),
     );
   }
 
@@ -318,6 +429,131 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
         height: 34,
         decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         child: Icon(icon, color: Colors.white, size: 20),
+      ),
+    );
+  }
+}
+
+/// One account's cheque details for a cheque-mode list.
+class ChequeEntry {
+  final String chequeNo;
+  final String bankAccount; // bank a/c number printed on the cheque
+  const ChequeEntry(this.chequeNo, this.bankAccount);
+}
+
+/// Collects the cheque number + bank account number for each account in a
+/// DOP / Non-DOP cheque list. Returns `accountNumber -> ChequeEntry`, or null
+/// if cancelled. Every account must be filled before it can be saved.
+class ChequeEntryScreen extends StatefulWidget {
+  const ChequeEntryScreen({super.key, required this.mode, required this.rows});
+  final String mode;
+  final List<({RdAccount account, int installments})> rows;
+
+  @override
+  State<ChequeEntryScreen> createState() => _ChequeEntryScreenState();
+}
+
+class _ChequeEntryScreenState extends State<ChequeEntryScreen> {
+  final Map<String, TextEditingController> _chq = {};
+  final Map<String, TextEditingController> _bank = {};
+
+  @override
+  void initState() {
+    super.initState();
+    for (final r in widget.rows) {
+      _chq[r.account.accountNumber] = TextEditingController();
+      _bank[r.account.accountNumber] = TextEditingController();
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in [..._chq.values, ..._bank.values]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _done() {
+    for (final r in widget.rows) {
+      final acc = r.account.accountNumber;
+      if (_chq[acc]!.text.trim().isEmpty || _bank[acc]!.text.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Enter the cheque number and bank account for every account.')));
+        return;
+      }
+    }
+    final out = <String, ChequeEntry>{
+      for (final r in widget.rows)
+        r.account.accountNumber: ChequeEntry(
+          _chq[r.account.accountNumber]!.text.trim(),
+          _bank[r.account.accountNumber]!.text.trim(),
+        ),
+    };
+    Navigator.of(context).pop(out);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Cheque details · ${widget.mode}')),
+      body: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 100),
+        itemCount: widget.rows.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (_, i) {
+          final r = widget.rows[i];
+          final a = r.account;
+          return Container(
+            padding: const EdgeInsets.all(14),
+            decoration: AppTheme.card(radius: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(a.customerName,
+                    style: AppTheme.display(15, weight: FontWeight.w700)),
+                Text(
+                    '#${a.accountNumber} · ${r.installments} × '
+                    '${inr(a.denominationAmount)} = '
+                    '${inr(a.denominationAmount * r.installments)}',
+                    style: AppTheme.body(12, color: AppTheme.inkMuted)),
+                const SizedBox(height: 10),
+                _field(_chq[a.accountNumber]!, 'Cheque number',
+                    TextInputType.number),
+                const SizedBox(height: 8),
+                _field(_bank[a.accountNumber]!, 'Bank account number (on cheque)',
+                    TextInputType.number),
+              ],
+            ),
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _done,
+        icon: const Icon(Icons.check, size: 20),
+        label: const Text('Done'),
+      ),
+    );
+  }
+
+  Widget _field(TextEditingController c, String label, TextInputType kb) {
+    return TextField(
+      controller: c,
+      keyboardType: kb,
+      style: AppTheme.body(15, weight: FontWeight.w600),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: AppTheme.body(13, color: AppTheme.inkMuted),
+        isDense: true,
+        filled: true,
+        fillColor: AppTheme.surfaceSoft,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       ),
     );
   }

@@ -58,6 +58,10 @@ void main() {
     fab.onPressed!();
     await tester.pumpAndSettle();
 
+    // Confirm the "Create this lot?" dialog (marks accounts deposited).
+    await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+    await tester.pumpAndSettle();
+
     final saved = await lots.all();
     expect(saved.length, 1);
     expect(saved.first.count, 2);

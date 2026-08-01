@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -19,6 +20,7 @@ class ProfileView extends StatefulWidget {
 
 class _ProfileViewState extends State<ProfileView> {
   String _name = '', _agent = '', _userId = '', _aslaas = '', _photo = '';
+  Uint8List? _photoBytes; // decoded once (P4)
 
   @override
   void initState() {
@@ -38,17 +40,21 @@ class _ProfileViewState extends State<ProfileView> {
       _agent = agent;
       _aslaas = aslaas;
       _photo = photo;
+      _photoBytes = photo.isEmpty ? null : base64Decode(photo);
       _userId = creds.agentId;
     });
   }
 
   String get _initials {
     final n = _name.trim().isEmpty ? 'Agent' : _name.trim();
-    return n.split(RegExp(r'\s+')).take(2).map((w) => w[0]).join().toUpperCase();
+    final parts = n.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+    return parts.isEmpty
+        ? 'A'
+        : parts.take(2).map((w) => w[0]).join().toUpperCase();
   }
 
   void _viewFullPhoto() {
-    if (_photo.isEmpty) return;
+    if (_photoBytes == null) return;
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => Scaffold(
         backgroundColor: Colors.black,
@@ -56,7 +62,7 @@ class _ProfileViewState extends State<ProfileView> {
             backgroundColor: Colors.black, foregroundColor: Colors.white),
         body: Center(
           child: InteractiveViewer(
-            child: Image.memory(base64Decode(_photo)),
+            child: Image.memory(_photoBytes!),
           ),
         ),
       ),
@@ -86,13 +92,13 @@ class _ProfileViewState extends State<ProfileView> {
                 clipBehavior: Clip.antiAlias,
                 decoration: const BoxDecoration(
                     color: AppTheme.black, shape: BoxShape.circle),
-                child: _photo.isEmpty
+                child: _photoBytes == null
                     ? Center(
                         child: Text(_initials,
                             style: AppTheme.display(40,
                                 weight: FontWeight.w800, color: Colors.white)),
                       )
-                    : Image.memory(base64Decode(_photo), fit: BoxFit.cover),
+                    : Image.memory(_photoBytes!, fit: BoxFit.cover),
               ),
             ),
           ),

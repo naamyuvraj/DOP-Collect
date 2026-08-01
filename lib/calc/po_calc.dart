@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import '../util/format.dart';
+
 /// India Post savings schemes the calculator supports.
 enum PoScheme {
   rd,
@@ -380,8 +382,8 @@ class PoCalc {
           interest: monthly * 12 * y,
           payout: 'Monthly income',
           rows: [
-            ('Monthly income', monthly.round().toString()),
-            ('Over $y years', (monthly * 12 * y).round().toString()),
+            ('Monthly income', inr(monthly.round())),
+            ('Over $y years', inr((monthly * 12 * y).round())),
           ],
         );
 
@@ -394,8 +396,8 @@ class PoCalc {
           interest: quarterly * 4 * y,
           payout: 'Quarterly income',
           rows: [
-            ('Quarterly income', quarterly.round().toString()),
-            ('Over $y years', (quarterly * 4 * y).round().toString()),
+            ('Quarterly income', inr(quarterly.round())),
+            ('Over $y years', inr((quarterly * 4 * y).round())),
           ],
         );
 

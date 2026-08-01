@@ -52,12 +52,41 @@ class AppSettings {
   static Future<void> setOfflineOnlyAi(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(_kOfflineOnly, v);
 
+  /// "New Accounts" window in months (1/2/3), default 1.
+  static const _kNewMonths = 'new_account_months';
+  static Future<int> newAccountMonths() async =>
+      (await SharedPreferences.getInstance()).getInt(_kNewMonths) ?? 1;
+  static Future<void> setNewAccountMonths(int v) async =>
+      (await SharedPreferences.getInstance()).setInt(_kNewMonths, v);
+
   /// Anonymous usage analytics (default on). Opt-out from Settings.
   static const _kAnalytics = 'analytics_enabled';
   static Future<bool> analyticsEnabled() async =>
       (await SharedPreferences.getInstance()).getBool(_kAnalytics) ?? true;
   static Future<void> setAnalyticsEnabled(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(_kAnalytics, v);
+
+  /// Lot ids whose report has been downloaded/printed (for the Downloads tab's
+  /// "Download / Downloaded" state).
+  static const _kDownloaded = 'downloaded_lot_ids';
+  static Future<Set<int>> downloadedLotIds() async {
+    final raw =
+        (await SharedPreferences.getInstance()).getStringList(_kDownloaded) ??
+            const [];
+    return raw.map(int.tryParse).whereType<int>().toSet();
+  }
+
+  static Future<void> setDownloadedLotIds(Set<int> ids) async =>
+      (await SharedPreferences.getInstance())
+          .setStringList(_kDownloaded, ids.map((e) => '$e').toList());
+
+  /// Timestamp of the last successful portal sync (ms since epoch, 0 = never).
+  static const _kLastSync = 'last_sync_ms';
+  static Future<int> lastSyncMs() async =>
+      (await SharedPreferences.getInstance()).getInt(_kLastSync) ?? 0;
+  static Future<void> setLastSyncNow() async =>
+      (await SharedPreferences.getInstance())
+          .setInt(_kLastSync, DateTime.now().millisecondsSinceEpoch);
 
   /// User-edited RD rate history as JSON (empty = use the built-in table).
   static const _kRdRates = 'rd_rate_history_v1';

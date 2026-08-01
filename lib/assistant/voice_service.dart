@@ -33,13 +33,14 @@ class VoiceService {
   Future<bool> listen({
     required void Function(String text) onResult,
     required void Function(String text) onFinal,
+    String? localeId, // 'en_IN' / 'hi_IN'; null = device default
   }) async {
     if (!await initStt()) return false;
     await _stt.listen(
       listenOptions: SpeechListenOptions(
         listenMode: ListenMode.dictation,
         partialResults: true,
-        localeId: 'hi_IN',
+        localeId: localeId,
         listenFor: const Duration(seconds: 15),
         pauseFor: const Duration(seconds: 3),
       ),

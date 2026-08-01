@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/account_repository.dart';
+import '../models/account_sort.dart';
 import '../models/rd_account.dart';
 import '../models/summaries.dart';
 import '../theme/app_theme.dart';
 import '../widgets/account_row.dart';
+import '../widgets/account_sort_bar.dart';
 import 'portfolio_screen.dart';
 
 /// Accounts list. With [filter] null it is the "All Accounts" tab (search +
@@ -23,6 +27,10 @@ class _AccountListScreenState extends State<AccountListScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
   Future<List<RdAccount>>? _future;
+  Timer? _debounce;
+
+  /// null = natural (repo) order; else amount/due sort.
+  AccountSort? _sort;
 
   bool get _isTab => widget.filter == null;
 
@@ -34,6 +42,7 @@ class _AccountListScreenState extends State<AccountListScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -42,9 +51,25 @@ class _AccountListScreenState extends State<AccountListScreen> {
     _future = _query.isEmpty ? widget.repo.all() : widget.repo.search(_query);
   }
 
+  /// Debounce the SQLite search so it doesn't fire on every keystroke on a
+  /// 500-row DB (the field stuttered on a budget phone).
+  void _onSearchChanged(String v) {
+    setState(() {}); // reflect the clear (✕) button instantly
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      setState(() {
+        _query = v.trim();
+        _reload();
+      });
+    });
+  }
+
   List<RdAccount> _apply(List<RdAccount> all) {
-    if (widget.filter == null) return all;
-    return widget.filter!.filter(all, DateTime.now());
+    final filtered =
+        widget.filter == null ? all : widget.filter!.filter(all, DateTime.now());
+    if (_sort == null) return filtered;
+    return [...filtered]..sort(_sort!.comparator);
   }
 
   @override
@@ -54,6 +79,14 @@ class _AccountListScreenState extends State<AccountListScreen> {
       body: Column(
         children: [
           if (_isTab) _searchRow(),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 4),
+            child: AccountSortBar(
+              value: _sort,
+              smartLabel: 'Default',
+              onChanged: (v) => setState(() => _sort = v),
+            ),
+          ),
           Expanded(
             child: FutureBuilder<List<RdAccount>>(
               future: _future,
@@ -63,9 +96,18 @@ class _AccountListScreenState extends State<AccountListScreen> {
                 }
                 final list = _apply(snap.data!);
                 if (list.isEmpty) {
+                  final msg = _query.isNotEmpty
+                      ? 'No account matches "$_query".'
+                      : _isTab
+                          ? 'No accounts yet — Sync from the dashboard.'
+                          : 'Nothing in this list right now.';
                   return Center(
-                    child: Text('No accounts',
-                        style: AppTheme.body(14, color: AppTheme.inkMuted)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(msg,
+                          textAlign: TextAlign.center,
+                          style: AppTheme.body(14, color: AppTheme.inkMuted)),
+                    ),
                   );
                 }
                 return ListView.builder(
@@ -94,52 +136,43 @@ class _AccountListScreenState extends State<AccountListScreen> {
   Widget _searchRow() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              height: 46,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: AppTheme.card(radius: 10),
-              alignment: Alignment.center,
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: AppTheme.card(radius: 12),
+        child: Row(
+          children: [
+            const Icon(Icons.search_rounded, size: 20, color: AppTheme.inkFaint),
+            const SizedBox(width: 8),
+            Expanded(
               child: TextField(
                 controller: _searchCtrl,
-                onChanged: (v) => setState(() {
-                  _query = v;
-                  _reload();
-                }),
+                onChanged: _onSearchChanged,
                 style: AppTheme.body(15),
                 cursorColor: AppTheme.accent,
                 decoration: InputDecoration(
-                  hintText: 'Type Here…',
+                  hintText: 'Search name or account number',
                   hintStyle: AppTheme.body(15, color: AppTheme.inkFaint),
                   border: InputBorder.none,
                   isDense: true,
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: () => setState(() {
-              _searchCtrl.clear();
-              _query = '';
-              _reload();
-            }),
-            child: Container(
-              height: 46,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppTheme.inkMuted,
-                borderRadius: BorderRadius.circular(10),
+            if (_searchCtrl.text.isNotEmpty)
+              GestureDetector(
+                onTap: () => setState(() {
+                  _searchCtrl.clear();
+                  _query = '';
+                  _reload();
+                }),
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Icon(Icons.close_rounded,
+                      size: 20, color: AppTheme.inkMuted),
+                ),
               ),
-              child: Text('Reset',
-                  style: AppTheme.body(14,
-                      weight: FontWeight.w600, color: Colors.white)),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -1,0 +1,6 @@
+# Copy to android/key.properties (git-ignored) after generating your upload
+# keystore (see the keytool command in the release-signing instructions).
+storeFile=upload-keystore.jks
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=upload
+keyPassword=YOUR_KEY_PASSWORD

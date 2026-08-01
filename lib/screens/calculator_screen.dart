@@ -7,7 +7,6 @@ import '../calc/po_calc.dart';
 import '../services/analytics.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
-import '../widgets/push_button.dart';
 
 /// Post Office interest calculator. Pick a scheme, type the amount, and the
 /// maturity updates live — the maths lives in [PoCalc] so the screen and the
@@ -48,7 +47,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   Future<void> _pickOpenedOn() async {
-    final now = DateTime(2026, 7, 24);
+    final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
       initialDate: _openedOn ?? DateTime(now.year - 2, now.month),
@@ -90,6 +89,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       _spec = s;
       _applyDefaults();
     });
+    unawaited(Analytics.track('calc_used', {'scheme': s.code}));
   }
 
   @override
@@ -181,27 +181,35 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             _openedOnField(),
           ],
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _spec.scheme == PoScheme.kvp
-                    ? _readOnly('Term', 'till doubled')
-                    : fixedTerm
-                        ? _readOnly('Term', '${_trim(_spec.years)} years')
-                        : _field(_years, 'Years'),
-              ),
+          if (_spec.scheme == PoScheme.kvp)
+            Row(children: [
+              Expanded(child: _readOnly('Term', 'till doubled')),
               const SizedBox(width: 12),
               Expanded(child: _field(_rate, 'Rate %')),
+            ])
+          else if (fixedTerm)
+            Row(children: [
+              Expanded(child: _readOnly('Term', '${_trim(_spec.years)} years')),
+              const SizedBox(width: 12),
+              Expanded(child: _field(_rate, 'Rate %')),
+            ])
+          else ...[
+            // Editable term with a live ± stepper — maturity recalculates as
+            // you tap, like the reference detail screen.
+            _termStepper(),
+            const SizedBox(height: 12),
+            _field(_rate, 'Rate %'),
+          ],
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.bolt_rounded,
+                  size: 16, color: AppTheme.green),
+              const SizedBox(width: 4),
+              Text('Maturity updates automatically as you type',
+                  style: AppTheme.body(12, color: AppTheme.inkMuted)),
             ],
-          ),
-          const SizedBox(height: 16),
-          PushButton(
-            color: AppTheme.black,
-            onPressed: () {
-              setState(() => FocusScope.of(context).unfocus());
-              unawaited(Analytics.track('calc_used', {'scheme': _spec.code}));
-            },
-            child: const Text('Calculate'),
           ),
         ],
       ),
@@ -232,6 +240,52 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     );
   }
 
+  void _setYears(double v) {
+    final clamped = v.clamp(1, 40).toDouble();
+    setState(() => _years.text = _trim(clamped));
+  }
+
+  /// "Maturity Time" with a live ± stepper — every tap recalculates maturity.
+  Widget _termStepper() {
+    final y = _yearsVal ?? _spec.years;
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: AppTheme.panel(AppTheme.surfaceSoft, radius: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('MATURITY TIME', style: AppTheme.label(AppTheme.inkMuted)),
+                const SizedBox(height: 2),
+                Text('${_trim(y)} ${y == 1 ? "Year" : "Years"}',
+                    style: AppTheme.body(16, weight: FontWeight.w800)),
+              ],
+            ),
+          ),
+          _stepBtn(Icons.remove, AppTheme.red, () => _setYears(y - 1)),
+          const SizedBox(width: 10),
+          _stepBtn(Icons.add, AppTheme.green, () => _setYears(y + 1)),
+        ],
+      ),
+    );
+  }
+
+  Widget _stepBtn(IconData icon, Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        child: Icon(icon, color: Colors.white, size: 22),
+      ),
+    );
+  }
+
   /// RD-only: tap to set the opening date, which fills the locked historical
   /// rate. Optional — for a brand-new RD the current rate is already filled.
   Widget _openedOnField() {
@@ -254,7 +308,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 children: [
                   Text(
                       _openedOn == null
-                          ? 'Opened on (sets old rate)'
+                          ? 'Date'
                           : 'Opened ${_trim(_openedOn!.day.toDouble())}-'
                               '${_openedOn!.month}-${_openedOn!.year}',
                       style: AppTheme.body(13.5, weight: FontWeight.w600)),
@@ -323,11 +377,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
           const Divider(height: 26, color: Color(0x33000000)),
           _row('Total deposited', inr(r.deposited.round())),
           _row('Interest earned', inr(r.interest.round())),
-          for (final extra in r.rows)
-            _row(extra.$1,
-                RegExp(r'^\d+$').hasMatch(extra.$2)
-                    ? inr(int.parse(extra.$2))
-                    : extra.$2),
+          for (final extra in r.rows) _row(extra.$1, extra.$2),
         ],
       ),
     );

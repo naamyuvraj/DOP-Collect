@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import '../models/rd_account.dart';
 import 'database.dart';
@@ -13,7 +13,12 @@ abstract class AccountRepository {
   Future<RdAccount?> byAccountNumber(String accountNumber);
   Future<void> setStatus(String accountNumber, CollectionStatus status);
 
-  /// Wholesale replace — the entry point a portal Sync will call.
+  /// Merge a fresh portal list into the store — the entry point a Sync calls.
+  /// Core fields (name, denomination, months paid, next due) are updated from
+  /// the portal; locally-held state the list parse does NOT carry — collection
+  /// [status] and Deep-Sync detail (opening date, totals, last-deposit) — is
+  /// preserved. Accounts absent from a (possibly partial) sync are kept, never
+  /// deleted, so a dropped session can never wipe his data.
   Future<void> replaceAll(List<RdAccount> accounts);
   Future<int> count();
 
@@ -73,10 +78,31 @@ class SqfliteAccountRepository implements AccountRepository {
   Future<void> replaceAll(List<RdAccount> accounts) async {
     final db = await _db.database;
     await db.transaction((txn) async {
-      await txn.delete('accounts');
+      // Preload existing rows so we can preserve status + detail on merge.
+      final existing = <String, Map<String, Object?>>{
+        for (final r in await txn.query('accounts'))
+          r['account_number'] as String: r,
+      };
       final batch = txn.batch();
       for (final a in accounts) {
-        batch.insert('accounts', a.toMap(),
+        final map = a.toMap();
+        final old = existing[a.accountNumber];
+        if (old != null) {
+          // Keep the collection mark and Deep-Sync detail the portal list
+          // doesn't include; keep the old serial if this parse didn't set one.
+          map['status'] = old['status'] ?? map['status'];
+          map['opening_date'] = old['opening_date'] ?? map['opening_date'];
+          map['total_deposit'] = old['total_deposit'] ?? map['total_deposit'];
+          map['pending_installments'] =
+              old['pending_installments'] ?? map['pending_installments'];
+          map['default_installments'] =
+              old['default_installments'] ?? map['default_installments'];
+          map['last_deposit_date'] =
+              old['last_deposit_date'] ?? map['last_deposit_date'];
+          final oldSerial = (old['serial'] as num?)?.toInt() ?? 0;
+          if (a.serial == 0 && oldSerial != 0) map['serial'] = oldSerial;
+        }
+        batch.insert('accounts', map,
             conflictAlgorithm: ConflictAlgorithm.replace);
       }
       await batch.commit(noResult: true);
@@ -145,9 +171,24 @@ class MemoryAccountRepository implements AccountRepository {
 
   @override
   Future<void> replaceAll(List<RdAccount> accounts) async {
-    _items
-      ..clear()
-      ..addAll(accounts);
+    for (final a in accounts) {
+      final i = _items.indexWhere((x) => x.accountNumber == a.accountNumber);
+      if (i == -1) {
+        _items.add(a);
+      } else {
+        // Preserve status + detail + serial the same way the SQLite store does.
+        final old = _items[i];
+        _items[i] = a.copyWith(
+          status: old.status,
+          serial: a.serial == 0 ? old.serial : a.serial,
+          openingDate: old.openingDate,
+          totalDeposit: old.totalDeposit,
+          pendingInstallments: old.pendingInstallments,
+          defaultInstallments: old.defaultInstallments,
+          lastDepositDate: old.lastDepositDate,
+        );
+      }
+    }
   }
 
   @override

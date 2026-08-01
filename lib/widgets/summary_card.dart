@@ -10,10 +10,16 @@ class FocalCard extends StatelessWidget {
     required this.label,
     required this.amount,
     required this.sublabel,
+    this.hidden = false,
+    this.onToggleVisibility,
   });
   final String label;
   final String amount;
   final String sublabel;
+
+  /// Privacy: when true the amount is masked; the eye toggles it.
+  final bool hidden;
+  final VoidCallback? onToggleVisibility;
 
   @override
   Widget build(BuildContext context) {
@@ -46,21 +52,40 @@ class FocalCard extends StatelessWidget {
                 children: [
                   Text(label.toUpperCase(),
                       style: AppTheme.label(
-                          AppTheme.black.withValues(alpha: 0.55))),
+                          AppTheme.black.withValues(alpha: 0.75))),
                   const SizedBox(height: 10),
                   FittedBox(
-                    child: Text(amount,
+                    child: Text(hidden ? '• • • • •' : amount,
                         style: AppTheme.display(46,
                             weight: FontWeight.w800, spacing: -1.5)),
                   ),
                   const SizedBox(height: 6),
-                  Text(sublabel,
+                  Text(hidden ? 'Tap the eye to view' : sublabel,
                       style: AppTheme.body(14,
                           weight: FontWeight.w700,
-                          color: AppTheme.black.withValues(alpha: 0.7))),
+                          color: AppTheme.black.withValues(alpha: 0.85))),
                 ],
               ),
             ),
+            // Eye toggle — hide/show the balance for privacy.
+            if (onToggleVisibility != null)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Material(
+                  color: Colors.transparent,
+                  child: IconButton(
+                    icon: Icon(
+                        hidden
+                            ? Icons.visibility_off_rounded
+                            : Icons.visibility_rounded,
+                        color: AppTheme.black.withValues(alpha: 0.7),
+                        size: 22),
+                    onPressed: onToggleVisibility,
+                    tooltip: hidden ? 'Show' : 'Hide',
+                  ),
+                ),
+              ),
             // Glossy shine sweeping across the top-left.
             Positioned.fill(
               child: IgnorePointer(
@@ -95,6 +120,7 @@ class SummaryCard extends StatelessWidget {
     required this.count,
     this.amount,
     this.onView,
+    this.trailing,
   });
 
   final String title;
@@ -102,6 +128,9 @@ class SummaryCard extends StatelessWidget {
   final String count;
   final String? amount;
   final VoidCallback? onView;
+
+  /// Optional compact control shown before the View button (e.g. a dropdown).
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -117,10 +146,14 @@ class SummaryCard extends StatelessWidget {
                 Row(
                   children: [
                     Container(
-                      width: 8,
-                      height: 8,
+                      width: 12,
+                      height: 12,
                       decoration: BoxDecoration(
-                          color: statusColor, shape: BoxShape.circle),
+                          color: statusColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: statusColor.withValues(alpha: 0.25),
+                              width: 3)),
                     ),
                     const SizedBox(width: 8),
                     Flexible(
@@ -141,11 +174,15 @@ class SummaryCard extends StatelessWidget {
                     Text(count,
                         style: AppTheme.display(26, weight: FontWeight.w800)),
                     const SizedBox(width: 6),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Text('accounts',
-                          style:
-                              AppTheme.body(12.5, color: AppTheme.inkFaint)),
+                    Flexible(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: Text('accounts',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                AppTheme.body(13, color: AppTheme.inkFaint)),
+                      ),
                     ),
                   ],
                 ),
@@ -158,6 +195,7 @@ class SummaryCard extends StatelessWidget {
               ],
             ),
           ),
+          if (trailing != null) ...[trailing!, const SizedBox(width: 10)],
           if (onView != null)
             GestureDetector(
               onTap: onView,

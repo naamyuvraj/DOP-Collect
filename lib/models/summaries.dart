@@ -19,6 +19,7 @@ class Stat {
 /// detail fetch lands.
 enum AccountFilter {
   all,
+  toCollect,
   firstHalfPending,
   firstHalfDeposited,
   secondHalfPending,
@@ -31,6 +32,7 @@ enum AccountFilter {
 
   String get title => switch (this) {
         all => 'All Accounts',
+        toCollect => 'To Collect',
         firstHalfPending => 'First Half · Pending',
         firstHalfDeposited => 'First Half · Deposited',
         secondHalfPending => 'Second Half · Pending',
@@ -41,6 +43,10 @@ enum AccountFilter {
         advancedPaid => 'Advanced Paid',
         newAccounts => 'New Accounts',
       };
+
+  /// "New Accounts" window in months (opened within this many months). Default 1
+  /// (the actual need); user-selectable 1/2/3 from the Home dashboard.
+  static int newAccountMonths = 1;
 
   /// How many whole months the account is behind (>=1 = missed), 0 if due this
   /// month, negative if paid ahead into a future month.
@@ -59,6 +65,9 @@ enum AccountFilter {
     final second = a.fortnight == Fortnight.second;
     return switch (this) {
       all => true,
+      // Collection worklist: everyone who still owes — due this month (behind
+      // == 0) or overdue (behind >= 1). Excludes accounts paid ahead.
+      toCollect => behind >= 0,
       firstHalfPending => first && behind == 0,
       firstHalfDeposited => first && behind <= -1,
       secondHalfPending => second && behind == 0,
@@ -71,8 +80,8 @@ enum AccountFilter {
           ? a.pendingInstallments! <= 2
           : (a.monthsPaid > 0 && a.installmentsToMaturity <= 2),
       advancedPaid => behind <= -2,
-      newAccounts => !a.effectiveOpeningDate
-          .isBefore(DateTime(now.year, now.month - 3, now.day)),
+      newAccounts => !a.effectiveOpeningDate.isBefore(
+          DateTime(now.year, now.month - newAccountMonths, now.day)),
     };
   }
 
@@ -80,7 +89,7 @@ enum AccountFilter {
   /// full outstanding (denomination x months behind); others price one
   /// installment.
   int amountOf(RdAccount a, DateTime now) {
-    if (this == defaulters || this == aboutToFreeze) {
+    if (this == defaulters || this == aboutToFreeze || this == toCollect) {
       final behind = monthsBehind(a, now);
       return a.denominationAmount * (behind < 1 ? 1 : behind);
     }

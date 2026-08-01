@@ -7,10 +7,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../assistant/answer.dart';
 import '../assistant/assistant_service.dart';
 import '../assistant/voice_service.dart';
+import '../data/account_repository.dart';
 import '../data/database.dart';
 import '../models/rd_account.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
+import 'portfolio_screen.dart';
 
 /// One line in the chat transcript.
 class _Msg {
@@ -29,7 +31,10 @@ class _Msg {
 /// English or Hindi; answers come from the offline intent engine first, then
 /// the Groq free-tier text-to-SQL fallback. No customer data leaves the device.
 class AssistantScreen extends StatefulWidget {
-  const AssistantScreen({super.key});
+  const AssistantScreen({super.key, this.repo});
+
+  /// When provided, answer rows become tappable and open the account.
+  final AccountRepository? repo;
 
   @override
   State<AssistantScreen> createState() => _AssistantScreenState();
@@ -44,6 +49,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
   bool _busy = false;
   bool _listening = false;
   bool _speak = true; // read answers aloud
+  String _micLang = 'en_IN'; // mic dictation language (toggle EN / हि)
 
   static const _historyKey = 'assistant_chat_v1';
 
@@ -126,6 +132,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     }
     await _voice.shutUp();
     final ok = await _voice.listen(
+      localeId: _micLang, // dictate in the chosen language, not always Hindi
       onResult: (text) => setState(() => _controller.text = text),
       onFinal: (text) {
         setState(() => _listening = false);
@@ -155,7 +162,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     AssistantAnswer answer;
     if (kIsWeb) {
       answer = AssistantAnswer(
-        label: 'Preview',
+        label: 'Assistant',
         kind: AnswerKind.none,
         rows: const [],
         source: 'local',
@@ -173,6 +180,16 @@ class _AssistantScreenState extends State<AssistantScreen> {
     _saveHistory();
     _scrollToEnd();
     if (_speak && !kIsWeb) _voice.speak(answer.speakText());
+  }
+
+  /// Open one account from an answer row — makes lists/details actionable
+  /// instead of dead ends.
+  void _openAccount(String? accountNumber) {
+    final acc = accountNumber?.trim() ?? '';
+    if (acc.isEmpty || widget.repo == null) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => PortfolioScreen(repo: widget.repo!, accountNumber: acc),
+    ));
   }
 
   void _scrollToEnd() {
@@ -348,15 +365,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(a.isError ? 'Assistant' : a.label,
-                    style: AppTheme.display(14.5)),
-              ),
-              _sourceTag(a),
-            ],
-          ),
+          Text(a.isError ? 'Assistant' : a.label,
+              style: AppTheme.display(15)),
           const SizedBox(height: 8),
           if (a.isError)
             Text(a.error!,
@@ -424,42 +434,60 @@ class _AssistantScreenState extends State<AssistantScreen> {
             ? (AppTheme.amberSoft, AppTheme.amber, 'Due this month')
             : (AppTheme.greenSoft, AppTheme.green, 'Paid ahead');
 
+    final tappable = widget.repo != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(a.customerName,
-            style: AppTheme.display(16.5, weight: FontWeight.w800)),
+            style: AppTheme.display(17.5, weight: FontWeight.w800)),
         const SizedBox(height: 2),
         Text('#${a.accountNumber}',
-            style: AppTheme.body(11.5, color: AppTheme.inkFaint)),
+            style: AppTheme.body(12.5, color: AppTheme.inkFaint)),
         const SizedBox(height: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: AppTheme.panel(chipBg, radius: 8),
           child: Text(chipText,
-              style: AppTheme.body(11,
+              style: AppTheme.body(12,
                   weight: FontWeight.w700, color: chipFg)),
         ),
         const SizedBox(height: 12),
         _kv('Monthly RD', inr(a.denominationAmount)),
         _kv('Installments paid', '${a.monthsPaid}'),
         _kv('Total deposited', inr(a.depositedAmount)),
-        _kv('Next due', a.dueDateIso),
-        _kv('Opened on', a.openingDateIso),
+        _kv('Next due', a.dueDateLabel),
+        _kv('Opened on', a.openingDateLabel),
         _kv('Maturity value', inr(a.maturityAmount)),
         _kv('Term', '${a.termYears} years'),
         _kv('Left to maturity', '${a.installmentsToMaturity} inst'),
+        if (tappable) ...[
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: () => _openAccount(a.accountNumber),
+            child: Container(
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppTheme.black,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text('Open account',
+                  style: AppTheme.body(14,
+                      weight: FontWeight.w700, color: Colors.white)),
+            ),
+          ),
+        ],
       ],
     );
   }
 
   Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(vertical: 3.5),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(k, style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
-            Text(v, style: AppTheme.body(13, weight: FontWeight.w700)),
+            Text(k, style: AppTheme.body(13.5, color: AppTheme.inkMuted)),
+            Text(v, style: AppTheme.body(14.5, weight: FontWeight.w700)),
           ],
         ),
       );
@@ -484,36 +512,47 @@ class _AssistantScreenState extends State<AssistantScreen> {
     final due = (r['next_due'] as String?) ?? '';
     final bucket = (r['bucket'] as String?) ?? '';
     final (bg, fg) = _bucketColors(bucket);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 7),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: AppTheme.panel(AppTheme.surfaceSoft, radius: 12),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTheme.body(13.5, weight: FontWeight.w700)),
-                const SizedBox(height: 2),
-                Text('#$acc · ${inr(den)}${due.isEmpty ? '' : ' · due $due'}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTheme.body(11.5, color: AppTheme.inkMuted)),
-              ],
+    final tappable = widget.repo != null && acc.isNotEmpty;
+    return GestureDetector(
+      onTap: tappable ? () => _openAccount(acc) : null,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: AppTheme.panel(AppTheme.surfaceSoft, radius: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTheme.body(14.5, weight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text('#$acc · ${inr(den)}${due.isEmpty ? '' : ' · due $due'}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
+                ],
+              ),
             ),
-          ),
-          if (bucket.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: AppTheme.panel(bg, radius: 8),
-              child: Text(bucket,
-                  style: AppTheme.body(10.5, weight: FontWeight.w700, color: fg)),
-            ),
-        ],
+            if (bucket.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: AppTheme.panel(bg, radius: 8),
+                child: Text(bucket,
+                    style:
+                        AppTheme.body(10.5, weight: FontWeight.w700, color: fg)),
+              ),
+            if (tappable)
+              const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Icon(Icons.chevron_right_rounded,
+                    size: 20, color: AppTheme.inkFaint),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -529,20 +568,6 @@ class _AssistantScreenState extends State<AssistantScreen> {
       default:
         return (AppTheme.surfaceSoft, AppTheme.inkMuted);
     }
-  }
-
-  Widget _sourceTag(AssistantAnswer a) {
-    final online = a.source == 'groq';
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: AppTheme.panel(
-          online ? AppTheme.blueSoft : AppTheme.greenSoft,
-          radius: 8),
-      child: Text(online ? 'online' : 'offline',
-          style: AppTheme.body(10,
-              weight: FontWeight.w700,
-              color: online ? const Color(0xFF2E3A8C) : AppTheme.green)),
-    );
   }
 
   Widget _thinking() => Align(
@@ -571,65 +596,112 @@ class _AssistantScreenState extends State<AssistantScreen> {
     return Container(
       padding: EdgeInsets.fromLTRB(
           14, 8, 14, MediaQuery.of(context).padding.bottom + 10),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Container(
-              decoration: AppTheme.card(radius: 26),
-              child: TextField(
-                controller: _controller,
-                textInputAction: TextInputAction.send,
-                onSubmitted: _ask,
-                style: AppTheme.body(14),
-                decoration: InputDecoration(
-                  hintText: 'Sawaal poochhein…',
-                  hintStyle: AppTheme.body(14, color: AppTheme.inkFaint),
-                  border: InputBorder.none,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          // Type row — full-width field with an inline send button.
+          Container(
+            decoration: AppTheme.card(radius: 26),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _controller,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: _ask,
+                    style: AppTheme.body(15),
+                    decoration: InputDecoration(
+                      hintText: 'Sawaal likhein…',
+                      hintStyle: AppTheme.body(15, color: AppTheme.inkFaint),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 18, vertical: 14),
+                    ),
+                  ),
                 ),
-              ),
+                GestureDetector(
+                  onTap: _busy ? null : () => _ask(_controller.text),
+                  child: Container(
+                    margin: const EdgeInsets.all(5),
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: _busy ? AppTheme.inkFaint : AppTheme.black,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.arrow_upward_rounded,
+                        color: Colors.white, size: 22),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          if (!kIsWeb)
-            GestureDetector(
-              onTap: _busy ? null : _toggleMic,
-              child: Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: _listening ? AppTheme.red : AppTheme.surface,
-                  shape: BoxShape.circle,
-                  boxShadow: const [
-                    BoxShadow(
-                        color: Color(0x14101B12),
-                        blurRadius: 12,
-                        offset: Offset(0, 6)),
-                  ],
-                ),
-                child: Icon(
-                  _listening ? Icons.stop_rounded : Icons.mic_rounded,
-                  color: _listening ? Colors.white : AppTheme.ink,
-                  size: 24,
-                ),
-              ),
+          // Voice is his best input method — make it the primary, labelled,
+          // full-width control, with the dictation language beside it.
+          if (!kIsWeb) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(child: _micButton()),
+                const SizedBox(width: 8),
+                _langToggle(),
+              ],
             ),
-          if (!kIsWeb) const SizedBox(width: 8),
-          GestureDetector(
-            onTap: _busy ? null : () => _ask(_controller.text),
-            child: Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                color: _busy ? AppTheme.inkFaint : AppTheme.black,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.arrow_upward_rounded,
-                  color: Colors.white, size: 24),
-            ),
-          ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _micButton() {
+    return GestureDetector(
+      onTap: _busy ? null : _toggleMic,
+      child: Container(
+        height: 52,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: _listening ? AppTheme.red : AppTheme.black,
+          borderRadius: BorderRadius.circular(26),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(_listening ? Icons.stop_rounded : Icons.mic_rounded,
+                color: Colors.white, size: 22),
+            const SizedBox(width: 8),
+            Text(_listening ? 'Sun raha hoon… (roken)' : 'Bolkar poochhein',
+                style: AppTheme.body(15,
+                    weight: FontWeight.w700, color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Dictation language — labelled so it's clear this sets what the MIC hears,
+  /// not the answer language.
+  Widget _langToggle() {
+    final hi = _micLang == 'hi_IN';
+    return GestureDetector(
+      onTap: () => setState(() => _micLang = hi ? 'en_IN' : 'hi_IN'),
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: AppTheme.line),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('बोली',
+                style: AppTheme.body(9.5,
+                    weight: FontWeight.w600, color: AppTheme.inkMuted)),
+            Text(hi ? 'हिंदी' : 'English',
+                style: AppTheme.body(13, weight: FontWeight.w800)),
+          ],
+        ),
       ),
     );
   }

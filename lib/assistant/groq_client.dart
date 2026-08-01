@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../services/analytics.dart';
+import '../services/supabase_config.dart';
 import 'assistant_config.dart';
 
 /// Thrown only after every (model, key) combination has failed.
@@ -24,6 +25,53 @@ class GroqClient {
   /// Sticky pointer to the last key that worked, so we don't keep hitting a
   /// known-throttled key first on the next question.
   int _keyStart = 0;
+
+  /// Call the Supabase `groq` edge function (keys live server-side). Returns the
+  /// content, or null to signal "proxy not available — try local keys". A hard
+  /// "no keys configured" (503) surfaces as [GroqUnavailable] so the assistant
+  /// doesn't silently fall back to (absent) local keys.
+  Future<String?> _viaProxy({
+    required String system,
+    required String user,
+    required bool jsonMode,
+    required double temperature,
+    required int maxTokens,
+  }) async {
+    if (!SupabaseConfig.configured) return null;
+    try {
+      final deviceId = await Analytics.deviceId();
+      final resp = await _http
+          .post(
+            Uri.parse('${SupabaseConfig.url}/functions/v1/groq'),
+            headers: {
+              'apikey': SupabaseConfig.anonKey,
+              'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
+              'Content-Type': 'application/json',
+              'x-device-id': deviceId,
+            },
+            body: jsonEncode({
+              'system': system,
+              'user': user,
+              'jsonMode': jsonMode,
+              'temperature': temperature,
+              'maxTokens': maxTokens,
+              'models': AssistantConfig.groqModels,
+            }),
+          )
+          .timeout(AssistantConfig.requestTimeout);
+      if (resp.statusCode == 200) {
+        final body =
+            jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+        final content = body['content'];
+        if (content is String && content.isNotEmpty) return content;
+      }
+      // Any non-200 (not deployed / no keys / error) -> fall back to local keys
+      // so the assistant never breaks during the cutover.
+    } catch (_) {
+      // Network / not-deployed -> fall back to any local keys.
+    }
+    return null;
+  }
 
   /// Returns the assistant message content (expected to be a JSON string).
   /// Throws [GroqUnavailable] only when all keys and models are exhausted.
@@ -53,6 +101,18 @@ class GroqClient {
     double temperature = 0,
     int maxTokens = 512,
   }) async {
+    // PRIMARY: the Supabase proxy holds the keys server-side, so the app ships
+    // with none. Falls through to any local keys only if the proxy is
+    // unavailable (dev / migration), so the assistant never breaks mid-cutover.
+    final proxied = await _viaProxy(
+      system: system,
+      user: user,
+      jsonMode: jsonMode,
+      temperature: temperature,
+      maxTokens: maxTokens,
+    );
+    if (proxied != null) return proxied;
+
     const keys = AssistantConfig.groqKeys;
     const models = AssistantConfig.groqModels;
     final errors = <String>[];

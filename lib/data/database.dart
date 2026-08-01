@@ -1,5 +1,10 @@
+import 'dart:io';
+import 'dart:math';
+
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
-import 'package:sqflite/sqflite.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 
 /// Single SQLite database. Offline-first. Migrations must never drop the
 /// already-synced `accounts` on a user's device.
@@ -9,6 +14,8 @@ import 'package:sqflite/sqflite.dart';
 ///   v4: added the read-only `v_accounts` view (derived buckets/fortnight/
 ///       months-behind) that the AI assistant queries. Carries no data, so it
 ///       is always safe to drop + recreate.
+///   v5: added `lots.reference_number` + `lots.submitted_at` (real portal
+///       reference captured on submission; null for every existing list).
 class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
@@ -17,12 +24,50 @@ class AppDatabase {
 
   Future<Database> get database async => _db ??= await _open();
 
+  static const _secure = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+  static const _kEncrypted = 'db_encrypted_v1';
+
+  /// 256-bit DB key, generated once and kept in the Keystore.
+  Future<String> _dbKey() async {
+    var k = await _secure.read(key: 'db_key');
+    if (k == null || k.isEmpty) {
+      final r = Random.secure();
+      k = List<int>.generate(32, (_) => r.nextInt(256))
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join();
+      await _secure.write(key: 'db_key', value: k);
+    }
+    return k;
+  }
+
   Future<Database> _open() async {
     final dir = await getDatabasesPath();
     final path = p.join(dir, 'dop_collect.db');
+    final key = await _dbKey();
+    final prefs = await SharedPreferences.getInstance();
+
+    var encrypted = prefs.getBool(_kEncrypted) ?? false;
+    if (!encrypted) {
+      if (!await File(path).exists()) {
+        // Fresh install — the DB we create below will be encrypted from birth.
+        encrypted = true;
+        await prefs.setBool(_kEncrypted, true);
+      } else {
+        // Existing plaintext DB (an upgrade) — encrypt it in place, safely.
+        encrypted = await _encryptInPlace(path, key);
+        await prefs.setBool(_kEncrypted, encrypted);
+      }
+    }
+
     return openDatabase(
       path,
-      version: 4,
+      // Only pass the key once the file is actually encrypted; otherwise open
+      // the plaintext DB as-is (migration failed / not yet done) so the app
+      // never fails to start and no data is lost.
+      password: encrypted ? key : null,
+      version: 5,
       onCreate: (db, version) async {
         await _createAccounts(db);
         await _createLots(db);
@@ -32,8 +77,51 @@ class AppDatabase {
         if (oldV < 2) await _createLots(db);
         if (oldV < 3) await _addDetailColumns(db);
         if (oldV < 4) await _createAssistantView(db);
+        if (oldV < 5) await _addLotSubmissionColumns(db);
       },
     );
+  }
+
+  /// Encrypt an existing plaintext DB using SQLCipher's `sqlcipher_export`, then
+  /// swap it in — but only after verifying the encrypted copy is readable. On
+  /// any failure the original plaintext file is left untouched (returns false),
+  /// so a failed migration degrades to "unencrypted", never to data loss.
+  Future<bool> _encryptInPlace(String path, String key) async {
+    final encPath = '$path.enc';
+    Database? plain;
+    try {
+      if (await File(encPath).exists()) await File(encPath).delete();
+      plain = await openDatabase(path); // no password => plaintext
+      final v =
+          Sqflite.firstIntValue(await plain.rawQuery('PRAGMA user_version')) ??
+              0;
+      await plain.rawQuery("ATTACH DATABASE '$encPath' AS enc KEY '$key'");
+      await plain.rawQuery("SELECT sqlcipher_export('enc')");
+      await plain.rawQuery('PRAGMA enc.user_version = $v');
+      await plain.rawQuery('DETACH DATABASE enc');
+      await plain.close();
+      plain = null;
+
+      // Verify: the encrypted copy opens with the key and has the accounts table.
+      final check = await openDatabase(encPath, password: key);
+      final ok = Sqflite.firstIntValue(await check.rawQuery(
+              "SELECT count(*) FROM sqlite_master WHERE name='accounts'")) ==
+          1;
+      await check.close();
+      if (!ok) throw Exception('verification failed');
+
+      await File(path).delete();
+      await File(encPath).rename(path);
+      return true;
+    } catch (_) {
+      try {
+        await plain?.close();
+      } catch (_) {}
+      try {
+        if (await File(encPath).exists()) await File(encPath).delete();
+      } catch (_) {}
+      return false; // keep plaintext; retried on next launch
+    }
   }
 
   Future<void> _createAccounts(Database db) async {
@@ -133,11 +221,21 @@ class AppDatabase {
   Future<void> _createLots(Database db) async {
     await db.execute('''
       CREATE TABLE lots (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        created_at  TEXT NOT NULL,
-        mode        TEXT NOT NULL,
-        items_json  TEXT NOT NULL
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at        TEXT NOT NULL,
+        mode              TEXT NOT NULL,
+        items_json        TEXT NOT NULL,
+        reference_number  TEXT,
+        submitted_at      TEXT
       )
     ''');
+  }
+
+  /// v5: the real portal reference (C…/DC…/NDC…) + submit time, captured once a
+  /// list is actually submitted. Null for every existing (unsubmitted) list.
+  Future<void> _addLotSubmissionColumns(Database db) async {
+    for (final col in const ['reference_number TEXT', 'submitted_at TEXT']) {
+      await db.execute('ALTER TABLE lots ADD COLUMN $col');
+    }
   }
 }

@@ -1,22 +1,28 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../data/account_repository.dart';
 import '../../data/app_settings.dart';
 import '../../data/credentials.dart';
 import '../../data/lot_repository.dart';
 import '../../models/lot.dart';
+import '../../services/analytics.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/glass_pill.dart';
+import '../portal/sync_screen.dart';
+import 'batch_list_screen.dart';
 import 'list_builder_screen.dart';
 import 'lot_detail_screen.dart';
+import 'lot_preview_screen.dart';
 import 'lot_report.dart';
 
-/// Groups tab: create a lot (manual) and view saved lots. Each saved lot is a
-/// DOP-style "list" that can be opened, printed, shared, or sent on WhatsApp as
-/// a Recurring Deposit Installment Report.
+/// Lists tab (the app's single home for lists): auto-build month-end lists,
+/// make one by hand, and manage saved lists — open, print, share on WhatsApp,
+/// or prepare on the DOP portal. Each list is a Recurring Deposit Installment
+/// schedule for the post office.
 class SavedListsScreen extends StatefulWidget {
   const SavedListsScreen({super.key, required this.accounts, required this.lots});
   final AccountRepository accounts;
@@ -27,10 +33,12 @@ class SavedListsScreen extends StatefulWidget {
 }
 
 class _SavedListsScreenState extends State<SavedListsScreen> {
-  Future<List<Lot>>? _future;
+  List<Lot>? _lots; // null while first load is in flight
   String _agentName = '';
   String _agentId = '';
   String _aslaas = '';
+  int _view = 0; // 0 = Lists (not yet on portal), 1 = Downloads (submitted)
+  Set<int> _downloaded = {}; // lot ids already downloaded
 
   @override
   void initState() {
@@ -39,10 +47,51 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
     AppSettings.agentName().then((v) => _agentName = v);
     AppSettings.aslaas().then((v) => _aslaas = v);
     Credentials.load().then((c) => _agentId = c.agentId);
+    AppSettings.downloadedLotIds().then((s) {
+      if (mounted) setState(() => _downloaded = s);
+    });
   }
 
-  void _reload() => setState(() => _future = widget.lots.all());
+  Future<void> _markDownloaded(Lot lot) async {
+    unawaited(Analytics.track('list_download', {'submitted': lot.isSubmitted}));
+    if (lot.id == null) return;
+    final next = {..._downloaded, lot.id!};
+    await AppSettings.setDownloadedLotIds(next);
+    if (mounted) setState(() => _downloaded = next);
+  }
 
+  /// The reference to name a file/share by: the real E-Banking reference once
+  /// the list is submitted, else the local L… id for a draft.
+  String _ref(Lot lot) => lot.referenceNumber ?? lotReference(lot);
+
+  /// Open one list's report in a full-screen, zoomable preview. Downloading
+  /// from there marks it downloaded. Same screen serves drafts and submitted
+  /// lists — the only difference is the mark-downloaded callback.
+  Future<void> _preview(Lot lot, {bool markOnDownload = false}) async {
+    final bytes = await buildLotReportPdf(lot,
+        agentName: _agentName, agentId: _agentId, aslaas: _aslaas);
+    if (!mounted) return;
+    unawaited(Analytics.track('list_preview', {'submitted': lot.isSubmitted}));
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => LotPreviewScreen(
+        title: lot.isSubmitted ? 'List ${lot.referenceNumber}' : 'List preview',
+        bytes: bytes,
+        filename: '${_ref(lot)}.pdf',
+        onDownloaded: markOnDownload ? () => _markDownloaded(lot) : null,
+      ),
+    ));
+  }
+
+  // Held in state (not a FutureBuilder) so the floating "Submit on Portal" pill
+  // in the outer Stack can see how many lists are still unsubmitted. Keeps the
+  // old list visible during a refresh instead of flashing a spinner.
+  void _reload() {
+    widget.lots.all().then((lots) {
+      if (mounted) setState(() => _lots = lots);
+    });
+  }
+
+  /// Manual list builder (pick accounts by hand).
   Future<void> _newList() async {
     final made = await Navigator.of(context).push<bool>(MaterialPageRoute(
       builder: (_) =>
@@ -51,29 +100,162 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
     if (made == true) _reload();
   }
 
-  Future<void> _print(Lot lot) async {
-    final bytes = await buildLotReportPdf(lot,
-        agentName: _agentName, agentId: _agentId, aslaas: _aslaas);
-    await Printing.layoutPdf(
-        onLayout: (_) async => bytes, name: '${lotReference(lot)}.pdf');
+  /// Auto-build: pack every account still to collect into ready ₹20,000 lists.
+  Future<void> _autoBuild() async {
+    final made = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) =>
+          BatchListScreen(accounts: widget.accounts, lots: widget.lots),
+    ));
+    if (made == true) _reload();
   }
 
+  /// Lists not yet made on the portal (drives the floating Submit pill).
+  List<Lot> get _unsubmitted =>
+      (_lots ?? const <Lot>[]).where((l) => !l.isSubmitted).toList();
+
+  /// A floating action pill (rounded, shadowed) — shared by "New" and
+  /// "Submit on Portal" so they match on the bottom-left stack.
+  Widget _pill(String label, IconData icon, VoidCallback onTap,
+      {required Color color}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 54,
+        padding: const EdgeInsets.symmetric(horizontal: 22),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(27),
+          boxShadow: const [
+            BoxShadow(
+                color: Color(0x40000000), blurRadius: 18, offset: Offset(0, 8)),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 22),
+            const SizedBox(width: 8),
+            Text(label,
+                style: AppTheme.body(16,
+                    weight: FontWeight.w800, color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Preview + download a whole batch of lists as ONE bundled PDF (each list on
+  /// its own page) — to submit together at the post office.
+  Future<void> _printBundle(List<Lot> lots, String day) async {
+    if (lots.isEmpty) return;
+    final bytes = await buildBundlePdf(lots,
+        agentName: _agentName, agentId: _agentId, aslaas: _aslaas);
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => LotPreviewScreen(
+        title: '${lots.length} lists · $day',
+        bytes: bytes,
+        filename: 'RD-lists-$day-${lots.length}.pdf',
+      ),
+    ));
+  }
+
+  Future<void> _submitAllOnPortal(List<Lot> unsubmitted) async {
+    final total = unsubmitted.fold<int>(0, (s, l) => s + l.totalAmount);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('Submit ${unsubmitted.length} lists?',
+            style: AppTheme.display(17)),
+        content: Text(
+          'Logs in once and works through all ${unsubmitted.length} lists on the '
+          'portal (up to ${inr(total)} total). You confirm each list\'s payment '
+          'separately — nothing is paid without your tap.',
+          style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Start')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final done = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => SyncScreen(
+        repo: widget.accounts,
+        batchLots: unsubmitted,
+        lotStore: widget.lots,
+      ),
+    ));
+    if (done == true && mounted) _reload();
+  }
+
+  /// Batch header: the day + a "Download all (N)" button that bundles that day's
+  /// lists into one PDF.
+  Widget _batchHeader(String day, List<Lot> dayLots) {
+    // Only submitted lists (with a real portal reference) can be handed in at
+    // the counter — so "Download all" bundles ONLY those, and hides if none.
+    final submittedLots = dayLots.where((l) => l.isSubmitted).toList();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 10, 2, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(day, style: AppTheme.display(15, weight: FontWeight.w800)),
+                Text(
+                    '${dayLots.length} list${dayLots.length == 1 ? '' : 's'}'
+                    '${submittedLots.isNotEmpty ? ' · ${submittedLots.length} submitted' : ''}',
+                    style: AppTheme.body(11.5, color: AppTheme.inkMuted)),
+              ],
+            ),
+          ),
+          if (submittedLots.isNotEmpty)
+            GestureDetector(
+              onTap: () => _printBundle(submittedLots, day),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: AppTheme.panel(AppTheme.black, radius: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.download_rounded,
+                        size: 16, color: Colors.white),
+                    const SizedBox(width: 6),
+                    Text('Download all (${submittedLots.length})',
+                        style: AppTheme.body(12.5,
+                            weight: FontWeight.w700, color: Colors.white)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Share the actual PDF (WhatsApp / Drive / Files). The old text-only
+  /// "WhatsApp" action did the same job less well, so it was folded into this.
+  /// Named by the real E-Banking reference once submitted (not the local id).
   Future<void> _share(Lot lot) async {
+    unawaited(Analytics.track('list_share', {'submitted': lot.isSubmitted}));
     final bytes = await buildLotReportPdf(lot,
         agentName: _agentName, agentId: _agentId, aslaas: _aslaas);
-    await Printing.sharePdf(bytes: bytes, filename: '${lotReference(lot)}.pdf');
-  }
-
-  Future<void> _whatsapp(Lot lot) async {
-    await Share.share(lotReportText(lot, aslaas: _aslaas),
-        subject: 'RD List ${lotReference(lot)}');
+    await Printing.sharePdf(bytes: bytes, filename: '${_ref(lot)}.pdf');
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Groups'),
+        title: const Text('Lists'),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -82,61 +264,200 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
           ),
         ],
       ),
-      // Positioned in a Stack (not floatingActionButton) so its bottom edge
-      // lines up EXACTLY with the shell's AI Agent button.
       body: Stack(
         children: [
-          FutureBuilder<List<Lot>>(
-            future: _future,
-            builder: (context, snap) {
-              if (!snap.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final lots = snap.data!;
-              if (lots.isEmpty) {
-                return _empty();
-              }
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 100),
-                itemCount: lots.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (_, i) => _lotCard(lots[i]),
-              );
-            },
-          ),
-          Positioned(
-            left: 20,
-            bottom: agentLevelBottom(context),
-            child: GlassPill(
-              label: 'Create Lot',
-              icon: Icons.add,
-              onTap: _newList,
+          Builder(builder: (context) {
+            final lots = _lots;
+            if (lots == null) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            // Not-yet-on-portal lists live in "Lists"; submitted ones move to
+            // "Downloads" (ready to hand in at the counter).
+            final unsubmitted = lots.where((l) => !l.isSubmitted).toList();
+            final submitted = lots.where((l) => l.isSubmitted).toList();
+            return Column(
+              children: [
+                _viewTabs(unsubmitted.length, submitted.length),
+                Expanded(
+                  child: _view == 0
+                      ? _listsView(unsubmitted)
+                      : _downloadsView(submitted),
+                ),
+              ],
+            );
+          }),
+          // "New" (make a list by hand) — floating pill, bottom-left, on the
+          // same level as the AI assistant button. Lists view only.
+          if (_view == 0)
+            Positioned(
+              left: 20,
+              bottom: agentLevelBottom(context),
+              child: _pill(
+                'New',
+                Icons.add_rounded,
+                _newList,
+                color: AppTheme.black,
+              ),
             ),
+          // "Submit on Portal" — the primary Lists action, as a clear labeled
+          // pill stacked just above "New" (not a bare cloud icon up top).
+          if (_view == 0 && kEnablePortalSubmit && _unsubmitted.isNotEmpty)
+            Positioned(
+              left: 20,
+              bottom: agentLevelBottom(context) + 66,
+              child: _pill(
+                'Submit on Portal',
+                Icons.cloud_upload_rounded,
+                () => _submitAllOnPortal(_unsubmitted),
+                color: AppTheme.green,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Segmented tabs — replaces the old "+ New" spot.
+  Widget _viewTabs(int nLists, int nDownloads) {
+    Widget tab(String label, int i) {
+      final active = _view == i;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _view = i),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active ? AppTheme.black : AppTheme.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.line),
+            ),
+            child: Text(label,
+                style: AppTheme.body(13.5,
+                    weight: FontWeight.w700,
+                    color: active ? Colors.white : AppTheme.ink)),
           ),
-        ],
-      ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(11, 12, 11, 8),
+      child: Row(children: [
+        tab('Lists ($nLists)', 0),
+        tab('Downloads ($nDownloads)', 1),
+      ]),
     );
   }
 
-  Widget _empty() {
+  // --- Lists view (not yet on portal) --------------------------------------
+
+  Widget _listsView(List<Lot> unsubmitted) {
+    final items = <Widget>[
+      // Auto-build the month's ₹20,000 lists (with a review screen). Making one
+      // by hand is the floating "New" pill; submitting is the "Submit on
+      // Portal" pill.
+      Padding(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 4),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _autoBuild,
+            icon: const Icon(Icons.tune_rounded, size: 18),
+            label: Text('Auto-build this month\'s lists',
+                style: AppTheme.body(13.5, weight: FontWeight.w700)),
+            style: TextButton.styleFrom(
+                foregroundColor: AppTheme.ink,
+                padding: const EdgeInsets.symmetric(horizontal: 6)),
+          ),
+        ),
+      ),
+    ];
+
+    if (unsubmitted.isEmpty) {
+      items.add(_emptyMsg(
+          'No lists to submit',
+          'Tap "Auto-build this month\'s lists" or the "New" button to make '
+              'this month\'s ₹20,000 lists, then submit them on the portal.'));
+    } else {
+      for (final entry in _byDay(unsubmitted).entries) {
+        items.add(_dayHeader(entry.key, entry.value.length));
+        for (final lot in entry.value) {
+          items.add(Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _lotCard(lot, downloads: false)));
+        }
+      }
+    }
+    return ListView(
+      // Extra bottom room so the last card clears the stacked New + Submit pills.
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 196),
+      children: items,
+    );
+  }
+
+  // --- Downloads view (submitted / made on the portal) ---------------------
+
+  Widget _downloadsView(List<Lot> submitted) {
+    if (submitted.isEmpty) {
+      return _emptyMsg('No downloads yet',
+          'Lists you submit on the portal appear here — download each, or a '
+              'whole day\'s batch, to submit at the post office.');
+    }
+    final items = <Widget>[];
+    for (final entry in _byDay(submitted).entries) {
+      items.add(_batchHeader(entry.key, entry.value)); // day + "Download all"
+      for (final lot in entry.value) {
+        items.add(Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _lotCard(lot, downloads: true)));
+      }
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 130),
+      children: items,
+    );
+  }
+
+  Map<String, List<Lot>> _byDay(List<Lot> lots) {
+    final groups = <String, List<Lot>>{};
+    for (final lot in lots) {
+      groups.putIfAbsent(lot.dayLabel, () => []).add(lot);
+    }
+    return groups;
+  }
+
+  Widget _dayHeader(String day, int n) => Padding(
+        padding: const EdgeInsets.fromLTRB(2, 10, 2, 8),
+        child: Text('$day · $n list${n == 1 ? '' : 's'}',
+            style: AppTheme.body(12.5,
+                weight: FontWeight.w700, color: AppTheme.inkMuted)),
+      );
+
+  Widget _emptyMsg(String title, String body) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.receipt_long_outlined,
-              size: 56, color: AppTheme.inkFaint),
-          const SizedBox(height: 12),
-          Text('No lots yet',
-              style: AppTheme.display(18, weight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          Text('Tap "Create Lot" to group accounts (max ₹20,000).',
-              style: AppTheme.body(13, color: AppTheme.inkMuted)),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(32, 20, 32, 60),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.receipt_long_outlined,
+                size: 52, color: AppTheme.inkFaint),
+            const SizedBox(height: 12),
+            Text(title, style: AppTheme.display(18, weight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text(body,
+                textAlign: TextAlign.center,
+                style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4)),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _lotCard(Lot lot) {
+  Widget _lotCard(Lot lot, {required bool downloads}) {
+    final isDownloaded = lot.id != null && _downloaded.contains(lot.id);
     return Container(
       decoration: AppTheme.card(),
       clipBehavior: Clip.antiAlias,
@@ -169,12 +490,28 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                             style:
                                 AppTheme.display(20, weight: FontWeight.w600)),
                         const SizedBox(height: 2),
-                        Text(
-                          '${lotReference(lot)} · ${lot.count} accts · '
-                          '${lot.dateLabel}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppTheme.body(12, color: AppTheme.inkMuted),
+                        Row(
+                          children: [
+                            if (lot.isSubmitted) ...[
+                              const Icon(Icons.verified_rounded,
+                                  size: 13, color: AppTheme.green),
+                              const SizedBox(width: 3),
+                            ],
+                            Flexible(
+                              child: Text(
+                                // Real E-Banking ref once submitted, else the
+                                // local L… id.
+                                '${lot.referenceNumber ?? lotReference(lot)} · '
+                                '${lot.count} accts · ${lot.dateLabel}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTheme.body(12,
+                                    color: lot.isSubmitted
+                                        ? AppTheme.green
+                                        : AppTheme.inkMuted),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -187,14 +524,20 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
           const Divider(height: 1, color: AppTheme.divider),
           Row(
             children: [
-              _action('Print', Icons.print_rounded, AppTheme.accent,
-                  () => _print(lot)),
+              if (downloads)
+                _action(
+                    isDownloaded ? 'Downloaded' : 'Download',
+                    isDownloaded
+                        ? Icons.check_circle_rounded
+                        : Icons.download_rounded,
+                    isDownloaded ? AppTheme.green : AppTheme.accent,
+                    () => _preview(lot, markOnDownload: true))
+              else
+                _action('Preview', Icons.visibility_rounded, AppTheme.accent,
+                    () => _preview(lot)),
               _vline(),
               _action('Share', Icons.ios_share_rounded, AppTheme.accent,
                   () => _share(lot)),
-              _vline(),
-              _action('WhatsApp', Icons.chat_rounded, AppTheme.green,
-                  () => _whatsapp(lot)),
             ],
           ),
         ],
@@ -209,7 +552,7 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 15),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [

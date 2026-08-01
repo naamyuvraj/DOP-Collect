@@ -27,6 +27,10 @@ class Analytics {
 
   static void setEnabled(bool v) => _enabled = v;
 
+  /// Stable anonymous per-install id — also used by the Groq proxy for
+  /// per-device rate limiting. Generated regardless of the analytics opt-out.
+  static Future<String> deviceId() => _did();
+
   static bool get _live => SupabaseConfig.configured && _enabled;
 
   // --- Public events ---------------------------------------------------------

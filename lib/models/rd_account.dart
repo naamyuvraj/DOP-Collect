@@ -125,6 +125,9 @@ class RdAccount {
       : DateFormat('yyyy-MM-dd').format(effectiveLastDeposit!);
   String get openingDateLabel =>
       DateFormat('dd-MMM-yyyy').format(effectiveOpeningDate);
+  String get lastDepositLabel => effectiveLastDeposit == null
+      ? '—'
+      : DateFormat('dd-MMM-yyyy').format(effectiveLastDeposit!);
 
   RdAccount copyWith({
     CollectionStatus? status,

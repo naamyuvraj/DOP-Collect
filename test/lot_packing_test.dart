@@ -42,16 +42,17 @@ void main() {
       _acct('late', 2000, DateTime(2026, 4, 2)), // overdue -> eligible, first
     ];
     final eligible = LotPacking.eligible(accounts, now);
-    expect(eligible.map((a) => a.accountNumber), ['late', 'due']);
+    // Reliable (due this month) ranks ahead of overdue now.
+    expect(eligible.map((a) => a.accountNumber), ['due', 'late']);
   });
 
-  test('most-unpaid account lands in the first lot', () {
+  test('reliable (on-time) account is packed before an overdue one', () {
     final accounts = [
-      _acct('current', 2000, DateTime(2026, 7, 2)),
       _acct('overdue', 2000, DateTime(2026, 1, 2)), // most behind
+      _acct('current', 2000, DateTime(2026, 7, 2)), // due this month
     ];
     final lots = LotPacking.build(accounts, now);
-    expect(lots.first.items.first.accountNumber, 'overdue');
+    expect(lots.first.items.first.accountNumber, 'current');
   });
 
   test('one installment per account', () {

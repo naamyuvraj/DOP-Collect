@@ -7,6 +7,7 @@ import '../../services/analytics.dart';
 import '../../data/lot_repository.dart';
 import '../../models/lot.dart';
 import '../../models/lot_packing.dart';
+import '../../models/rd_account.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/glass_pill.dart';
@@ -60,6 +61,7 @@ class _BatchListScreenState extends State<BatchListScreen> {
     if (lots == null) return;
     final lot = lots[lotIndex];
     final removed = lot.items[itemIndex];
+    final wasWholeLot = lot.items.length == 1;
     final remaining = [...lot.items]..removeAt(itemIndex);
     setState(() {
       if (remaining.isEmpty) {
@@ -71,6 +73,23 @@ class _BatchListScreenState extends State<BatchListScreen> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('Removed ${removed.customerName}'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () {
+          final cur = _lots;
+          if (cur == null) return;
+          setState(() {
+            if (wasWholeLot) {
+              cur.insert(lotIndex.clamp(0, cur.length),
+                  lot.copyWith(items: [removed]));
+            } else if (lotIndex < cur.length) {
+              final items = [...cur[lotIndex].items]
+                ..insert(itemIndex.clamp(0, cur[lotIndex].items.length), removed);
+              cur[lotIndex] = cur[lotIndex].copyWith(items: items);
+            }
+          });
+        },
+      ),
     ));
   }
 
@@ -80,6 +99,12 @@ class _BatchListScreenState extends State<BatchListScreen> {
     setState(() => _saving = true);
     for (final lot in lots) {
       await widget.lots.save(lot);
+      // Mark each list's accounts collected — same as the manual builder and
+      // "Create all", so a saved list isn't rebuilt into a duplicate next time.
+      for (final it in lot.items) {
+        await widget.accounts
+            .setStatus(it.accountNumber, CollectionStatus.deposited);
+      }
     }
     unawaited(Analytics.track('list_generated', {
       'lists': lots.length,
@@ -87,16 +112,15 @@ class _BatchListScreenState extends State<BatchListScreen> {
     }));
     if (!mounted) return;
     setState(() => _saving = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${lots.length} lists saved to Groups.')),
-    );
+    // Pushed from the Lists tab — return so the saved lists refresh and show.
+    Navigator.of(context).pop(true);
   }
 
   @override
   Widget build(BuildContext context) {
     final lots = _lots;
     return Scaffold(
-      appBar: AppBar(title: const Text('Lists')),
+      appBar: AppBar(title: const Text('Auto-build lists')),
       body: Stack(
         children: [
           if (lots == null)
@@ -134,7 +158,7 @@ class _BatchListScreenState extends State<BatchListScreen> {
               bottom: agentLevelBottom(context),
               child: GlassPill(
                 key: BatchListScreen.saveKey,
-                label: _saving ? 'Saving…' : 'Save all to Groups',
+                label: _saving ? 'Saving…' : 'Save all lists',
                 icon: Icons.save_alt_rounded,
                 busy: _saving,
                 onTap: _saveAll,

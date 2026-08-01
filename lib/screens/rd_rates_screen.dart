@@ -49,6 +49,29 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
   }
 
   Future<void> _reset() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('Restore built-in rates?', style: AppTheme.display(17)),
+        content: Text(
+          'This discards every rate you added or edited and restores the '
+          'built-in table. It changes the maturity shown for accounts.',
+          style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
     await RdRatesStore.reset();
     if (!mounted) return;
     setState(() {
@@ -82,12 +105,15 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
           FilledButton(
             onPressed: () {
               final v = double.tryParse(ctrl.text.trim());
-              if (v != null && v > 0) {
-                setState(() {
-                  _rows[index] = (_rows[index].$1, v);
-                  _dirty = true;
-                });
+              if (v == null || v < 1 || v > 15) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Enter a rate between 1% and 15%.')));
+                return;
               }
+              setState(() {
+                _rows[index] = (_rows[index].$1, v);
+                _dirty = true;
+              });
               Navigator.pop(context);
             },
             child: const Text('Set'),
@@ -97,14 +123,41 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
     );
   }
 
-  void _delete(int index) => setState(() {
+  Future<void> _delete(int index) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('Delete this rate?', style: AppTheme.display(17)),
+        content: Text(
+          'Removing the ${_label(_rows[index].$1)} rate changes the maturity '
+          'shown for every account opened from then on.',
+          style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      setState(() {
         _rows.removeAt(index);
         _dirty = true;
       });
+    }
+  }
 
   Future<void> _addRow() async {
-    var year = 2026;
-    var month = 10;
+    final now = DateTime.now();
+    var year = now.year;
+    var month = ((now.month - 1) ~/ 3) * 3 + 1; // current quarter start
     final rateCtrl = TextEditingController();
     await showDialog<void>(
       context: context,
@@ -164,15 +217,18 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
             FilledButton(
               onPressed: () {
                 final v = double.tryParse(rateCtrl.text.trim());
-                if (v != null && v > 0) {
-                  final key = year * 100 + month;
-                  setState(() {
-                    _rows.removeWhere((r) => r.$1 == key);
-                    _rows.add((key, v));
-                    _rows.sort((a, b) => a.$1.compareTo(b.$1));
-                    _dirty = true;
-                  });
+                if (v == null || v < 1 || v > 15) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Enter a rate between 1% and 15%.')));
+                  return;
                 }
+                final key = year * 100 + month;
+                setState(() {
+                  _rows.removeWhere((r) => r.$1 == key);
+                  _rows.add((key, v));
+                  _rows.sort((a, b) => a.$1.compareTo(b.$1));
+                  _dirty = true;
+                });
                 Navigator.pop(context);
               },
               child: const Text('Add'),
@@ -183,9 +239,41 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
     );
   }
 
+  Future<void> _confirmExit() async {
+    if (!_dirty) {
+      if (mounted) Navigator.pop(context);
+      return;
+    }
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('Discard changes?', style: AppTheme.display(17)),
+        content: Text('You edited the rates but haven\'t saved. Leave anyway?',
+            style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep editing')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Discard'),
+          ),
+        ],
+      ),
+    );
+    if (leave == true && mounted) Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmExit();
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('RD Interest Rates'),
         actions: [
@@ -283,6 +371,7 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
               ),
             )
           : null,
+      ),
     );
   }
 }

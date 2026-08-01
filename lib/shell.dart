@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'data/account_repository.dart';
@@ -7,9 +9,9 @@ import 'screens/account_list_screen.dart';
 import 'screens/assistant_screen.dart';
 import 'screens/calculator_screen.dart';
 import 'screens/home_dashboard.dart';
-import 'screens/lists/batch_list_screen.dart';
 import 'screens/lists/saved_lists_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/analytics.dart';
 import 'theme/app_theme.dart';
 import 'widgets/product_tour.dart';
 
@@ -32,7 +34,6 @@ class _MainShellState extends State<MainShell> {
   static const _items = [
     (Icons.home_rounded, 'Home'),
     (Icons.account_balance_wallet_rounded, 'Accounts'),
-    (Icons.groups_rounded, 'Groups'),
     (Icons.receipt_long_rounded, 'Lists'),
     (Icons.calculate_rounded, 'Calc'),
     (Icons.settings_rounded, 'Settings'),
@@ -49,7 +50,33 @@ class _MainShellState extends State<MainShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (await AppSettings.tourSeen()) return;
       if (!mounted) return;
-      await runTour();
+      // Offer the tour — don't force a 10-step walkthrough on him the instant
+      // onboarding finishes. Either choice marks it seen so it won't nag again.
+      final wants = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: AppTheme.surface,
+          title: Text('Take a quick tour?', style: AppTheme.display(18)),
+          content: Text(
+            'A short walkthrough of the app — about 10 steps. You can skip it '
+            'and start straight away.',
+            style: AppTheme.body(14, color: AppTheme.inkMuted, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Skip')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Show me')),
+          ],
+        ),
+      );
+      if (wants == true && mounted) {
+        await runTour();
+      } else {
+        await AppSettings.setTourSeen(true);
+      }
     });
   }
 
@@ -61,13 +88,15 @@ class _MainShellState extends State<MainShell> {
 
   /// The guided walkthrough. Also replayable from Settings.
   Future<void> runTour() async {
+    unawaited(Analytics.track('tour'));
     await startProductTour(context, [
       TourStep(
         key: _navKeys[0],
         circle: true,
         before: () => _goTab(0),
         title: 'Your dashboard',
-        body: 'Totals at a glance — first half, second half, defaulters and '
+        body: 'Your monthly book sits up top — tap the eye to show or hide the '
+            'amount. Below it: this-fortnight collection, defaulters and your '
             'portfolio. Tap any "View" to open that list.',
       ),
       TourStep(
@@ -82,55 +111,43 @@ class _MainShellState extends State<MainShell> {
         key: _navKeys[2],
         circle: true,
         before: () => _goTab(2),
-        title: 'Groups — your lots',
-        body: 'Create a lot by hand (₹20,000 cap), print or share it, and use '
-            '"Prepare on portal" to auto-tick those accounts on the DOP site.',
+        title: 'Lists — build them',
+        body: 'At month-end, auto-build your ₹20,000 lists (most valuable '
+            'customers first) or make one by hand. The "New" button is bottom-'
+            'left.',
+      ),
+      TourStep(
+        key: _navKeys[2],
+        circle: true,
+        before: () => _goTab(2),
+        title: 'Lists — make them on the portal',
+        body: '"Make all on portal" logs in once and creates every list in one '
+            'go — it ticks the accounts and pays each as one installment, then '
+            'saves the official reference number back onto the list. Advance '
+            'deposits (an account added twice) are keyed for the rebate.',
+      ),
+      TourStep(
+        key: _navKeys[2],
+        circle: true,
+        before: () => _goTab(2),
+        title: 'Lists — Downloads tab',
+        body: 'Once a list is made on the portal it moves to Downloads. Tap '
+            'Preview to see the PDF, pinch to zoom, then Download to save it or '
+            'Share it on WhatsApp — the real receipt for the post office.',
       ),
       TourStep(
         key: _navKeys[3],
         circle: true,
         before: () => _goTab(3),
-        title: 'Lists — built for you',
-        body: 'One tap packs every account that needs collecting into ready '
-            '₹20,000 lists. Remove anyone, then save them all to Groups.',
-      ),
-      // --- Inside Lists: these are skipped automatically if there's nothing
-      // to collect (no cards on screen).
-      TourStep(
-        key: BatchListScreen.summaryKey,
-        before: () => _goTab(3),
-        title: 'Your lists at a glance',
-        body: 'How many lists were built, how many accounts they cover, and '
-            'the total amount you\'ll be depositing.',
-      ),
-      TourStep(
-        key: BatchListScreen.firstCardKey,
-        before: () => _goTab(3),
-        title: 'One list = one deposit',
-        body: 'Each list stays under the ₹20,000 cash cap — the bar shows how '
-            'full it is. Tap a list to open it and remove anyone who hasn\'t '
-            'paid yet.',
-      ),
-      TourStep(
-        key: BatchListScreen.saveKey,
-        before: () => _goTab(3),
-        title: 'Save them to Groups',
-        body: 'Happy with the lists? Save them all in one tap. From Groups you '
-            'can print, share on WhatsApp, or auto-prepare them on the portal.',
-      ),
-      TourStep(
-        key: _navKeys[4],
-        circle: true,
-        before: () => _goTab(4),
         title: 'Interest calculator',
         body: 'Work out maturity for any post-office scheme — RD, TD, MIS, '
             'SCSS, NSC, KVP, PPF, Sukanya and more, with the current rates '
             'built in.',
       ),
       TourStep(
-        key: _navKeys[5],
+        key: _navKeys[4],
         circle: true,
-        before: () => _goTab(5),
+        before: () => _goTab(4),
         title: 'Sync & settings',
         body: 'Sync Collection pulls all your accounts from the portal in '
             'about a minute. Your profile and ASLAAS number live here too.',
@@ -150,14 +167,15 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomeDashboard(key: ValueKey('home-$_dataVersion'), repo: widget.repo),
+      HomeDashboard(
+          key: ValueKey('home-$_dataVersion'),
+          repo: widget.repo,
+          onOpenLists: () => setState(() => _index = 2)),
       AccountListScreen(
           key: ValueKey('accounts-$_dataVersion'), repo: widget.repo),
+      // One "Lists" tab: saved lists + an Auto-build entry (which pushes the
+      // batch builder). Groups and Lists used to be two tabs for one concept.
       SavedListsScreen(
-          key: ValueKey('groups-$_dataVersion'),
-          accounts: widget.repo,
-          lots: widget.lots),
-      BatchListScreen(
           key: ValueKey('lists-$_dataVersion'),
           accounts: widget.repo,
           lots: widget.lots),
@@ -189,12 +207,15 @@ class _MainShellState extends State<MainShell> {
 
   Widget _aiAgentButton() {
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          fullscreenDialog: true,
-          builder: (_) => const AssistantScreen(),
-        ),
-      ),
+      onTap: () {
+        unawaited(Analytics.track('screen_view', {'tab': 'assistant'}));
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            fullscreenDialog: true,
+            builder: (_) => AssistantScreen(repo: widget.repo),
+          ),
+        );
+      },
       child: Container(
         width: 58,
         height: 58,
@@ -224,8 +245,8 @@ class _MainShellState extends State<MainShell> {
     return SafeArea(
       top: false,
       child: Container(
-        margin: const EdgeInsets.fromLTRB(24, 0, 24, 14),
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 9),
+        margin: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         decoration: BoxDecoration(
           // Subtle top-highlight gradient for a glossy, glowing bar.
           gradient: const LinearGradient(
@@ -252,32 +273,57 @@ class _MainShellState extends State<MainShell> {
           ],
         ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             for (var i = 0; i < _items.length; i++)
-              KeyedSubtree(key: _navKeys[i], child: _navItem(i)),
+              Expanded(
+                  child: KeyedSubtree(key: _navKeys[i], child: _navItem(i))),
           ],
         ),
       ),
     );
   }
 
+  static const _tabNames = ['home', 'accounts', 'lists', 'calculator', 'settings'];
+
+  void _navTo(int i) {
+    if (_index == i) return;
+    setState(() => _index = i);
+    unawaited(Analytics.track('screen_view', {'tab': _tabNames[i]}));
+  }
+
   Widget _navItem(int i) {
     final active = _index == i;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => setState(() => _index = i),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          color: active ? AppTheme.black : Colors.transparent,
-          shape: BoxShape.circle,
+      onTap: () => _navTo(i),
+      child: SizedBox(
+        // Full-height 48dp+ tap target; the visible pill sits inside it.
+        height: 52,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              width: 40,
+              height: 32,
+              decoration: BoxDecoration(
+                color: active ? AppTheme.black : Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(_items[i].$1,
+                  size: 21, color: active ? Colors.white : AppTheme.inkFaint),
+            ),
+            const SizedBox(height: 3),
+            Text(_items[i].$2,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTheme.body(11,
+                    weight: active ? FontWeight.w800 : FontWeight.w600,
+                    color: active ? AppTheme.black : AppTheme.inkFaint)),
+          ],
         ),
-        child: Icon(_items[i].$1,
-            size: 23, color: active ? Colors.white : AppTheme.inkFaint),
       ),
     );
   }

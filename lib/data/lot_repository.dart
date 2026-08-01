@@ -25,8 +25,7 @@ class SqfliteLotRepository implements LotRepository {
   Future<Lot> save(Lot lot) async {
     final db = await _db.database;
     final id = await db.insert('lots', lot.toMap());
-    return Lot(
-        id: id, createdAt: lot.createdAt, mode: lot.mode, items: lot.items);
+    return lot.copyWith(id: id);
   }
 
   @override
@@ -53,11 +52,7 @@ class MemoryLotRepository implements LotRepository {
 
   @override
   Future<Lot> save(Lot lot) async {
-    final saved = Lot(
-        id: ++_seq,
-        createdAt: lot.createdAt,
-        mode: lot.mode,
-        items: lot.items);
+    final saved = lot.copyWith(id: ++_seq);
     _items.add(saved);
     return saved;
   }

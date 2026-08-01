@@ -17,10 +17,11 @@ class AppTheme {
   static const Color line = Color(0xFFEAEFE8);
   static const Color divider = Color(0xFFEEF2EC);
 
-  // Ink
+  // Ink — contrast-safe against white (WCAG AA). Old values (#6E7B72 / #A0ADA4)
+  // failed body contrast; these clear ~7:1 and ~4.6:1 for Ramesh-ji in sunlight.
   static const Color ink = Color(0xFF141715); // near-black
-  static const Color inkMuted = Color(0xFF6E7B72);
-  static const Color inkFaint = Color(0xFFA0ADA4);
+  static const Color inkMuted = Color(0xFF4E5A53); // ~7:1
+  static const Color inkFaint = Color(0xFF6B7770); // ~4.6:1
 
   // Focal + CTA
   static const Color focal = Color(0xFFE7EF5E); // vibrant lime-yellow hero
@@ -72,7 +73,7 @@ class AppTheme {
           height: height);
 
   static TextStyle label(Color color) => GoogleFonts.plusJakartaSans(
-      fontSize: 11, fontWeight: FontWeight.w700, color: color, letterSpacing: 0.6);
+      fontSize: 13, fontWeight: FontWeight.w700, color: color, letterSpacing: 0.4);
 
   // ---- ThemeData ----------------------------------------------------------
 
@@ -104,6 +105,16 @@ class AppTheme {
         backgroundColor: black,
         foregroundColor: Colors.white,
         elevation: 3,
+      ),
+      // Float snackbars with a bottom margin so they clear the floating nav pill
+      // (screens with their own Scaffold anchored them under it before).
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        insetPadding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+        backgroundColor: ink,
+        contentTextStyle: body(13.5, color: Colors.white),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     );
   }

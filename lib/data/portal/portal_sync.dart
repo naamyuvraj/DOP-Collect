@@ -31,6 +31,36 @@ class ListPrepResult {
   Set<String> missing(Set<String> targets) => targets.difference(selected);
 }
 
+/// Cheque details keyed per account for DOP / Non-DOP cheque submission.
+class ChequeInfo {
+  final String chequeNo;
+  final String bankAccount; // bank a/c number printed on the cheque
+  final String bankName;
+  const ChequeInfo(
+      {required this.chequeNo, required this.bankAccount, this.bankName = ''});
+}
+
+/// Outcome of keying installments on the selected-accounts screen. [saved] rows
+/// reached Modified=YES; [rebates] is what the portal computed per account.
+class InstallmentFillResult {
+  /// How many rows that *needed* explicit keying reached Modified=YES.
+  final int saved;
+
+  /// How many rows needed explicit keying (advance >1 installment, or cheque).
+  /// Single-installment cash rows are NOT counted — the portal pays them at its
+  /// default of 1, so [total] == 0 is a perfectly successful all-single list.
+  final int total;
+  final Map<String, ({int rebate, int defaultFee})> rebates;
+  final String? error;
+  const InstallmentFillResult(this.saved, this.total,
+      {this.rebates = const {}, this.error});
+
+  /// True when every row that needed keying got keyed (and no error). A list
+  /// with nothing to key ([total] == 0) is ok by definition.
+  bool get ok => error == null && saved >= total;
+  bool get allSaved => total > 0 && saved >= total;
+}
+
 /// Drives a logged-in WebView to the "Agent Inquire and Update" account list
 /// (Finacle `AgentRDActSummaryAllListing`) and reads every RD account.
 ///
@@ -140,17 +170,7 @@ class PortalSyncEngine {
       // complete before we start listening.
       _pageLoad = Completer<void>();
 
-      // Prefer the Enquire link by its stable name attribute (exact from the
-      // portal DOM), then by visible text…
-      var clicked =
-          await _clickSelector('a[name*="Enquire"], a[id*="Enquire"]');
-      clicked = clicked ||
-          await _clickLinkByText(const [
-            'agent enquire & update',
-            'enquire & update',
-            'enquire and update',
-            'update screen',
-          ]);
+      var clicked = await _clickEnquireLink();
       // …otherwise open the Accounts menu (stable id) to reveal it.
       clicked = clicked ||
           await _clickSelector(
@@ -160,12 +180,42 @@ class PortalSyncEngine {
         _pageLoad = null;
         break;
       }
-      await _pageLoad!.future
-          .timeout(stepTimeout, onTimeout: () => _pageLoad = null);
-      await _settle();
-      if (await _isSessionExpired()) return false;
+
+      // The "Agent Enquire & Update Screen" step is the slow one: the portal can
+      // silently drop the click, or the session can lapse, while we wait. So
+      // rather than blocking for the whole timeout, wait in ~11s slices and
+      // AUTO-CLICK the link again each slice it's still loading.
+      const slice = Duration(seconds: 11);
+      final tries = (stepTimeout.inSeconds ~/ slice.inSeconds).clamp(1, 5);
+      for (var t = 0; t < tries; t++) {
+        await _awaitLoad(slice);
+        await _settle();
+        if (await _onListPage()) return true;
+        if (await _isSessionExpired()) return false;
+        // Still not there — nudge the Enquire link again and wait another slice.
+        _pageLoad = Completer<void>();
+        if (!await _clickEnquireLink()) {
+          _pageLoad = null;
+          break;
+        }
+      }
     }
     return _onListPage();
+  }
+
+  /// Click the "Agent Enquire & Update Screen" link — by its stable name/id
+  /// first (exact from the portal DOM), then by visible text. Returns true if
+  /// something was clicked.
+  Future<bool> _clickEnquireLink() async {
+    var c = await _clickSelector('a[name*="Enquire"], a[id*="Enquire"]');
+    c = c ||
+        await _clickLinkByText(const [
+          'agent enquire & update',
+          'enquire & update',
+          'enquire and update',
+          'update screen',
+        ]);
+    return c;
   }
 
   /// Click the first element matching a CSS selector. Returns true if one was
@@ -548,11 +598,19 @@ class PortalSyncEngine {
     return true;
   }
 
-  /// Walk every list page, tick the lot's accounts (mode set on each page so it
-  /// survives the reloads), then Save. Stops early once all are found.
+  /// Tick the lot's accounts across the portal pages (mode set on each page so
+  /// it survives the reloads), then Save.
+  ///
+  /// FAST PATH: when [serialByAccount] is given (each account's 1-based position
+  /// from the last sync, 10 rows/page), we jump straight to the page holding
+  /// each account instead of scanning all ~47 pages. A full sequential scan
+  /// still runs for anything the fast path didn't find (unknown serial, or the
+  /// portal list changed since sync), so an account is never silently skipped.
+  /// Selections persist server-side across navigation, so order doesn't matter.
   Future<ListPrepResult> prepareList({
     required Set<String> accountNumbers,
     required String mode,
+    Map<String, int>? serialByAccount,
     void Function(int page, int total, int selected)? onProgress,
     Duration pageTimeout = const Duration(seconds: 60),
   }) async {
@@ -570,16 +628,43 @@ class PortalSyncEngine {
 
     final total = totalPages(await currentPageHtml());
     final found = <String>{};
-    for (var page = 1; page <= total; page++) {
-      await selectPayMode(mode);
-      found.addAll(await _selectMatchingOnPage(accountNumbers));
-      onProgress?.call(page, total, found.length);
-      if (found.length >= accountNumbers.length) break;
-      if (page == total) break;
-      if (!await _clickNextAndWait(pageTimeout)) break;
-      if (await _isSessionExpired()) {
-        return ListPrepResult(found, accountNumbers.length,
-            error: 'Session expired at page $page — selected ${found.length}.');
+
+    // --- Fast path: direct page jumps using the recorded serials -----------
+    if (serialByAccount != null) {
+      final byPage = <int, Set<String>>{};
+      for (final a in accountNumbers) {
+        final s = serialByAccount[a] ?? 0;
+        if (s <= 0) continue;
+        final page = (((s - 1) ~/ 10) + 1).clamp(1, total);
+        byPage.putIfAbsent(page, () => <String>{}).add(a);
+      }
+      for (final page in byPage.keys.toList()..sort()) {
+        if (!await _gotoPage(page, pageTimeout)) break;
+        await selectPayMode(mode);
+        found.addAll(await _selectMatchingOnPage(byPage[page]!));
+        onProgress?.call(page, total, found.length);
+        if (await _isSessionExpired()) {
+          return ListPrepResult(found, accountNumbers.length,
+              error: 'Session expired — selected ${found.length}.');
+        }
+      }
+    }
+
+    // --- Correctness net: sequential scan for anything still missing --------
+    final remaining = accountNumbers.difference(found);
+    if (remaining.isNotEmpty) {
+      await _gotoPage(1, pageTimeout); // reset to the top (no-op if already there)
+      for (var page = 1; page <= total; page++) {
+        await selectPayMode(mode);
+        found.addAll(await _selectMatchingOnPage(remaining));
+        onProgress?.call(page, total, found.length);
+        if (found.length >= accountNumbers.length) break;
+        if (page == total) break;
+        if (!await _clickNextAndWait(pageTimeout)) break;
+        if (await _isSessionExpired()) {
+          return ListPrepResult(found, accountNumbers.length,
+              error: 'Session expired at page $page — selected ${found.length}.');
+        }
       }
     }
 
@@ -587,6 +672,297 @@ class PortalSyncEngine {
     final saved = await saveSelection(pageTimeout);
     return ListPrepResult(found, accountNumbers.length,
         saved: saved, error: saved ? null : 'Could not click Save on the portal.');
+  }
+
+  // --- Installment entry (step 6) ------------------------------------------
+  // After prepareList() Saves, the portal shows the "selected accounts" screen.
+  // For each row we: select it, key the installment count (+ cheque fields),
+  // click "Get Rebate & Default Fee", then Save — so its Modified flag flips to
+  // YES. This ONLY keys + saves records; it never pays. Money (Pay All) stays a
+  // deliberate, agent-tapped action, and the app just reads the reference after.
+  //
+  // Built against a captured static page and NOT yet verified against the live
+  // portal — the first real run must be watched on-device.
+
+  /// Per-account cheque details for DOP / Non-DOP cheque modes.
+  /// Selectors (installment screen, form `CustomAgentRDAccountFG`):
+  ///   row radio        input[name="…SELECTED_INDEX"][value=i]
+  ///   installments     input[name="…RD_INSTALLMENT_NO"]
+  ///   cheque no.       input[name="…RD_CHEQUE_NO"]
+  ///   bank a/c on chq  input[name="…RD_ACCOUNT_NUMBER_FOR_PAYMENT"]
+  ///   bank name        input[name="…BANK_NAME_RDI"]
+  ///   rebate/default   Action.CALCULATE_REBATE  ·  save row: Action.ADD_TO_LIST
+  ///   per-row display  #HREF_…ACCOUNT_NUMBER_ARRAY[i] / …MODIFIED_ARRAY[i]
+
+  /// Are we on the selected-accounts / installment-entry screen?
+  Future<bool> onInstallmentScreen() async {
+    final n = await _installmentRowCount();
+    return n > 0;
+  }
+
+  Future<int> _installmentRowCount() async {
+    final r = await controller.runJavaScriptReturningResult(
+        "document.querySelectorAll('input[name=\"CustomAgentRDAccountFG.SELECTED_INDEX\"]').length");
+    return int.tryParse(_unwrap(r).replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
+  }
+
+  Future<String> _installmentRowAccount(int i) async {
+    final js = '''
+      (function(){
+        var el=document.querySelector('[id*="ACCOUNT_NUMBER_ARRAY[$i]"]');
+        return el ? (el.textContent||'').replace(/\\D/g,'') : '';
+      })();
+    ''';
+    return _unwrap(await controller.runJavaScriptReturningResult(js));
+  }
+
+
+  Future<void> _selectInstallmentRow(int i, Duration timeout) async {
+    _pageLoad = Completer<void>();
+    final ok = _unwrap(await controller.runJavaScriptReturningResult('''
+      (function(){
+        var r=document.querySelector(
+          'input[name="CustomAgentRDAccountFG.SELECTED_INDEX"][value="$i"]');
+        if(!r) return 'false';
+        if(!r.checked){ r.click(); }
+        r.dispatchEvent(new Event('change',{bubbles:true}));
+        return 'true';
+      })();
+    '''));
+    // Selecting a row may or may not round-trip; wait briefly either way.
+    if (ok.contains('true')) {
+      await _awaitLoad(const Duration(seconds: 8));
+    } else {
+      _pageLoad = null;
+    }
+    await _settle();
+  }
+
+  Future<void> _fillInstallmentFields(
+      int installments, ChequeInfo? cheque) async {
+    final chq = cheque == null
+        ? ''
+        : '''
+        set('CustomAgentRDAccountFG.RD_CHEQUE_NO', ${jsonEncode(cheque.chequeNo)});
+        set('CustomAgentRDAccountFG.RD_ACCOUNT_NUMBER_FOR_PAYMENT', ${jsonEncode(cheque.bankAccount)});
+        set('CustomAgentRDAccountFG.BANK_NAME_RDI', ${jsonEncode(cheque.bankName)});
+      ''';
+    await controller.runJavaScript('''
+      (function(){
+        function set(name,val){
+          var el=document.querySelector('input[name="'+name+'"]');
+          if(!el) return;
+          el.value=val;
+          ['input','change','keyup','blur'].forEach(function(t){
+            el.dispatchEvent(new Event(t,{bubbles:true}));});
+        }
+        set('CustomAgentRDAccountFG.RD_INSTALLMENT_NO', '${installments.clamp(1, 999)}');
+        $chq
+      })();
+    ''');
+  }
+
+  /// Click a Finacle Action.* submit and wait for the reload.
+  Future<bool> _clickActionAndWait(String actionName, Duration timeout) async {
+    _pageLoad = Completer<void>();
+    final clicked = _unwrap(await controller.runJavaScriptReturningResult('''
+      (function(){
+        var b=document.querySelector('input[name=${jsonEncode(actionName)}]');
+        if(!b || b.disabled) return 'false';
+        b.click(); return 'true';
+      })();
+    '''));
+    if (!clicked.contains('true')) {
+      _pageLoad = null;
+      return false;
+    }
+    await _awaitLoad(timeout);
+    await _settle();
+    return true;
+  }
+
+  /// The set of account numbers currently listed on the installment screen —
+  /// for verifying (before paying) that exactly the list's accounts are there.
+  Future<Set<String>> installmentScreenAccounts() async {
+    const js = '''
+      (function(){
+        var out=[];
+        var accs=document.querySelectorAll('[id*="ACCOUNT_NUMBER_ARRAY["]');
+        for(var i=0;i<accs.length;i++){
+          var num=(accs[i].textContent||'').replace(/\\D/g,'');
+          if(num) out.push(num);
+        }
+        return JSON.stringify(out);
+      })();
+    ''';
+    final raw = _unwrap(await controller.runJavaScriptReturningResult(js));
+    try {
+      return (jsonDecode(raw) as List).cast<String>().toSet();
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// The portal array index of the first row whose account is in [targets] and
+  /// is NOT yet Modified=YES, or -1 if all targets are done. Reading the account
+  /// off the row each time means row reordering after a Save can never misalign
+  /// an installment onto the wrong customer.
+  Future<int> _firstUnmodifiedTargetRow(Set<String> targets) async {
+    final js = '''
+      (function(){
+        var targets=${jsonEncode(targets.toList())};
+        var accs=document.querySelectorAll('[id*="ACCOUNT_NUMBER_ARRAY["]');
+        for(var i=0;i<accs.length;i++){
+          var m=accs[i].id.match(/\\[(\\d+)\\]/); if(!m) continue;
+          var n=m[1];
+          var num=(accs[i].textContent||'').replace(/\\D/g,'');
+          if(targets.indexOf(num)===-1) continue;
+          var mod=document.querySelector('[id*="MODIFIED_ARRAY['+n+']"]');
+          var yes=mod && (mod.textContent||'').trim().toUpperCase()==='YES';
+          if(!yes) return n;
+        }
+        return '-1';
+      })();
+    ''';
+    return int.tryParse(
+            _unwrap(await controller.runJavaScriptReturningResult(js))) ??
+        -1;
+  }
+
+  /// How many of [targets] are now Modified=YES (paid-ready).
+  Future<int> _countModifiedTargets(Set<String> targets) async {
+    final js = '''
+      (function(){
+        var targets=${jsonEncode(targets.toList())};
+        var accs=document.querySelectorAll('[id*="ACCOUNT_NUMBER_ARRAY["]');
+        var c=0;
+        for(var i=0;i<accs.length;i++){
+          var m=accs[i].id.match(/\\[(\\d+)\\]/); if(!m) continue;
+          var n=m[1];
+          var num=(accs[i].textContent||'').replace(/\\D/g,'');
+          if(targets.indexOf(num)===-1) continue;
+          var mod=document.querySelector('[id*="MODIFIED_ARRAY['+n+']"]');
+          if(mod && (mod.textContent||'').trim().toUpperCase()==='YES') c++;
+        }
+        return String(c);
+      })();
+    ''';
+    return int.tryParse(
+            _unwrap(await controller.runJavaScriptReturningResult(js))) ??
+        0;
+  }
+
+  /// Prepare the installment screen for payment. "Pay All Saved Installments"
+  /// already pays every selected account as ONE installment by default, so a
+  /// plain single-installment cash row needs NO keying at all. This only keys
+  /// the rows that genuinely differ from that default:
+  ///   * advance deposits (>1 installment) — so the rebate is calculated, and
+  ///   * cheque rows — the cheque number/bank must be entered.
+  /// Each such row is keyed with Get-Rebate-&-Default + Save so it becomes
+  /// Modified=YES. NEVER pays. Robust to row reordering: it repeatedly finds the
+  /// next un-keyed target row, reads THAT row's account off the page, and keys
+  /// that account's own installment — so a count can't land on the wrong
+  /// customer. Returns how many of the rows-that-needed-keying got saved
+  /// ([InstallmentFillResult.total] is that count, not the whole list).
+  Future<InstallmentFillResult> enterInstallments({
+    required Map<String, int> installmentsByAccount,
+    Map<String, ChequeInfo>? chequeByAccount,
+    void Function(int done, int total)? onProgress,
+    bool Function()? shouldStop,
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    if (!await onInstallmentScreen()) {
+      return const InstallmentFillResult(0, 0,
+          error: 'Not on the installment screen — run Prepare + Save first.');
+    }
+    // Only these rows need explicit keying; every other row rides the portal's
+    // default of one installment when Pay All runs.
+    bool needsKey(String acc) {
+      final n = installmentsByAccount[acc] ?? 1;
+      final chqNo = chequeByAccount?[acc]?.chequeNo ?? '';
+      return n > 1 || chqNo.isNotEmpty;
+    }
+
+    final targets = installmentsByAccount.keys.where(needsKey).toSet();
+    final rebates = <String, ({int rebate, int defaultFee})>{};
+    if (targets.isEmpty) {
+      // Nothing to key: an all-single cash list. Pay All handles it as-is.
+      return const InstallmentFillResult(0, 0);
+    }
+    onProgress?.call(0, targets.length);
+
+    final maxIterations = targets.length * 3 + 5; // guard against a stuck loop
+    var guard = 0;
+
+    while (guard++ < maxIterations) {
+      if (shouldStop?.call() ?? false) break;
+      final idx = await _firstUnmodifiedTargetRow(targets);
+      if (idx < 0) break; // all targets are Modified=YES — done
+      final acc = await _installmentRowAccount(idx);
+      if (acc.isEmpty) break; // shouldn't happen; stop rather than mis-key
+      await _selectInstallmentRow(idx, timeout);
+      await _fillInstallmentFields(
+          installmentsByAccount[acc] ?? 1, chequeByAccount?[acc]);
+      await _clickActionAndWait('Action.CALCULATE_REBATE', timeout);
+      rebates[acc] = (
+        rebate: await _rowIntArray('RD_REBATE_ARRAY', idx),
+        defaultFee: await _rowIntArray('RD_DEFAUT_FEE_ARRAY', idx),
+      );
+      await _clickActionAndWait('Action.ADD_TO_LIST', timeout);
+      onProgress?.call(await _countModifiedTargets(targets), targets.length);
+      if (await _isSessionExpired()) {
+        return InstallmentFillResult(
+            await _countModifiedTargets(targets), targets.length,
+            rebates: rebates, error: 'Session expired.');
+      }
+    }
+    final saved = await _countModifiedTargets(targets);
+    return InstallmentFillResult(saved, targets.length, rebates: rebates);
+  }
+
+  Future<int> _rowIntArray(String array, int i) async {
+    final js = '''
+      (function(){
+        var el=document.querySelector('[id*="$array[$i]"]');
+        return el ? (el.textContent||'').replace(/[^0-9]/g,'') : '';
+      })();
+    ''';
+    final s = _unwrap(await controller.runJavaScriptReturningResult(js));
+    return int.tryParse(s) ?? 0;
+  }
+
+  /// Read the reference (C…/DC…/NDC… + digits) off the current portal page.
+  Future<String?> readReferenceIfPresent() async =>
+      parseReference(await currentPageHtml());
+
+  /// Click "Pay All Saved Installments" — this COMMITS the payment on the portal
+  /// and cannot be undone — then read back the generated reference. The caller
+  /// MUST confirm the amount with the agent before calling this. Returns the
+  /// reference, or null if the click failed / no reference appeared (e.g. the
+  /// portal is waiting on its own confirm step — fall back to manual capture).
+  Future<String?> payAllAndCapture(
+      {Duration timeout = const Duration(seconds: 90)}) async {
+    // A reference already on screen means it was paid — don't double-pay.
+    final existing = await readReferenceIfPresent();
+    if (existing != null) return existing;
+    final ok =
+        await _clickActionAndWait('Action.PAY_ALL_SAVED_INSTALLMENTS', timeout);
+    if (!ok) return null;
+    // The confirmation/reference page can take an extra reload to settle.
+    for (var i = 0; i < 6; i++) {
+      final ref = await readReferenceIfPresent();
+      if (ref != null && ref.isNotEmpty) return ref;
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    return null;
+  }
+
+  /// Pull a DOP list reference (mode prefix C / DC / NDC + ≥6 digits) out of a
+  /// page. Longest-prefix wins so "NDC…" isn't clipped to "C…". Pure + testable.
+  static String? parseReference(String html) {
+    final m =
+        RegExp(r'(?<![A-Z0-9])(NDC|DC|C)(\d{6,})').firstMatch(html);
+    return m == null ? null : '${m.group(1)}${m.group(2)}';
   }
 
   // --- Deep Sync (per-account detail crawl) --------------------------------

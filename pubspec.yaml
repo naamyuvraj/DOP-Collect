@@ -10,8 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
-  # Local, offline-first storage
-  sqflite: ^2.3.3
+  # Local, offline-first storage — SQLCipher (AES-256) encrypted at rest.
+  sqflite_sqlcipher: ^3.1.0
   path: ^1.9.0
   # Date formatting (09-Aug-2026, IST etc.)
   intl: ^0.19.0

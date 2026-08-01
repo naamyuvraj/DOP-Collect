@@ -1,12 +1,11 @@
+import '../services/supabase_config.dart';
+
 /// Central config for the in-app AI assistant.
 ///
-/// SECURITY: real Groq keys must NEVER be committed. They are injected at build
-/// time from the git-ignored `env.json`:
-///   shorebird release android ... --dart-define-from-file=env.json ...
-///   shorebird patch   android ... --dart-define-from-file=env.json ...
-///   flutter build apk            --dart-define-from-file=env.json ...
-/// The placeholder defaults below keep a clean clone compiling (assistant cloud
-/// tier just stays off until keys are supplied). See env.json.example.
+/// SECURITY: Groq keys now live server-side in the Supabase `groq` edge function
+/// (managed from the admin dashboard's `app_keys` table). The app ships with no
+/// keys — the local placeholders below are only a dev/compile fallback. See
+/// supabase/functions/groq.
 class AssistantConfig {
   /// 4 Groq free-tier API keys. Rotated by [GroqClient] on rate-limit / auth /
   /// server errors so one dead or throttled key never blocks an answer.
@@ -44,8 +43,10 @@ class AssistantConfig {
   /// Max rows returned to the UI / injected as LIMIT into generated SQL.
   static const int maxRows = 200;
 
-  /// True once at least one real key has been supplied (so the UI can hide the
-  /// online path and stay purely offline until keys are added).
+  /// Cloud is reachable if the Supabase proxy is configured (keys live there)
+  /// OR local Groq keys are present (dev / fallback). With the proxy the app
+  /// ships with no Groq keys at all.
   static bool get hasCloudKeys =>
+      SupabaseConfig.configured ||
       groqKeys.any((k) => k.isNotEmpty && !k.startsWith('gsk_REPLACE'));
 }

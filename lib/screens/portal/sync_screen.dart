@@ -1,16 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../data/account_repository.dart';
+import '../../data/app_settings.dart';
 import '../../data/credentials.dart';
+import '../../data/lot_repository.dart';
 import '../../data/portal/agent_detail_parser.dart';
 import '../../data/portal/captcha_solver.dart';
 import '../../data/portal/portal.dart';
+import '../../models/lot.dart';
 import '../../services/analytics.dart';
 import '../../data/portal/portal_sync.dart';
 import '../../theme/app_theme.dart';
@@ -27,8 +28,28 @@ class SyncScreen extends StatefulWidget {
     this.prepareMode,
     this.detailAccount,
     this.detailSerial,
+    this.deepSync = false,
+    this.submitLot,
+    this.batchLots,
+    this.lotStore,
   });
   final AccountRepository repo;
+
+  /// Full submit flow: after Prepare + Save, auto-key each account's
+  /// installments (+ rebate/default + Save per record). Stops before Pay All —
+  /// the agent reviews and taps "Pay All Saved Installments" himself, then the
+  /// app captures the reference. When set, pops with the captured reference
+  /// (String) or null.
+  final Lot? submitLot;
+  bool get isSubmit => submitLot != null;
+
+  /// Batch submit: process every one of these lists in a SINGLE portal session
+  /// (prepare → key → confirm → pay → capture → next). Each list's payment is
+  /// still confirmed individually. [batchLots] needs [lotStore] to save the
+  /// captured reference onto each list as it completes.
+  final List<Lot>? batchLots;
+  final LotRepository? lotStore;
+  bool get isBatch => batchLots != null && batchLots!.isNotEmpty;
 
   /// If set, fetch this one account's exact detail (last-deposit date, total
   /// deposit, pending/default installments) and save it.
@@ -41,8 +62,13 @@ class SyncScreen extends StatefulWidget {
   final Set<String>? prepareAccounts;
   final String? prepareMode; // 'C' | 'DC' | 'NDC'
 
+  /// Deep Sync: after login, crawl the per-account detail pages to fill exact
+  /// last-deposit dates + totals for every account still missing them.
+  final bool deepSync;
+
   bool get isPrepare => prepareAccounts != null;
   bool get isDetail => detailAccount != null;
+  bool get isDeep => deepSync;
 
   // Desktop Chrome UA — makes the Finacle portal render its full desktop pages.
   static const _desktopUa =
@@ -63,6 +89,7 @@ class _SyncScreenState extends State<SyncScreen> {
   bool _stopFill = false;
   bool _autoStarted = false;
   bool _solvingCaptcha = false;
+  bool _awaitingRef = false; // installments keyed; waiting for agent's Pay All
   String? _progress;
 
   @override
@@ -221,12 +248,14 @@ class _SyncScreenState extends State<SyncScreen> {
         return;
       }
       if (!data.startsWith('data:')) {
-        if (manual) _snack('No captcha image found · $dbg');
+        if (manual) _snack('Please type the captcha shown, then tap Login.');
         return;
       }
       final guess = await _captcha.solveFromDataUrl(data);
       if (guess == null || guess.isEmpty) {
-        if (manual) _snack('Captcha unreadable — type it · $dbg');
+        if (manual) {
+          _snack("Couldn't read the captcha — type it in, then tap Login.");
+        }
         return;
       }
       final ok = _decode(
@@ -235,15 +264,21 @@ class _SyncScreenState extends State<SyncScreen> {
         if (manual) _snack('Captcha box not found to fill · $dbg');
         return;
       }
-      // Auto-submit. Capped at 2 tries per screen so a bad OCR read can never
-      // burn through the portal's 10-attempt lockout — after that it's manual.
+      // Auto-submit. The portal keeps the Login button disabled for a moment
+      // after the captcha field is filled (it validates on input), so clicking
+      // instantly used to no-op and the agent had to tap Login himself. Give it
+      // a beat and retry a few times; only a REAL submit counts toward the
+      // 2-per-screen lockout guard (a failed find is never burned).
       if (_loginClicks < 2) {
-        _loginClicks++;
-        final clicked =
-            _decode(await _controller.runJavaScriptReturningResult(_loginJs));
-        if (clicked.contains('true')) {
-          if (mounted) _snack('Captcha $guess — logging in…');
-          return;
+        for (var attempt = 0; attempt < 3; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 450));
+          final clicked =
+              _decode(await _controller.runJavaScriptReturningResult(_loginJs));
+          if (clicked.contains('true')) {
+            _loginClicks++;
+            if (mounted) _snack('Captcha $guess — logging in…');
+            return;
+          }
         }
       }
       if (mounted) _snack('Captcha filled: $guess — tap Login.');
@@ -299,14 +334,147 @@ class _SyncScreenState extends State<SyncScreen> {
     final authed = await _engine.isAuthenticated();
     if (authed && !_busy && !_autoStarted) {
       _autoStarted = true;
-      if (widget.isDetail) {
+      if (widget.isBatch) {
+        _submitBatch();
+      } else if (widget.isDetail) {
         _fetchDetail();
       } else if (widget.isPrepare) {
         _prepare();
+      } else if (widget.isDeep) {
+        _deepSync();
       } else {
         _sync();
       }
     }
+  }
+
+  /// Mode string ('Cash'/'DOP Cheque'/'Non DOP Cheque') → portal code.
+  static String _modeCode(String mode) {
+    final m = mode.toLowerCase();
+    if (m.contains('non')) return 'NDC';
+    if (m.contains('cheque')) return 'DC';
+    return 'C';
+  }
+
+  /// Batch: submit every unsubmitted list in ONE portal session. For each list:
+  /// prepare (tick + Save, serial-jump) → key installments → confirm the amount
+  /// → Pay All → capture the reference (saved onto the list) → back to the
+  /// account list for the next. Each payment is confirmed individually; a
+  /// declined or failed list is skipped, not retried, and the batch continues.
+  Future<void> _submitBatch() async {
+    final lots = widget.batchLots!;
+    var paid = 0, skipped = 0;
+    final serials = {
+      for (final a in await widget.repo.all())
+        if (a.serial > 0) a.accountNumber: a.serial
+    };
+
+    for (var i = 0; i < lots.length; i++) {
+      if (!mounted) return;
+      final lot = lots[i];
+      if (lot.isSubmitted) continue;
+      final label = 'List ${i + 1} of ${lots.length}';
+
+      // 1) Prepare: tick this list's accounts + Save.
+      setState(() {
+        _busy = true;
+        _progress = '$label · selecting accounts…';
+      });
+      final accounts = lot.items.map((e) => e.accountNumber).toSet();
+      final prep = await _engine.prepareList(
+        accountNumbers: accounts,
+        mode: _modeCode(lot.mode),
+        serialByAccount: serials,
+        onProgress: (page, total, sel) =>
+            setState(() => _progress = '$label · page $page · $sel selected'),
+      );
+      if (!mounted) return;
+      if (!prep.saved) {
+        skipped++;
+        _snack('$label skipped (${prep.error ?? 'could not save'}).');
+        await _engine.navigateToAccountList();
+        continue;
+      }
+
+      // 2) Key only the rows that differ from "one installment" — advance
+      // deposits (added more than once) and cheque rows. The rest ride Pay
+      // All's default of 1. An account listed twice = two installments.
+      final isCheque = lot.mode.toLowerCase().contains('cheque');
+      final fill = await _engine.enterInstallments(
+        installmentsByAccount: _installmentsFor(lot),
+        chequeByAccount: isCheque ? _chequesFor(lot) : null,
+        shouldStop: () => !mounted,
+        onProgress: (done, total) => setState(
+            () => _progress = '$label · keyed $done of $total advance/cheque…'),
+      );
+      if (!mounted) return;
+      setState(() => _busy = false);
+      if (!fill.ok) {
+        skipped++;
+        _snack('$label skipped (could not key installments).');
+        await _engine.navigateToAccountList();
+        continue;
+      }
+
+      // 3) Automated audit — pay ONLY if this list's accounts all match the
+      // portal screen and are keyed. No per-list tap.
+      final problem = await _verifySelection(lot, fill);
+      if (!mounted) return;
+      if (problem != null) {
+        skipped++;
+        _snack('$label held ($problem) — not paid.');
+        await _engine.navigateToAccountList();
+        continue;
+      }
+
+      // 4) Pay + capture the reference, save it onto the list.
+      setState(() {
+        _busy = true;
+        _progress = '$label · paying…';
+      });
+      String? ref;
+      try {
+        ref = await _engine.payAllAndCapture();
+      } catch (_) {
+        ref = null;
+      }
+      if (!mounted) return;
+      final okRef = ref != null && ref.isNotEmpty;
+      if (okRef) {
+        await widget.lotStore?.update(
+            lot.copyWith(referenceNumber: ref, submittedAt: DateTime.now()));
+        paid++;
+      } else {
+        skipped++;
+        _snack('$label paid? no reference captured — check the portal.');
+      }
+      unawaited(Analytics.track('list_submitted', {
+        'accounts': lot.count,
+        'amount': lot.totalAmount,
+        'mode': _modeCode(lot.mode),
+        'batch': true,
+        'ok': okRef,
+      }));
+
+      // 5) Back to the account list for the next one.
+      if (i < lots.length - 1) await _engine.navigateToAccountList();
+    }
+
+    if (!mounted) return;
+    setState(() => _busy = false);
+    unawaited(Analytics.track('portal_batch',
+        {'lists': lots.length, 'paid': paid, 'skipped': skipped}));
+    _snack('Done — $paid submitted${skipped > 0 ? ', $skipped skipped' : ''}.');
+    Navigator.of(context).pop(true);
+  }
+
+
+  /// Deep Sync mission: fill exact per-account detail (last-deposit date etc.)
+  /// for accounts that don't have it yet. Bounded + resumable across runs.
+  Future<void> _deepSync() async {
+    await _fillDetails();
+    unawaited(Analytics.track('deep_sync'));
+    if (mounted) Navigator.of(context).pop(true);
   }
 
   /// After the fast list sync, fill in the exact per-account figures (real
@@ -419,11 +587,18 @@ class _SyncScreenState extends State<SyncScreen> {
       _progress = 'Opening account list…';
     });
     try {
+      // Use each account's serial from the last sync to jump straight to its
+      // page instead of scanning all of them.
+      final serials = {
+        for (final a in await widget.repo.all())
+          if (a.serial > 0) a.accountNumber: a.serial
+      };
       final res = await _engine.prepareList(
         accountNumbers: widget.prepareAccounts!,
         mode: widget.prepareMode ?? 'C',
+        serialByAccount: serials,
         onProgress: (page, total, selected) => setState(
-            () => _progress = 'Page $page of $total · $selected selected'),
+            () => _progress = 'Page $page · $selected selected'),
       );
       if (!mounted) return;
       if (res.selected.isEmpty) {
@@ -433,8 +608,14 @@ class _SyncScreenState extends State<SyncScreen> {
       final miss = res.missing(widget.prepareAccounts!);
       final missNote = miss.isEmpty ? '' : ' (${miss.length} not found)';
       if (res.saved) {
+        if (widget.isSubmit) {
+          // Busy overlay off; the keying step drives its own progress + Stop.
+          setState(() => _busy = false);
+          await _keyInstallmentsThenAwaitPayAll();
+          return;
+        }
         _snack('Selected & saved ${res.selected.length}$missNote. Now enter '
-            'installments + ASLAAS and tap Pay All on the portal.');
+            'installments + Pay All on the portal.');
       } else {
         _snack('Selected ${res.selected.length}$missNote. '
             '${res.error ?? 'Tap Save on the portal.'}');
@@ -444,6 +625,194 @@ class _SyncScreenState extends State<SyncScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Submit flow (never pays on its own): key only the advance (>1) and cheque
+  /// rows (single-installment rows ride Pay All's default of 1), audit that the
+  /// portal shows exactly this list's accounts, then auto-pay if it's clean —
+  /// otherwise hand the WebView back to the agent to review and tap "Pay All
+  /// Saved Installments" himself. The app captures the reference either way.
+  Future<void> _keyInstallmentsThenAwaitPayAll() async {
+    final lot = widget.submitLot!;
+    final isCheque = lot.mode.toLowerCase().contains('cheque');
+    final installments = _installmentsFor(lot);
+    final cheques = isCheque ? _chequesFor(lot) : null;
+
+    _stopFill = false;
+    setState(() {
+      _filling = true;
+      _progress = 'Keying installments…';
+    });
+    InstallmentFillResult fill;
+    try {
+      fill = await _engine.enterInstallments(
+        installmentsByAccount: installments,
+        chequeByAccount: cheques,
+        shouldStop: () => _stopFill || !mounted,
+        onProgress: (done, total) => setState(
+            () => _progress = 'Keyed $done of $total installments…'),
+      );
+    } catch (e) {
+      fill = InstallmentFillResult(0, 0, error: '$e');
+    }
+    if (!mounted) return;
+    setState(() => _filling = false);
+    if (!fill.ok) {
+      _snack('Could not key installments${fill.error == null ? '' : ' · ${fill.error}'}. '
+          'Enter them on the portal instead.');
+      return;
+    }
+    // Automated audit (replaces the manual confirm): pay ONLY if every one of
+    // the list's accounts is on the payment screen — no missing, no extra — and
+    // all are keyed. No extra tap for the agent.
+    final problem = await _verifySelection(lot, fill);
+    if (!mounted) return;
+    if (problem != null) {
+      // Something's off — do NOT pay. Hand to the agent to review + pay/capture.
+      setState(() {
+        _awaitingRef = true;
+        _progress = 'Not paid — $problem. Check the portal, pay, then '
+            '"Capture reference".';
+      });
+      _snack('Payment held: $problem.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _progress = 'Verified — paying…';
+    });
+    String? ref;
+    try {
+      ref = await _engine.payAllAndCapture();
+    } catch (_) {
+      ref = null;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (ref != null && ref.isNotEmpty) {
+      unawaited(Analytics.track('list_submitted', {
+        'accounts': lot.count,
+        'amount': lot.totalAmount,
+        'mode': _modeCode(lot.mode),
+        'batch': false,
+        'ok': true,
+      }));
+      Navigator.of(context).pop(ref); // lot_detail saves it → onto the PDF
+      return;
+    }
+    // Paid the click, but no reference yet (portal may want its own confirm) →
+    // let the agent complete it + capture.
+    setState(() {
+      _awaitingRef = true;
+      _progress = 'Tapped Pay All. If the portal shows a confirm step, '
+          'complete it, then tap "Capture reference".';
+    });
+  }
+
+  /// Installments to key, per account. An account that appears more than once
+  /// in the list (added twice) becomes that many installments on its single
+  /// portal row — so it's keyed for the advance rebate rather than paid once.
+  Map<String, int> _installmentsFor(Lot lot) {
+    final m = <String, int>{};
+    for (final it in lot.items) {
+      m[it.accountNumber] = (m[it.accountNumber] ?? 0) + it.installments;
+    }
+    return m;
+  }
+
+  /// Cheque details per account (one cheque per account row).
+  Map<String, ChequeInfo> _chequesFor(Lot lot) => {
+        for (final it in lot.items)
+          it.accountNumber: ChequeInfo(
+              chequeNo: it.chequeNumber ?? '',
+              bankAccount: it.bankAccountNumber ?? ''),
+      };
+
+  /// Pre-pay audit: returns null when it's safe to pay, else a short reason.
+  /// The real safety net is that EXACTLY the list's accounts are on the payment
+  /// screen (single-installment rows are paid at the portal's default, so they
+  /// are intentionally not keyed / not Modified=YES). Only the advance/cheque
+  /// rows had to be keyed, and [fill.ok] confirms those all went through.
+  Future<String?> _verifySelection(Lot lot, InstallmentFillResult fill) async {
+    if (!fill.ok) {
+      return 'only ${fill.saved} of ${fill.total} advance/cheque rows got keyed';
+    }
+    final expected = _installmentsFor(lot).keys.toSet();
+    final onScreen = await _engine.installmentScreenAccounts();
+    if (onScreen.length != expected.length ||
+        !onScreen.containsAll(expected)) {
+      return 'the portal\'s accounts don\'t match this list';
+    }
+    return null;
+  }
+
+  Widget _payAllBanner() {
+    final lot = widget.submitLot!;
+    return Material(
+      elevation: 12,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+            16, 14, 16, MediaQuery.of(context).padding.bottom + 14),
+        color: AppTheme.surface,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.verified_user_outlined,
+                    color: AppTheme.accent, size: 20),
+                const SizedBox(width: 8),
+                Text('Installments keyed', style: AppTheme.display(15)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Review the amounts on the portal. When you are sure, tap '
+              '"Pay All Saved Installments" there yourself — the app never pays '
+              'for you. ${lot.count} account${lot.count == 1 ? '' : 's'} · '
+              '₹${lot.totalAmount} · ${lot.mode}.',
+              style: AppTheme.body(12.5, color: AppTheme.inkMuted, height: 1.35),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.black,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: _captureReference,
+                    child: const Text("I've paid — capture reference"),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                TextButton(
+                  onPressed: () => setState(() => _awaitingRef = false),
+                  child: Text('Skip',
+                      style: AppTheme.body(13, color: AppTheme.inkMuted)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Read the reference off the current portal page after the agent has paid.
+  Future<void> _captureReference() async {
+    final ref = await _engine.readReferenceIfPresent();
+    if (!mounted) return;
+    if (ref == null) {
+      _snack('No reference on screen yet — tap "Pay All Saved Installments" '
+          'on the portal first.');
+      return;
+    }
+    Navigator.of(context).pop(ref); // lot_detail saves it on the Lot
   }
 
   Future<void> _sync() async {
@@ -461,13 +830,15 @@ class _SyncScreenState extends State<SyncScreen> {
         return;
       }
       await widget.repo.replaceAll(result.accounts);
+      await AppSettings.setLastSyncNow();
       unawaited(
           Analytics.track('sync_done', {'accounts': result.accounts.length}));
       if (!mounted) return;
-      _snack(result.error ?? 'Synced ${result.accounts.length} accounts.');
-      // Accounts are safely stored — now top up the exact per-account figures
-      // in the same session. Stoppable, and resumes on the next sync.
-      await _fillDetails();
+      _snack(result.error ??
+          'Synced ${result.accounts.length} accounts. Run Deep Sync for '
+              'last-deposit dates.');
+      // Fast list sync only. Exact per-account figures (last deposit etc.) are
+      // fetched separately via the "Deep Sync" button.
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       _snack('Sync failed: $e');
@@ -519,20 +890,6 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
-  /// Debug: dump the current page HTML so auto-nav can be tuned if it stalls.
-  Future<void> _capture() async {
-    try {
-      final html = await _engine.currentPageHtml();
-      final dir = (await getExternalStorageDirectory()) ??
-          await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/portal_capture.html');
-      await file.writeAsString(html);
-      _snack('Saved page (${html.length} chars) to ${file.path}');
-    } catch (e) {
-      _snack('Capture failed: $e');
-    }
-  }
-
   void _snack(String m) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
@@ -544,9 +901,15 @@ class _SyncScreenState extends State<SyncScreen> {
       appBar: AppBar(
         title: Text(widget.isDetail
             ? 'Account Details'
-            : widget.isPrepare
-                ? 'Prepare List'
-                : 'Sync'),
+            : widget.isBatch
+                ? 'Submit Lists'
+                : widget.isSubmit
+                    ? 'Submit List'
+                    : widget.isPrepare
+                        ? 'Prepare List'
+                        : widget.isDeep
+                            ? 'Deep Sync'
+                            : 'Sync'),
         actions: [
           IconButton(
               tooltip: 'Auto-fill captcha',
@@ -556,10 +919,6 @@ class _SyncScreenState extends State<SyncScreen> {
               tooltip: 'Saved login',
               icon: const Icon(Icons.key_outlined),
               onPressed: _editLogin),
-          IconButton(
-              tooltip: 'Capture page (debug)',
-              icon: const Icon(Icons.bug_report_outlined),
-              onPressed: _capture),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(24),
@@ -570,7 +929,7 @@ class _SyncScreenState extends State<SyncScreen> {
               child: Text(
                 _progress ??
                     'Log in and type the captcha — sync starts automatically.',
-                style: AppTheme.body(11, color: AppTheme.inkMuted),
+                style: AppTheme.body(13, color: AppTheme.inkMuted),
               ),
             ),
           ),
@@ -593,8 +952,11 @@ class _SyncScreenState extends State<SyncScreen> {
                   const SizedBox(height: 4),
                   Text(
                       _filling
-                          ? 'Accounts are already saved — this just adds exact '
-                              'figures. You can stop anytime.'
+                          ? (widget.isSubmit
+                              ? 'Keying installments only — NO payment happens. '
+                                  'You can stop anytime.'
+                              : 'Accounts are already saved — this just adds '
+                                  'exact figures. You can stop anytime.')
                           : 'Keep this screen open',
                       textAlign: TextAlign.center,
                       style: AppTheme.body(11, color: Colors.white70)),
@@ -614,15 +976,44 @@ class _SyncScreenState extends State<SyncScreen> {
                 ],
               ),
             ),
+          // Money step: installments are keyed; the agent taps Pay All on the
+          // portal himself, then we capture the reference. Non-blocking banner
+          // so the WebView stays interactive.
+          if (_awaitingRef)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _payAllBanner(),
+            ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _busy
             ? null
-            : (widget.isPrepare ? _prepare : _sync),
-        icon: Icon(widget.isPrepare ? Icons.playlist_add_check : Icons.sync,
+            : (widget.isBatch
+                ? _submitBatch
+                : widget.isPrepare
+                    ? _prepare
+                    : widget.isDeep
+                        ? _deepSync
+                        : _sync),
+        icon: Icon(
+            widget.isBatch
+                ? Icons.cloud_upload_rounded
+                : widget.isPrepare
+                    ? Icons.playlist_add_check
+                    : widget.isDeep
+                        ? Icons.cloud_download_rounded
+                        : Icons.sync,
             size: 18),
-        label: Text(widget.isPrepare ? 'Prepare' : 'Sync'),
+        label: Text(widget.isBatch
+            ? 'Submit all'
+            : widget.isPrepare
+                ? 'Prepare'
+                : widget.isDeep
+                    ? 'Deep Sync'
+                    : 'Sync'),
       ),
     );
   }
