@@ -29,7 +29,11 @@ class PaywallScreen extends StatefulWidget {
 
 class _PaywallScreenState extends State<PaywallScreen> {
   SubStatus? _s;
-  bool _busy = false;
+  String? _busyPlan; // which plan's button is mid-purchase (per-card, not global)
+
+  /// Checkout can't run until the native Razorpay plugin is wired in a release
+  /// build. Until then the paywall is preview-only.
+  bool get _checkoutReady => Subscription.opener != null;
 
   @override
   void initState() {
@@ -41,7 +45,11 @@ class _PaywallScreenState extends State<PaywallScreen> {
   }
 
   Future<void> _choose(Plan plan) async {
-    setState(() => _busy = true);
+    if (!_checkoutReady) {
+      _snack('Subscriptions open soon — checkout isn\'t enabled in this build.');
+      return;
+    }
+    setState(() => _busyPlan = plan.code);
     try {
       final ok = await Subscription.purchase(plan.code);
       if (!mounted) return;
@@ -53,11 +61,11 @@ class _PaywallScreenState extends State<PaywallScreen> {
         _snack('Payment cancelled.');
       }
     } on CheckoutUnavailable {
-      if (mounted) _snack('Payments are launching soon.');
+      if (mounted) _snack('Subscriptions open soon.');
     } catch (_) {
       if (mounted) _snack('Couldn\'t start payment. Try again.');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _busyPlan = null);
     }
   }
 
@@ -83,6 +91,12 @@ class _PaywallScreenState extends State<PaywallScreen> {
           const SizedBox(height: 4),
           Text('Full access — sync, lists, portal submit and the assistant.',
               style: AppTheme.body(13, color: AppTheme.inkMuted)),
+          if (!_checkoutReady) ...[
+            const SizedBox(height: 8),
+            Text('Paid plans open soon — checkout is being finalised.',
+                style: AppTheme.body(12,
+                    weight: FontWeight.w700, color: AppTheme.amber)),
+          ],
           const SizedBox(height: 14),
           if (plans.isEmpty)
             const Center(
@@ -143,12 +157,16 @@ class _PaywallScreenState extends State<PaywallScreen> {
             SizedBox(
               width: 116,
               child: PushButton(
-                onPressed: _busy ? null : () => _choose(p),
+                onPressed: _busyPlan != null ? null : () => _choose(p),
                 color: AppTheme.black,
                 foreground: Colors.white,
                 radius: 12,
                 expand: false,
-                child: Text(_busy ? '…' : 'Choose'),
+                child: Text(_busyPlan == p.code
+                    ? '…'
+                    : _checkoutReady
+                        ? 'Choose'
+                        : 'Soon'),
               ),
             ),
           ],

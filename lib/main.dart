@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'assistant/assistant_config.dart';
 import 'screens/force_update_screen.dart';
+import 'services/razorpay_checkout.dart';
 import 'services/remote_config.dart';
 import 'services/subscription.dart';
 import 'data/account_repository.dart';
@@ -48,6 +49,7 @@ Future<void> main() async {
   AssistantConfig.cloudEnabled = RemoteConfig.assistantCloud;
   // Subscription entitlement (cached instantly, refreshed in the background).
   // Inert until app_config.payments_enabled is turned on.
+  Subscription.opener = RazorpayCheckout.open; // wire the native checkout sheet
   unawaited(Subscription.init());
 
   // Anonymous analytics: load opt-out (defaulting to the remote-config value for
