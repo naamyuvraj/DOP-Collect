@@ -41,6 +41,12 @@ alter table public.payments add column if not exists agent_id  text;
 alter table public.payments add column if not exists plan_code text;
 alter table public.payments add column if not exists order_id  text;
 
+-- Idempotency: one payment row per Razorpay payment id. Blocks a replayed
+-- signature from stacking free subscription time even under a race (the `pay`
+-- function relies on this insert failing on a duplicate).
+create unique index if not exists uq_payments_razorpay_ref
+  on public.payments (ref) where provider = 'razorpay' and ref is not null;
+
 alter table public.plans         enable row level security;
 alter table public.subscriptions enable row level security;
 -- Plans are public pricing → anon may read. Subscriptions: service role only.

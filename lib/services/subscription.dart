@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/credentials.dart';
+import 'analytics.dart';
 import 'remote_config.dart';
 import 'supabase_config.dart';
 
@@ -84,6 +85,7 @@ class Subscription {
               'apikey': SupabaseConfig.anonKey,
               'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
               'Content-Type': 'application/json',
+              'x-device-id': await Analytics.deviceId(),
             },
             body: jsonEncode(body),
           )
