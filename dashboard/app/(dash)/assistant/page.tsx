@@ -42,9 +42,12 @@ export default function AssistantPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: text }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setMsgs((m) => [...m, { role: "assistant", text: data.error || "Something went wrong.", error: true }]);
+      const data = await res.json().catch(() => ({ error: "The server returned an unreadable response." }));
+      if (data.error || !data.answer) {
+        setMsgs((m) => [
+          ...m,
+          { role: "assistant", text: data.error || "No answer was produced.", error: true },
+        ]);
       } else {
         setMsgs((m) => [
           ...m,

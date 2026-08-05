@@ -208,7 +208,7 @@ function systemPrompt(memory: string): string {
     `Today is ${today}.`,
     "",
     "Answer questions about installs, active users, events, syncs, AI-assistant usage, revenue, Groq key health, devices, payments, and app config.",
-    "Use the provided tools to fetch real numbers — never invent figures. Call several tools if needed, then answer.",
+    "Use the provided tools to fetch real numbers — never invent figures. Call each tool at most once, never repeat a call you already made, and once you have the data answer immediately.",
     "The data is anonymous telemetry only: there is NO customer PII (no names, account numbers, or the questions end-users typed). If asked for that, say it isn't collected.",
     "Be concise and specific. Format money as ₹ with Indian digit grouping. Prefer a short sentence or a tight bulleted list. Round sensibly.",
     memory ? `\nWhat you already know about this admin (from memory):\n${memory}` : "",
@@ -219,6 +219,8 @@ function systemPrompt(memory: string): string {
 
 export type AgentAnswer = { answer: string; toolsUsed: string[]; error?: string };
 
+const MAX_ROUNDS = 5;
+
 export async function runAgent(question: string, memory = ""): Promise<AgentAnswer> {
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt(memory) },
@@ -226,32 +228,58 @@ export async function runAgent(question: string, memory = ""): Promise<AgentAnsw
   ];
   const toolsUsed: string[] = [];
 
-  for (let round = 0; round < 6; round++) {
-    const { message, error } = await groqChat(messages, { tools: TOOLS, maxTokens: 900 });
-    if (error || !message) return { answer: "", toolsUsed, error: error || "no response" };
+  try {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      // On the final round, drop the tools so the model MUST produce prose from
+      // what it already fetched — this guarantees a real answer instead of an
+      // empty "hit the tool limit" failure.
+      const lastRound = round === MAX_ROUNDS - 1;
+      const { message, error } = await groqChat(messages, {
+        tools: TOOLS,
+        toolChoice: lastRound ? "none" : "auto",
+        maxTokens: 900,
+      });
+      if (error || !message) return { answer: "", toolsUsed, error: error || "no response" };
 
-    if (message.tool_calls?.length) {
-      // Keep the assistant turn (with its tool_calls) then answer each call.
-      messages.push({ role: "assistant", content: message.content ?? "", tool_calls: message.tool_calls });
-      for (const tc of message.tool_calls) {
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(tc.function.arguments || "{}");
-        } catch {
-          /* leave empty */
-        }
-        toolsUsed.push(tc.function.name);
-        const result = await execTool(tc.function.name, args);
+      if (!lastRound && message.tool_calls?.length) {
+        // Keep the assistant turn (with its tool_calls) then answer each call.
         messages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(result).slice(0, 6000),
+          role: "assistant",
+          content: message.content ?? "",
+          tool_calls: message.tool_calls,
         });
+        for (const tc of message.tool_calls) {
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(tc.function.arguments || "{}");
+          } catch {
+            /* leave empty */
+          }
+          toolsUsed.push(tc.function.name);
+          let result: unknown;
+          try {
+            result = await execTool(tc.function.name, args);
+          } catch (e) {
+            result = { error: `tool ${tc.function.name} failed: ${String(e)}` };
+          }
+          messages.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify(result).slice(0, 6000),
+          });
+        }
+        continue; // let the model read the tool results
       }
-      continue; // let the model read the tool results
-    }
 
-    return { answer: (message.content || "").trim(), toolsUsed };
+      const answer = (message.content || "").trim();
+      if (answer) return { answer, toolsUsed };
+      // No content and no usable tool call — nudge once, then give up cleanly.
+      if (lastRound) return { answer: "", toolsUsed, error: "no answer produced" };
+      messages.push({ role: "user", content: "Please answer now using the data you already have." });
+    }
+    return { answer: "", toolsUsed, error: "no answer produced" };
+  } catch (e) {
+    // Never let the loop throw — the route must always be able to return JSON.
+    return { answer: "", toolsUsed, error: `agent crashed: ${String(e)}` };
   }
-  return { answer: "", toolsUsed, error: "hit tool-call limit without an answer" };
 }

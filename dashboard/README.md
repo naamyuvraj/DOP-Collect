@@ -39,6 +39,11 @@ Run in the SQL editor, in order:
 - **Activity** — the latest events.
 - **API Keys** — live Groq key health + a managed key store (for a future proxy).
 - **Payments** — revenue + transactions.
+- **Plans** — edit subscription pricing/duration and roll plans out to every
+  install with no app update: a master paywall switch (`payments_enabled`),
+  per-plan Offered toggles (`plans.active`), trial length, and a subscriber list.
+  The app reads plans live via the `pay` edge function, so changes take effect
+  on the next refresh.
 - **App Config** — feature flags, force-update, announcement banner (read by the
   app at runtime, no rebuild needed).
 

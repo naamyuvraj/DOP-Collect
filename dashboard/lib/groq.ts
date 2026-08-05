@@ -59,7 +59,13 @@ export type GroqResult = { message?: ChatMessage; error?: string };
 /** One chat-completions round trip, rotating keys/models on failure. */
 export async function groqChat(
   messages: ChatMessage[],
-  opts: { tools?: ToolSpec[]; temperature?: number; maxTokens?: number } = {}
+  opts: {
+    tools?: ToolSpec[];
+    toolChoice?: "auto" | "none";
+    temperature?: number;
+    maxTokens?: number;
+    timeoutMs?: number;
+  } = {}
 ): Promise<GroqResult> {
   const keys = await loadKeys();
   if (!keys.length) return { error: "no active Groq keys" };
@@ -68,9 +74,14 @@ export async function groqChat(
   for (const model of MODELS) {
     for (let i = 0; i < keys.length; i++) {
       let resp: Response;
+      // Hard per-call timeout so one slow/hung key can't run us into a platform
+      // request timeout (which would return HTML and read as a "network error").
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20000);
       try {
         resp = await fetch(API, {
           method: "POST",
+          signal: ctrl.signal,
           headers: {
             Authorization: `Bearer ${keys[i]}`,
             "Content-Type": "application/json",
@@ -80,17 +91,25 @@ export async function groqChat(
             temperature: opts.temperature ?? 0,
             max_tokens: opts.maxTokens ?? 900,
             messages,
-            ...(opts.tools ? { tools: opts.tools, tool_choice: "auto" } : {}),
+            ...(opts.tools ? { tools: opts.tools, tool_choice: opts.toolChoice ?? "auto" } : {}),
           }),
         });
       } catch (e) {
-        errors.push(`key#${i} network: ${e}`);
+        errors.push(`key#${i} ${ctrl.signal.aborted ? "timeout" : "network"}: ${e}`);
         continue;
+      } finally {
+        clearTimeout(timer);
       }
       logUsage(i, model, resp.ok);
 
       if (resp.ok) {
-        const body = await resp.json();
+        let body: any;
+        try {
+          body = await resp.json();
+        } catch (e) {
+          errors.push(`key#${i}/${model} bad JSON: ${e}`);
+          continue; // treat a malformed 200 like a soft failure -> rotate
+        }
         return { message: body?.choices?.[0]?.message as ChatMessage };
       }
       if ([429, 401, 403].includes(resp.status) || resp.status >= 500) {
