@@ -92,6 +92,11 @@ class RemoteConfig {
   /// Portal" actions are hidden everywhere (the risky automation can't run).
   static bool get portalSubmit => _flag('portal_submit', def: true);
 
+  /// Master switch for the subscription paywall. Off (default) => no paywall, no
+  /// access gating — everyone has full access. Flip on once Razorpay + the
+  /// native checkout ship in a release build.
+  static bool get paymentsEnabled => _flag('payments_enabled', def: false);
+
   /// Home-screen announcement banner.
   static ({String text, bool enabled}) get announcement {
     final m = _obj('announcement');

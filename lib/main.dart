@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'assistant/assistant_config.dart';
 import 'screens/force_update_screen.dart';
 import 'services/remote_config.dart';
+import 'services/subscription.dart';
 import 'data/account_repository.dart';
 import 'data/app_settings.dart';
 import 'data/rd_rates_store.dart';
@@ -45,6 +46,9 @@ Future<void> main() async {
   // refreshes in the background. Read the flags it exposes right after.
   await RemoteConfig.init();
   AssistantConfig.cloudEnabled = RemoteConfig.assistantCloud;
+  // Subscription entitlement (cached instantly, refreshed in the background).
+  // Inert until app_config.payments_enabled is turned on.
+  unawaited(Subscription.init());
 
   // Anonymous analytics: load opt-out (defaulting to the remote-config value for
   // a brand-new install), register the install, log the open.

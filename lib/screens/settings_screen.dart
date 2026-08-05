@@ -11,6 +11,7 @@ import '../widgets/developer_card.dart';
 import '../widgets/push_button.dart';
 import 'calculator_screen.dart';
 import 'debug_breakdown.dart';
+import 'paywall_screen.dart';
 import 'privacy_screen.dart';
 import 'rd_rates_screen.dart';
 import 'portal/sync_screen.dart';
@@ -31,7 +32,7 @@ class SettingsScreen extends StatefulWidget {
   /// spotlight targets).
   final Future<void> Function()? onTour;
 
-  static const _version = '0.9.40';
+  static const _version = '0.9.41';
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -83,6 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _sync() async {
+    if (!await gatePremium(context) || !mounted) return;
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => SyncScreen(repo: widget.repo)),
     );
@@ -169,6 +171,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Anonymous app usage (no customer data) to improve the app.',
               _analytics,
               _setAnalytics),
+          _btn(
+              'Subscription',
+              () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const PaywallScreen()))),
           if (widget.onTour != null)
             _btn('Take a tour', () => widget.onTour!()),
           _btn(

@@ -69,6 +69,23 @@ export type Device = {
 /// Every user/install seen (devices ∪ event-senders), newest activity first.
 export const getDevices = () => view<Device>("v_devices");
 
+export type Sub = {
+  agent_id: string;
+  plan_code: string | null;
+  plan_name: string | null;
+  status: string; // trial | active | expired
+  started_at: string;
+  current_period_end: string;
+  days_left: number;
+};
+export const getSubscriptions = () => view<Sub>("v_subscriptions");
+export const getMrr = () =>
+  view<{ day: string; revenue: number; payments: number }>("v_mrr");
+export const getPlans = () =>
+  view<{ code: string; name: string; price_inr: number; duration_days: number; active: boolean; sort: number }>(
+    "plans"
+  );
+
 export async function recent<T>(
   table: string,
   cols = "*",

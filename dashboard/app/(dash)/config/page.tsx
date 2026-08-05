@@ -56,6 +56,7 @@ export default function Config() {
             ["assistant_cloud", "AI cloud tier", "Master switch for the Groq assistant. Off = every install stays offline-only."],
             ["analytics_default", "Analytics default on", "New installs report anonymous usage unless the user opts out."],
             ["portal_submit", "Portal auto-submit", "Kill switch for making/paying lists on the DOP portal. Off = the “Submit on Portal” buttons are hidden on every install."],
+            ["payments_enabled", "Subscriptions / paywall", "Master switch. On = agents whose plan expired are gated to the paywall. Off = everyone has full access (default)."],
           ].map(([key, label, help]) => (
             <div key={key} className="flex items-center justify-between py-3 border-t border-line first:border-0">
               <div className="pr-4">

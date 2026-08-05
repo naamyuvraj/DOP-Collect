@@ -56,8 +56,8 @@ class FocalCard extends StatelessWidget {
                   const SizedBox(height: 10),
                   FittedBox(
                     child: Text(hidden ? '• • • • •' : amount,
-                        style: AppTheme.display(46,
-                            weight: FontWeight.w800, spacing: -1.5)),
+                        style: AppTheme.display(58,
+                            weight: FontWeight.w800, spacing: -2)),
                   ),
                   const SizedBox(height: 6),
                   Text(hidden ? 'Tap the eye to view' : sublabel,
@@ -134,7 +134,7 @@ class SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final card = Container(
       padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
       decoration: AppTheme.card(radius: 22),
       child: Row(
@@ -187,29 +187,34 @@ class SummaryCard extends StatelessWidget {
                   ],
                 ),
                 if (amount != null) ...[
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(amount!,
-                      style: AppTheme.body(14.5,
-                          weight: FontWeight.w700, color: AppTheme.ink)),
+                      style: AppTheme.display(22,
+                          weight: FontWeight.w800, spacing: -0.5)),
                 ],
               ],
             ),
           ),
           if (trailing != null) ...[trailing!, const SizedBox(width: 10)],
           if (onView != null)
-            GestureDetector(
-              onTap: onView,
-              child: Container(
-                width: 46,
-                height: 46,
-                decoration: const BoxDecoration(
-                    color: AppTheme.black, shape: BoxShape.circle),
-                child: const Icon(Icons.arrow_outward_rounded,
-                    color: Colors.white, size: 20),
-              ),
+            Container(
+              width: 46,
+              height: 46,
+              decoration: const BoxDecoration(
+                  color: AppTheme.black, shape: BoxShape.circle),
+              child: const Icon(Icons.arrow_outward_rounded,
+                  color: Colors.white, size: 20),
             ),
         ],
       ),
+    );
+    if (onView == null) return card;
+    // Whole card is tappable, not just the arrow. The trailing dropdown (if any)
+    // still gets its own taps — a child gesture wins over this outer one.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onView,
+      child: card,
     );
   }
 }

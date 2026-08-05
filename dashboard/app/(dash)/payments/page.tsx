@@ -1,6 +1,6 @@
 import PageHead from "@/components/PageHead";
 import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
-import { getSummary, recent } from "@/lib/data";
+import { getPlans, getSubscriptions, getSummary, recent } from "@/lib/data";
 import { inr, num, when } from "@/lib/format";
 
 export const revalidate = 60; // ISR: instant repeat loads, data ≤60s stale.
@@ -16,10 +16,14 @@ type Payment = {
   created_at: string;
 };
 
+const tone = (s: string) => (s === "active" ? "g" : s === "trial" ? "b" : "r");
+
 export default async function Payments() {
-  const [s, pays] = await Promise.all([
+  const [s, pays, subs, plans] = await Promise.all([
     getSummary(),
     recent<Payment>("payments", "*", 100),
+    getSubscriptions(),
+    getPlans(),
   ]);
   const ok = pays.filter((p) => p.status === "success");
   const mrr = ok
@@ -27,16 +31,62 @@ export default async function Payments() {
       (p) => new Date(p.created_at).getTime() > Date.now() - 30 * 864e5
     )
     .reduce((a, p) => a + Number(p.amount), 0);
+  const active = subs.filter((x) => x.status === "active").length;
+  const trialing = subs.filter((x) => x.status === "trial").length;
 
   return (
     <>
-      <PageHead title="Payments" subtitle="Revenue & transactions" />
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4">
+      <PageHead title="Payments" subtitle="Subscriptions, revenue & transactions" />
+      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
         <Kpi label="Total revenue" value={inr(s.revenue)} focal />
         <Kpi label="Last 30 days" value={inr(mrr)} />
+        <Kpi label="Active subs" value={num(active)} sub={`${num(trialing)} on trial`} />
         <Kpi label="Successful" value={num(ok.length)} />
         <Kpi label="Transactions" value={num(pays.length)} />
       </div>
+
+      <Card title="Plans" className="mt-3.5">
+        <div className="flex flex-wrap gap-2.5">
+          {plans.map((p) => (
+            <div key={p.code} className="rounded-xl border border-line px-4 py-3">
+              <div className="font-extrabold text-sm">{p.name}</div>
+              <div className="text-muted text-xs">
+                {p.price_inr > 0 ? inr(p.price_inr) : "Free"} · {p.duration_days}d
+                {p.active ? "" : " · inactive"}
+              </div>
+            </div>
+          ))}
+          {!plans.length && <Empty>Run schema_payments.sql to seed plans.</Empty>}
+        </div>
+      </Card>
+
+      <Card title="Subscribers" className="mt-3.5">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr>
+                <Th>Agent ID</Th>
+                <Th>Plan</Th>
+                <Th>Status</Th>
+                <Th>Days left</Th>
+                <Th>Renews / ends</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {subs.map((x) => (
+                <tr key={x.agent_id}>
+                  <Td className="font-mono text-xs">{x.agent_id}</Td>
+                  <Td className="font-semibold">{x.plan_name || x.plan_code || "—"}</Td>
+                  <Td><Pill tone={tone(x.status)}>{x.status}</Pill></Td>
+                  <Td className="font-mono">{num(x.days_left)}</Td>
+                  <Td className="text-muted whitespace-nowrap">{when(x.current_period_end)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!subs.length && <Empty>No subscribers yet.</Empty>}
+        </div>
+      </Card>
 
       <Card title="Transactions" className="mt-3.5">
         <div className="overflow-x-auto">
