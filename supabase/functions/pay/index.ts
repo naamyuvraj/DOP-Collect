@@ -108,6 +108,36 @@ Deno.serve(async (req) => {
       return { sub: sub!, status, daysLeft };
     };
 
+    // Activate/extend from the SERVER-recorded order (never client input), and
+    // idempotent: the unique payment `ref` index makes replay/race a no-op.
+    const activate = async (orderId: string, paymentId: string) => {
+      const { data: ord } = await sb
+        .from("orders").select("agent_id, plan_code").eq("order_id", orderId).maybeSingle();
+      if (!ord) return { ok: false, error: "unknown_order" } as const;
+      const { data: plan } = await sb
+        .from("plans").select("code, price_inr, duration_days").eq("code", ord.plan_code).maybeSingle();
+      if (!plan) return { ok: false, error: "bad_plan" } as const;
+      const endOf = async (): Promise<string | null> => {
+        const { data: s } = await sb.from("subscriptions")
+          .select("current_period_end").eq("agent_id", ord.agent_id).maybeSingle();
+        return s?.current_period_end ?? null;
+      };
+      const pay = await sb.from("payments").insert({
+        agent_id: ord.agent_id, plan_code: plan.code, amount: plan.price_inr,
+        currency: "INR", provider: "razorpay", ref: paymentId, order_id: orderId,
+        status: "success", plan: plan.code,
+      });
+      if (pay.error) return { ok: true, already: true, periodEnd: await endOf() } as const;
+      const cur = await endOf();
+      const base = Math.max(Date.now(), cur ? new Date(cur).getTime() : 0);
+      const newEnd = new Date(base + Number(plan.duration_days) * 86400_000).toISOString();
+      await sb.from("subscriptions").upsert({
+        agent_id: ord.agent_id, plan_code: plan.code, status: "active",
+        current_period_end: newEnd, updated_at: new Date().toISOString(),
+      });
+      return { ok: true, periodEnd: newEnd } as const;
+    };
+
     if (action === "status") {
       const r = await resolve();
       return json({
@@ -144,6 +174,11 @@ Deno.serve(async (req) => {
           { ok: false, error: order?.error?.description ?? "razorpay", detail: order },
           502
         );
+      // Record the order so verify/webhook derive the plan from HERE, not the
+      // client (prevents paying for a cheap plan and claiming an expensive one).
+      await sb.from("orders").insert({
+        order_id: order.id, agent_id: agentId, plan_code: plan.code, amount: order.amount,
+      });
       return json({
         ok: true, orderId: order.id, amount: order.amount,
         currency: order.currency, keyId, planName: plan.name,
@@ -152,47 +187,18 @@ Deno.serve(async (req) => {
 
     if (action === "verify") {
       if (!keySecret) return json({ ok: false, error: "not_configured" }, 503);
-      const { orderId, paymentId, signature, planCode } = body;
+      const orderId = String(body.orderId ?? "");
+      const paymentId = String(body.paymentId ?? "");
       const expected = await hmacHex(keySecret, `${orderId}|${paymentId}`);
-      if (!timingSafeEqual(expected, String(signature ?? "")))
+      if (!timingSafeEqual(expected, String(body.signature ?? "")))
         return json({ ok: false, error: "bad_signature" }, 400);
-
-      const { data: plan } = await sb
-        .from("plans").select("*").eq("code", String(planCode)).maybeSingle();
-      if (!plan) return json({ ok: false, error: "bad_plan" }, 400);
-
-      // IDEMPOTENCY: a valid signature could otherwise be REPLAYED to stack free
-      // subscription time. If this Razorpay payment was already recorded, return
-      // the current state without extending again.
-      const { data: dup } = await sb
-        .from("payments").select("id").eq("ref", String(paymentId)).maybeSingle();
-      if (dup) {
-        const r0 = await resolve();
-        return json({ ok: true, status: r0.status, periodEnd: r0.sub.current_period_end,
-          note: "already_processed" });
-      }
-
-      // Extend from the later of now / current end, so paying early stacks.
-      const r = await resolve();
-      const base = Math.max(Date.now(), new Date(r.sub.current_period_end).getTime());
-      const newEnd = new Date(base + plan.duration_days * 86400_000).toISOString();
-      // Record the payment FIRST (unique ref enforces idempotency at the DB
-      // level even under a race); only extend if that insert wins.
-      const pay = await sb.from("payments").insert({
-        agent_id: agentId, plan_code: plan.code, amount: plan.price_inr,
-        currency: "INR", provider: "razorpay", ref: String(paymentId),
-        order_id: String(orderId), status: "success", plan: plan.code,
+      // Plan + agent come from the recorded order (client planCode is ignored).
+      const res = await activate(orderId, paymentId);
+      if (!res.ok) return json({ ok: false, error: res.error }, 400);
+      return json({
+        ok: true, status: "active", periodEnd: res.periodEnd,
+        note: "already" in res && res.already ? "already_processed" : undefined,
       });
-      if (pay.error) {
-        const r0 = await resolve();
-        return json({ ok: true, status: r0.status, periodEnd: r0.sub.current_period_end,
-          note: "already_processed" });
-      }
-      await sb.from("subscriptions").upsert({
-        agent_id: agentId, plan_code: plan.code, status: "active",
-        current_period_end: newEnd, updated_at: new Date().toISOString(),
-      });
-      return json({ ok: true, status: "active", periodEnd: newEnd });
     }
 
     return json({ ok: false, error: "unknown action" }, 400);

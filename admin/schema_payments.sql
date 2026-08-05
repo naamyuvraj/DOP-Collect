@@ -24,6 +24,18 @@ insert into public.plans (code, name, price_inr, duration_days, active, sort) va
   ('yearly',    'Yearly',     1499, 365, true, 3)
 on conflict (code) do nothing;
 
+-- Server record of every Razorpay order we create. verify + the webhook read
+-- the plan/agent from HERE (never from the client), so a client can't pay for a
+-- cheap plan and claim an expensive one — the signature doesn't bind the plan.
+create table if not exists public.orders (
+  order_id   text primary key,
+  agent_id   text not null,
+  plan_code  text references public.plans(code),
+  amount     int,
+  created_at timestamptz not null default now()
+);
+alter table public.orders enable row level security;  -- service role only
+
 -- One row per agent. current_period_end is the source of truth for access.
 create table if not exists public.subscriptions (
   agent_id           text primary key,
