@@ -57,6 +57,8 @@ class _PaywallScreenState extends State<PaywallScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Payment successful — you\'re all set!')));
         Navigator.of(context).pop();
+      } else if (Subscription.lastError != null) {
+        _showError(Subscription.lastError!);
       } else {
         _snack('Payment cancelled.');
       }
@@ -71,6 +73,23 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
   void _snack(String m) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(m)));
+
+  /// Show the real failure reason (so we can debug, not just "cancelled").
+  void _showError(String msg) => showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: AppTheme.surface,
+          title: Text('Payment didn\'t go through',
+              style: AppTheme.display(17)),
+          content: Text(msg,
+              style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK')),
+          ],
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {

@@ -23,8 +23,13 @@ class RazorpayCheckout {
       _finish(RazorpayResult(
           r.orderId ?? '', r.paymentId ?? '', r.signature ?? ''));
     });
-    _rzp.on(Razorpay.EVENT_PAYMENT_ERROR, (PaymentFailureResponse _) {
-      _finish(null); // cancelled or failed
+    _rzp.on(Razorpay.EVENT_PAYMENT_ERROR, (PaymentFailureResponse r) {
+      // A genuine user-cancel stays null; a real error surfaces its code+message
+      // so we can see what actually failed.
+      Subscription.lastError = r.code == Razorpay.PAYMENT_CANCELLED
+          ? null
+          : 'Razorpay ${r.code}: ${r.message ?? 'error'}';
+      _finish(null);
     });
     _rzp.on(Razorpay.EVENT_EXTERNAL_WALLET, (ExternalWalletResponse _) {
       _finish(null); // external wallet gives no signature to verify

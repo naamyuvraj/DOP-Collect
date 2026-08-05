@@ -70,6 +70,11 @@ Deno.serve(async (req) => {
         const ins = await sb.from("subscriptions")
           .insert({ agent_id: agentId, plan_code: "trial", status: "trial", current_period_end: end })
           .select("*").single();
+        if (ins.error || !ins.data)
+          throw new Error(
+            "subscriptions table not ready — run admin/schema_payments.sql. " +
+              (ins.error?.message ?? "")
+          );
         sub = ins.data;
       }
       const active = new Date(sub!.current_period_end).getTime() > Date.now();
@@ -103,12 +108,18 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           amount: Math.round(Number(plan.price_inr) * 100), // paise
           currency: "INR",
-          receipt: `${agentId}:${plan.code}:${Date.now()}`,
+          // Razorpay caps `receipt` at 40 chars — keep it short; the agent id
+          // lives in `notes`.
+          receipt: `dop_${Date.now()}`,
           notes: { agent_id: agentId, plan: plan.code },
         }),
       });
       const order = await rzp.json();
-      if (!rzp.ok) return json({ ok: false, error: "razorpay", detail: order }, 502);
+      if (!rzp.ok)
+        return json(
+          { ok: false, error: order?.error?.description ?? "razorpay", detail: order },
+          502
+        );
       return json({
         ok: true, orderId: order.id, amount: order.amount,
         currency: order.currency, keyId, planName: plan.name,

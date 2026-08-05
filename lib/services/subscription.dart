@@ -62,6 +62,9 @@ class Subscription {
   /// Set by the release build to the real razorpay_flutter implementation.
   static RazorpayOpener? opener;
 
+  /// Last failure reason (order / checkout / verify), for surfacing to the user.
+  static String? lastError;
+
   static SubStatus? get current => _current;
 
   /// True only when payments are switched on AND we KNOW the plan expired.
@@ -131,20 +134,29 @@ class Subscription {
   /// Returns true on a verified payment. Throws [CheckoutUnavailable] if the
   /// native checkout isn't wired yet (patch build).
   static Future<bool> purchase(String planCode) async {
+    lastError = null;
     final agent = await _agentId();
+    if (agent.isEmpty) {
+      lastError = 'No agent id — sign in first.';
+      return false;
+    }
     final o = await _call({'action': 'order', 'agentId': agent, 'planCode': planCode});
-    if (o == null || o['ok'] != true) return false;
+    if (o == null || o['ok'] != true) {
+      lastError = 'Order failed: ${o?['error'] ?? o?['detail'] ?? 'no response from server'}';
+      return false;
+    }
     final order = RazorpayOrder(o['orderId'] as String, o['keyId'] as String,
         planCode, (o['planName'] ?? '') as String, (o['amount'] as num).toInt());
     final open = opener;
     if (open == null) throw const CheckoutUnavailable();
-    final res = await open(order);
-    if (res == null) return false; // cancelled
+    final res = await open(order); // sets lastError on a sheet error
+    if (res == null) return false; // cancelled or sheet error
     final v = await _call({
       'action': 'verify', 'agentId': agent, 'planCode': planCode,
       'orderId': res.orderId, 'paymentId': res.paymentId, 'signature': res.signature,
     });
     final ok = v != null && v['ok'] == true;
+    if (!ok) lastError = 'Verify failed: ${v?['error'] ?? 'no response'}';
     if (ok) await refresh();
     return ok;
   }
