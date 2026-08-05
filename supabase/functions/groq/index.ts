@@ -43,6 +43,14 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // --- Play Integrity gate (dormant until the flag is on) ----------------
+    // When app_config.require_integrity = true, calls must carry a genuine-app
+    // token (wired with the Play Store release). Fail closed while enabled.
+    const { data: intCfg } = await sb
+      .from("app_config").select("value").eq("key", "require_integrity").maybeSingle();
+    if (intCfg?.value === true && !req.headers.get("x-integrity-token"))
+      return json({ error: "integrity_required" }, 403);
+
     // --- Rate limiting (abuse guard) ---------------------------------------
     // The app authenticates with the public anon key, so anyone who extracts it
     // could otherwise drain the Groq quota. Cap per device (per-minute + daily)

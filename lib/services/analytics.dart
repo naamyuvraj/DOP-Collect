@@ -44,22 +44,17 @@ class Analytics {
     if (!_live || (_identified && !force)) return;
     _identified = true;
     final name = await AppSettings.agentName();
-    await _post(
-      'devices',
-      {
-        'id': await _did(),
-        'agent_name': name.isEmpty ? null : name,
-        'app_version': SupabaseConfig.buildVersion,
-        'platform': 'android',
-        'last_seen': DateTime.now().toUtc().toIso8601String(),
-      },
-      prefer: 'resolution=merge-duplicates,return=minimal',
-    );
+    await _ingest('device', {
+      'id': await _did(),
+      'agent_name': name.isEmpty ? null : name,
+      'app_version': SupabaseConfig.buildVersion,
+      'platform': 'android',
+    });
   }
 
   static Future<void> track(String event, [Map<String, Object?>? props]) async {
     if (!_live) return;
-    await _post('events', {
+    await _ingest('event', {
       'device_id': await _did(),
       'event': event,
       'props': props ?? const {},
@@ -70,7 +65,7 @@ class Analytics {
   /// Which Groq key/model was used and whether it succeeded (key rotation view).
   static Future<void> keyUsage(int keyIndex, String model, bool ok) async {
     if (!_live) return;
-    await _post('key_usage', {
+    await _ingest('key_usage', {
       'device_id': await _did(),
       'key_index': keyIndex,
       'model': model,
@@ -78,39 +73,22 @@ class Analytics {
     });
   }
 
-  static Future<void> payment({
-    required num amount,
-    String plan = '',
-    String provider = '',
-    String ref = '',
-    String status = 'success',
-  }) async {
-    if (!_live) return;
-    await _post('payments', {
-      'device_id': await _did(),
-      'amount': amount,
-      'plan': plan,
-      'provider': provider,
-      'ref': ref,
-      'status': status,
-    });
-  }
-
   // --- Internals -------------------------------------------------------------
 
-  static Future<void> _post(String table, Map<String, Object?> body,
-      {String prefer = 'return=minimal'}) async {
+  /// Post one telemetry row through the rate-limited `ingest` edge function
+  /// (the anon key can no longer INSERT directly). Fire-and-forget.
+  static Future<void> _ingest(String kind, Map<String, Object?> row) async {
     try {
       await http
           .post(
-            Uri.parse('${SupabaseConfig.url}/rest/v1/$table'),
+            Uri.parse('${SupabaseConfig.url}/functions/v1/ingest'),
             headers: {
               'apikey': SupabaseConfig.anonKey,
               'Authorization': 'Bearer ${SupabaseConfig.anonKey}',
               'Content-Type': 'application/json',
-              'Prefer': prefer,
+              'x-device-id': await _did(),
             },
-            body: jsonEncode(body),
+            body: jsonEncode({'kind': kind, 'row': row}),
           )
           .timeout(const Duration(seconds: 8));
     } catch (_) {
