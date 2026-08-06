@@ -1,5 +1,5 @@
 import PageHead from "@/components/PageHead";
-import { Bars, Donut, TrendArea } from "@/components/charts";
+import { Bars, Donut, TrendArea } from "@/components/LazyCharts";
 import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
 import {
   getCollections,

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Bars } from "@/components/charts";
+import { Bars } from "@/components/LazyCharts";
 import { Card, Empty, Pill, Td, Th } from "@/components/ui";
 
 type Key = {
