@@ -51,6 +51,18 @@ export default function Plans() {
     const d = (await fetch("/api/plans").then((r) => r.json())) as Data;
     setData(d);
     setRows(d.plans || []);
+    // Self-heal any past drift: the trial plan's Days must equal trial_days (the
+    // value `pay` actually uses). If they diverged, reconcile the plan row.
+    const trial = (d.plans || []).find((p) => p.code === "trial");
+    if (trial && Number(trial.duration_days) !== Number(d.config?.trial_days)) {
+      const days = Number(d.config?.trial_days) || 0;
+      setRows((rs) => rs.map((r) => (r.code === "trial" ? { ...r, duration_days: days } : r)));
+      fetch("/api/plans", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: "trial", duration_days: days }),
+      });
+    }
   }
   useEffect(() => {
     load();
@@ -71,12 +83,38 @@ export default function Plans() {
     say("Saved.");
   }
 
+  // The trial length is app_config.trial_days — the ONLY value the `pay` edge
+  // function uses to grant a trial. We also mirror it onto the `trial` plan row's
+  // duration_days so the plan list the app shows stays consistent (they used to
+  // drift, which is why editing the row's Days appeared to do nothing).
+  async function setTrialDays(v: number) {
+    const days = Math.max(0, Math.floor(Number(v) || 0));
+    setData((d) => (d ? { ...d, config: { ...d.config, trial_days: days } } : d));
+    setRows((rs) => rs.map((r) => (r.code === "trial" ? { ...r, duration_days: days } : r)));
+    await fetch("/api/plans", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "trial_days", value: days }),
+    });
+    // Keep the trial plan row in sync (no-op if there's no trial plan row).
+    if (rows.some((r) => r.code === "trial")) {
+      await fetch("/api/plans", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: "trial", duration_days: days }),
+      });
+    }
+    say("Trial length saved.");
+  }
+
   async function savePlan(p: Plan) {
     setBusy(p.code);
+    // For the trial, Days is governed by trial_days — never write a stale value.
+    const payload = p.code === "trial" ? { ...p, duration_days: data?.config.trial_days ?? p.duration_days } : p;
     const res = await fetch("/api/plans", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(p),
+      body: JSON.stringify(payload),
     }).then((r) => r.json());
     setBusy("");
     if (res.error) say(res.error);
@@ -160,13 +198,17 @@ export default function Plans() {
           <Toggle on={on} tone={on ? "green" : "red"} onChange={(v) => setConfig("payments_enabled", v)} />
         </div>
         <div className="flex items-center gap-3 mt-4 pt-4 border-t border-line">
-          <span className="text-sm font-semibold">Free-trial length</span>
+          <div className="mr-auto">
+            <div className="text-sm font-semibold">Free-trial length</div>
+            <div className="text-muted text-xs">Days auto-granted to every new agent. This is the only trial control.</div>
+          </div>
           <input
             type="number"
+            min={0}
             className="input w-24"
             value={data.config.trial_days ?? 14}
             onChange={(e) => setData({ ...data, config: { ...data.config, trial_days: Number(e.target.value) } })}
-            onBlur={(e) => setConfig("trial_days", Number(e.target.value) || 0)}
+            onBlur={(e) => setTrialDays(Number(e.target.value))}
           />
           <span className="text-muted text-sm">days</span>
         </div>
@@ -213,7 +255,18 @@ export default function Plans() {
                   <Td className="font-mono text-xs">{p.code}</Td>
                   <Td><input className="input py-1.5 w-32" value={p.name} onChange={(e) => edit(p.code, { name: e.target.value })} /></Td>
                   <Td><input type="number" className="input py-1.5 w-24" value={p.price_inr} onChange={(e) => edit(p.code, { price_inr: Number(e.target.value) })} /></Td>
-                  <Td><input type="number" className="input py-1.5 w-20" value={p.duration_days} onChange={(e) => edit(p.code, { duration_days: Number(e.target.value) })} /></Td>
+                  <Td>
+                    {p.code === "trial" ? (
+                      <span
+                        className="text-muted text-xs whitespace-nowrap"
+                        title="Trial length is set by ‘Free-trial length’ above"
+                      >
+                        {num(data.config.trial_days)} · set above
+                      </span>
+                    ) : (
+                      <input type="number" className="input py-1.5 w-20" value={p.duration_days} onChange={(e) => edit(p.code, { duration_days: Number(e.target.value) })} />
+                    )}
+                  </Td>
                   <Td><input type="number" className="input py-1.5 w-16" value={p.sort} onChange={(e) => edit(p.code, { sort: Number(e.target.value) })} /></Td>
                   <Td><Toggle on={p.active} onChange={(v) => toggleActive(p, v)} /></Td>
                   <Td>
@@ -221,7 +274,9 @@ export default function Plans() {
                       <button className="btn py-1.5 px-3" disabled={busy === p.code} onClick={() => savePlan(p)}>
                         {busy === p.code ? "…" : "Save"}
                       </button>
-                      <button className="btn btn-ghost py-1.5 px-3" title="Delete" onClick={() => del(p.code)}>🗑</button>
+                      {p.code !== "trial" && (
+                        <button className="btn btn-ghost py-1.5 px-3" title="Delete" onClick={() => del(p.code)}>🗑</button>
+                      )}
                     </div>
                   </Td>
                 </tr>
