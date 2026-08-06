@@ -6,6 +6,7 @@ const NAV = [
   { href: "/", label: "Overview", icon: "M3 12l9-9 9 9M5 10v10h14V10" },
   { href: "/assistant", label: "Assistant", icon: "M12 3a9 9 0 00-9 9 9 9 0 001.5 5L3 21l4-1.5A9 9 0 1012 3zM8 12h.01M12 12h.01M16 12h.01" },
   { href: "/devices", label: "Users & Devices", icon: "M4 20a8 8 0 0116 0M12 12a4 4 0 100-8 4 4 0 000 8" },
+  { href: "/regions", label: "Regions", icon: "M12 21s-7-6.5-7-11a7 7 0 0114 0c0 4.5-7 11-7 11zM12 12a2 2 0 100-4 2 2 0 000 4" },
   { href: "/activity", label: "Activity", icon: "M3 12h4l3 8 4-16 3 8h4" },
   { href: "/keys", label: "API Keys", icon: "M15 7a4 4 0 11-4 4h-1l-2 2-2-2H3v-3l6-6a4 4 0 016 5z" },
   { href: "/payments", label: "Payments", icon: "M3 7h18v10H3zM3 11h18" },
