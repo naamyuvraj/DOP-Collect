@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { isAuthed } from "@/lib/auth";
 import { admin, dbConfigured } from "@/lib/supabase";
 import { parseAgentId } from "@/lib/agentId";
@@ -20,11 +21,10 @@ type Region = {
   last_seen?: string;
 };
 
-export async function GET() {
-  if (!isAuthed()) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!dbConfigured()) return NextResponse.json({ regions: [], totals: {} });
-
-  try {
+// Read-only; telemetry changes slowly, so a 60s cache makes repeat visits
+// instant. (No mutation endpoints here, so no tag-busting needed.)
+const readRegions = unstable_cache(
+  async () => {
     const sb = admin();
     // select("*") on devices so missing agent_id/sol_id columns don't error.
     const [devRes, subRes] = await Promise.all([
@@ -82,7 +82,7 @@ export async function GET() {
       .map(({ _agents, ...r }) => ({ ...r, agents: Math.max(r.agents, _agents.size) }))
       .sort((a, b) => b.installs + b.subscribers - (a.installs + a.subscribers));
 
-    return NextResponse.json({
+    return {
       regions,
       totals: {
         regions: regions.length,
@@ -94,7 +94,17 @@ export async function GET() {
       },
       // True once devices carry sol_id/agent_id (app updated). Drives the hint.
       device_region_ready: devices.some((d) => d.sol_id || d.agent_id),
-    });
+    };
+  },
+  ["regions-data"],
+  { revalidate: 60, tags: ["regions"] }
+);
+
+export async function GET() {
+  if (!isAuthed()) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!dbConfigured()) return NextResponse.json({ regions: [], totals: {} });
+  try {
+    return NextResponse.json(await readRegions());
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }

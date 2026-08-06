@@ -1,8 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache, revalidateTag } from "next/cache";
 import { isAuthed } from "@/lib/auth";
 import { admin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
+
+// Cache the (read-only) plans payload for 30s so repeat visits are instant
+// instead of a fresh ~0.5s Supabase round-trip. Every write busts the tag
+// below, so edits still show immediately. Data is not per-user (single admin).
+const readPlans = unstable_cache(
+  async () => {
+    const sb = admin();
+    const [plans, cfg, subs, mrr] = await Promise.all([
+      sb.from("plans").select("*").order("sort"),
+      sb.from("app_config").select("key,value").in("key", ["payments_enabled", "trial_days"]),
+      sb.from("v_subscriptions").select("*").limit(500),
+      sb.from("v_mrr").select("*"),
+    ]);
+    const config: Record<string, unknown> = {};
+    for (const row of cfg.data || []) config[(row as any).key] = (row as any).value;
+    return {
+      plans: plans.data || [],
+      config: { payments_enabled: config.payments_enabled ?? false, trial_days: config.trial_days ?? 14 },
+      subscribers: subs.data || [],
+      mrr: mrr.data || [],
+      error: plans.error?.message,
+    };
+  },
+  ["plans-data"],
+  { revalidate: 30, tags: ["plans"] }
+);
 
 // Plans & subscription rollout control.
 // ---------------------------------------------------------------------------
@@ -21,22 +48,7 @@ export async function GET() {
   const bad = guard();
   if (bad) return bad;
   try {
-    const sb = admin();
-    const [plans, cfg, subs, mrr] = await Promise.all([
-      sb.from("plans").select("*").order("sort"),
-      sb.from("app_config").select("key,value").in("key", ["payments_enabled", "trial_days"]),
-      sb.from("v_subscriptions").select("*").limit(500),
-      sb.from("v_mrr").select("*"),
-    ]);
-    const config: Record<string, unknown> = {};
-    for (const row of cfg.data || []) config[(row as any).key] = (row as any).value;
-    return NextResponse.json({
-      plans: plans.data || [],
-      config: { payments_enabled: config.payments_enabled ?? false, trial_days: config.trial_days ?? 14 },
-      subscribers: subs.data || [],
-      mrr: mrr.data || [],
-      error: plans.error?.message,
-    });
+    return NextResponse.json(await readPlans());
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
@@ -57,6 +69,7 @@ export async function POST(req: NextRequest) {
     active: b.active !== false,
     sort: Number(b.sort) || 0,
   });
+  if (!error) revalidateTag("plans");
   return NextResponse.json({ ok: !error, error: error?.message });
 }
 
@@ -76,6 +89,7 @@ export async function PATCH(req: NextRequest) {
   if (!Object.keys(patch).length)
     return NextResponse.json({ ok: false, error: "nothing to update" }, { status: 400 });
   const { error } = await admin().from("plans").update(patch).eq("code", code);
+  if (!error) revalidateTag("plans");
   return NextResponse.json({ ok: !error, error: error?.message });
 }
 
@@ -87,6 +101,7 @@ export async function DELETE(req: NextRequest) {
   const code = String(b.code || "").trim();
   if (!code) return NextResponse.json({ ok: false, error: "code is required" }, { status: 400 });
   const { error } = await admin().from("plans").delete().eq("code", code);
+  if (!error) revalidateTag("plans");
   return NextResponse.json({
     ok: !error,
     error: error?.message
@@ -105,5 +120,6 @@ export async function PUT(req: NextRequest) {
   const { error } = await admin()
     .from("app_config")
     .upsert({ key, value, updated_at: new Date().toISOString() });
+  if (!error) revalidateTag("plans");
   return NextResponse.json({ ok: !error, error: error?.message });
 }

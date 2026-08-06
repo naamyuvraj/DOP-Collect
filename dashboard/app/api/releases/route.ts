@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { unstable_cache, revalidateTag } from "next/cache";
 import { isAuthed } from "@/lib/auth";
 import { admin, dbConfigured } from "@/lib/supabase";
 
@@ -54,10 +55,9 @@ async function fleetAdoption(): Promise<{ rows: Adoption[]; needsSql: boolean }>
 // NOTE: git commits are fetched separately (GET /api/git) so a slow GitHub call
 // never blocks this page's own data. See app/api/git/route.ts.
 
-export async function GET() {
-  const bad = guard();
-  if (bad) return bad;
-  try {
+// Cache the read for 30s (repeat visits are instant); writes bust the tag below.
+const readReleases = unstable_cache(
+  async () => {
     const sb = admin();
     const [rel, cfg, fleet] = await Promise.all([
       sb.from("releases").select("*").order("created_at", { ascending: false }).limit(100),
@@ -66,14 +66,24 @@ export async function GET() {
     ]);
     const config: Record<string, unknown> = {};
     for (const r of cfg.data || []) config[(r as any).key] = (r as any).value;
-    return NextResponse.json({
+    return {
       releases: rel.error ? [] : rel.data || [],
       releasesNeedsSql: !!rel.error, // table not created yet
       adoption: fleet.rows,
       adoptionNeedsSql: fleet.needsSql,
       force_update: config.force_update ?? { version: "", message: "", enabled: false },
       latest_version: config.latest_version ?? "",
-    });
+    };
+  },
+  ["releases-data"],
+  { revalidate: 30, tags: ["releases"] }
+);
+
+export async function GET() {
+  const bad = guard();
+  if (bad) return bad;
+  try {
+    return NextResponse.json(await readReleases());
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
@@ -94,6 +104,7 @@ export async function POST(req: NextRequest) {
     git_sha: b.git_sha || null,
     notes: b.notes || null,
   });
+  if (!error) revalidateTag("releases");
   return NextResponse.json({
     ok: !error,
     error: error?.message
@@ -113,6 +124,7 @@ export async function PATCH(req: NextRequest) {
   if (b.shorebird_patch !== undefined)
     patch.shorebird_patch = b.shorebird_patch === "" || b.shorebird_patch == null ? null : Number(b.shorebird_patch);
   const { error } = await admin().from("releases").update(patch).eq("id", b.id);
+  if (!error) revalidateTag("releases");
   return NextResponse.json({ ok: !error, error: error?.message });
 }
 
@@ -123,6 +135,7 @@ export async function DELETE(req: NextRequest) {
   const b = await req.json().catch(() => ({}));
   if (!b.id) return NextResponse.json({ ok: false, error: "id required" }, { status: 400 });
   const { error } = await admin().from("releases").delete().eq("id", b.id);
+  if (!error) revalidateTag("releases");
   return NextResponse.json({ ok: !error, error: error?.message });
 }
 
@@ -136,5 +149,6 @@ export async function PUT(req: NextRequest) {
   const { error } = await admin()
     .from("app_config")
     .upsert({ key, value, updated_at: new Date().toISOString() });
+  if (!error) revalidateTag("releases");
   return NextResponse.json({ ok: !error, error: error?.message });
 }
