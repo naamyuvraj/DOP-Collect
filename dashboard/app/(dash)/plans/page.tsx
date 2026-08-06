@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
+import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Td, Th } from "@/components/ui";
 import { inr, num } from "@/lib/format";
 
 type Plan = {
@@ -121,7 +121,16 @@ export default function Plans() {
     setRows((rs) => rs.map((r) => (r.code === code ? { ...r, ...patch } : r)));
   }
 
-  if (!data) return null; // (dash)/loading.tsx covers the pending state
+  if (!data) {
+    return (
+      <>
+        <PageHead title="Plans & Subscriptions" subtitle="Edit pricing and roll plans out to every install — no app update needed" />
+        <Card><Skel className="h-16 w-full" /></Card>
+        <div className="mt-3.5"><KpiSkeletons n={4} /></div>
+        <Card title="Plans" className="mt-3.5"><Skel className="h-40 w-full" /></Card>
+      </>
+    );
+  }
 
   const on = data.config.payments_enabled !== false;
   const activeSubs = data.subscribers.filter((s) => s.status !== "expired");

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Pill, Td, Th } from "@/components/ui";
+import { Card, Empty, Pill, Skel, Td, Th } from "@/components/ui";
 import { num, when } from "@/lib/format";
 
 type Adoption = { app_version: string; devices: number; events: number; last_seen?: string };
@@ -15,8 +15,8 @@ type Data = {
   releases: Release[]; releasesNeedsSql: boolean;
   adoption: Adoption[]; adoptionNeedsSql: boolean;
   force_update: ForceUpdate; latest_version: string;
-  commits: Commit[]; gitError: string | null; repo: string;
 };
+type Git = { commits: Commit[]; gitError: string | null; repo: string };
 
 const emptyForm = { version: "", kind: "patch", shorebird_patch: "", git_sha: "", notes: "" };
 
@@ -30,13 +30,17 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 
 export default function Releases() {
   const [d, setD] = useState<Data | null>(null);
+  const [git, setGit] = useState<Git | null>(null); // fetched separately so GitHub never blocks the page
   const [form, setForm] = useState<typeof emptyForm>({ ...emptyForm });
   const [flash, setFlash] = useState("");
 
   async function load() {
     setD(await fetch("/api/releases").then((r) => r.json()));
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    fetch("/api/git").then((r) => r.json()).then(setGit).catch(() => setGit({ commits: [], gitError: "git unavailable", repo: "" }));
+  }, []);
   function say(m: string) { setFlash(m); setTimeout(() => setFlash(""), 2000); }
 
   async function addRelease() {
@@ -64,7 +68,22 @@ export default function Releases() {
     document.getElementById("rel-form")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  if (!d) return null; // (dash)/loading.tsx covers pending
+  if (!d) {
+    return (
+      <>
+        <PageHead title="Releases & Patches" subtitle="Watch versions roll out, keep a record, and gate old installs" />
+        <Card title="Fleet by version">
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 5 }).map((_, i) => <Skel key={i} className="h-8 w-full" />)}
+          </div>
+        </Card>
+        <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1fr_1fr]">
+          <Card title="Release log"><Skel className="h-40 w-full" /></Card>
+          <Card title="Recent commits"><Skel className="h-40 w-full" /></Card>
+        </div>
+      </>
+    );
+  }
 
   const maxDevices = Math.max(1, ...d.adoption.map((a) => a.devices));
   const fu = d.force_update || { version: "", message: "", enabled: false };
@@ -150,22 +169,28 @@ export default function Releases() {
           </div>
         </Card>
 
-        {/* Git history */}
-        <Card title="Recent commits" right={<span className="text-faint text-xs font-mono">{d.repo}</span>}>
-          {d.gitError && <div className="text-red text-xs font-semibold mb-2">{d.gitError}</div>}
+        {/* Git history — loaded separately so GitHub never blocks the page */}
+        <Card title="Recent commits" right={<span className="text-faint text-xs font-mono">{git?.repo || ""}</span>}>
+          {git?.gitError && <div className="text-red text-xs font-semibold mb-2">{git.gitError}</div>}
           <div className="flex flex-col gap-1.5 max-h-[440px] overflow-y-auto">
-            {d.commits.map((c) => (
-              <div key={c.sha} className="rounded-lg hover:bg-canvas/60 p-2 flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-[13px] truncate">{c.message}</div>
-                  <div className="text-faint text-[11px]">
-                    <span className="font-mono">{c.short}</span> · {c.author} · {c.date ? when(c.date) : ""}
+            {!git ? (
+              Array.from({ length: 6 }).map((_, i) => <Skel key={i} className="h-10 w-full" />)
+            ) : (
+              <>
+                {git.commits.map((c) => (
+                  <div key={c.sha} className="rounded-lg hover:bg-canvas/60 p-2 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[13px] truncate">{c.message}</div>
+                      <div className="text-faint text-[11px]">
+                        <span className="font-mono">{c.short}</span> · {c.author} · {c.date ? when(c.date) : ""}
+                      </div>
+                    </div>
+                    <button className="btn btn-ghost py-1 px-2 text-xs whitespace-nowrap" onClick={() => logFromCommit(c)}>Log ↑</button>
                   </div>
-                </div>
-                <button className="btn btn-ghost py-1 px-2 text-xs whitespace-nowrap" onClick={() => logFromCommit(c)}>Log ↑</button>
-              </div>
-            ))}
-            {!d.commits.length && !d.gitError && <Empty>No commits.</Empty>}
+                ))}
+                {!git.commits.length && !git.gitError && <Empty>No commits.</Empty>}
+              </>
+            )}
           </div>
         </Card>
       </div>

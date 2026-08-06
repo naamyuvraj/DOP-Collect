@@ -68,3 +68,22 @@ export function Td({ children, className = "" }: { children: ReactNode; classNam
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="text-muted text-sm py-8 text-center">{children}</div>;
 }
+
+/** A shimmering placeholder block, sized by className, for loading states. */
+export function Skel({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-lg bg-line/70 ${className}`} />;
+}
+
+/** A row of KPI-card skeletons (matches the <Kpi> grid) while data loads. */
+export function KpiSkeletons({ n = 4 }: { n?: number }) {
+  return (
+    <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4">
+      {Array.from({ length: n }).map((_, i) => (
+        <div key={i} className="card p-[18px]">
+          <Skel className="h-2.5 w-14" />
+          <Skel className="h-7 w-20 mt-3" />
+        </div>
+      ))}
+    </div>
+  );
+}

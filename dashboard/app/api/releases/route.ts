@@ -16,7 +16,6 @@ export const dynamic = "force-dynamic";
 //   + an optional non-forcing latest_version pointer.
 
 const guard = () => (isAuthed() ? null : NextResponse.json({ error: "unauthorized" }, { status: 401 }));
-const REPO = process.env.GITHUB_REPO || "naamyuvraj/DOP-Collect";
 
 type Adoption = { app_version: string; devices: number; events: number; first_seen?: string; last_seen?: string };
 
@@ -52,45 +51,18 @@ async function fleetAdoption(): Promise<{ rows: Adoption[]; needsSql: boolean }>
   return { rows, needsSql: true };
 }
 
-async function gitCommits() {
-  try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/commits?per_page=15`, {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": "dop-dashboard",
-        ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
-      },
-      next: { revalidate: 300 }, // cache 5 min — GitHub unauth limit is 60/hr
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return { commits: [], gitError: `GitHub ${res.status}` };
-    const data = (await res.json()) as any[];
-    return {
-      commits: data.map((c) => ({
-        sha: c.sha as string,
-        short: (c.sha as string).slice(0, 7),
-        message: (c.commit?.message || "").split("\n")[0],
-        author: c.commit?.author?.name || c.author?.login || "?",
-        date: c.commit?.author?.date,
-        url: c.html_url,
-      })),
-      gitError: null as string | null,
-    };
-  } catch (e) {
-    return { commits: [], gitError: `git fetch failed: ${String(e)}` };
-  }
-}
+// NOTE: git commits are fetched separately (GET /api/git) so a slow GitHub call
+// never blocks this page's own data. See app/api/git/route.ts.
 
 export async function GET() {
   const bad = guard();
   if (bad) return bad;
   try {
     const sb = admin();
-    const [rel, cfg, fleet, git] = await Promise.all([
+    const [rel, cfg, fleet] = await Promise.all([
       sb.from("releases").select("*").order("created_at", { ascending: false }).limit(100),
       sb.from("app_config").select("key,value").in("key", ["force_update", "latest_version"]),
       fleetAdoption(),
-      gitCommits(),
     ]);
     const config: Record<string, unknown> = {};
     for (const r of cfg.data || []) config[(r as any).key] = (r as any).value;
@@ -101,9 +73,6 @@ export async function GET() {
       adoptionNeedsSql: fleet.needsSql,
       force_update: config.force_update ?? { version: "", message: "", enabled: false },
       latest_version: config.latest_version ?? "",
-      commits: git.commits,
-      gitError: git.gitError,
-      repo: REPO,
     });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });

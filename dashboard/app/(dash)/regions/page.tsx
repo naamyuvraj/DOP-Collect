@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
+import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Td, Th } from "@/components/ui";
 import { num, when } from "@/lib/format";
 
 type Region = {
@@ -30,7 +30,15 @@ export default function Regions() {
   useEffect(() => {
     fetch("/api/regions").then((r) => r.json()).then(setD);
   }, []);
-  if (!d) return null; // (dash)/loading.tsx covers pending
+  if (!d) {
+    return (
+      <>
+        <PageHead title="Regions" subtitle="Where the app is used — installs & agents by post-office branch (SOL ID)" />
+        <KpiSkeletons n={4} />
+        <Card title="Branches / regions" className="mt-3.5"><Skel className="h-40 w-full" /></Card>
+      </>
+    );
+  }
 
   const t = d.totals || {};
   const maxUse = Math.max(1, ...d.regions.map((r) => r.installs + r.subscribers));
