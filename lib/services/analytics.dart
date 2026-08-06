@@ -4,7 +4,9 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/agent_id.dart';
 import '../data/app_settings.dart';
+import '../data/credentials.dart';
 import 'supabase_config.dart';
 
 /// Anonymous, privacy-safe product analytics -> Supabase (via the REST API with
@@ -44,9 +46,16 @@ class Analytics {
     if (!_live || (_identified && !force)) return;
     _identified = true;
     final name = await AppSettings.agentName();
+    // Attach the DOP agent id + its SOL ID (post-office branch) so the dashboard
+    // can track usage per agent and per region. Empty until the agent has logged
+    // in (identify is re-sent with force:true right after login).
+    final agentId = (await Credentials.load()).agentId.trim();
+    final sol = AgentId.solOf(agentId);
     await _ingest('device', {
       'id': await _did(),
       'agent_name': name.isEmpty ? null : name,
+      'agent_id': agentId.isEmpty ? null : agentId,
+      'sol_id': sol.isEmpty ? null : sol,
       'app_version': SupabaseConfig.buildVersion,
       'platform': 'android',
     });

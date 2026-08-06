@@ -74,16 +74,19 @@ Deno.serve(async (req) => {
         app_version: clip(row.app_version, 32),
       });
     } else if (kind === "device") {
-      await sb.from("devices").upsert(
-        {
-          id: clip(row.id, 64),
-          agent_name: clip(row.agent_name, 80),
-          app_version: clip(row.app_version, 32),
-          platform: clip(row.platform, 16) || "android",
-          last_seen: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
+      // agent_id / sol_id (post-office branch) power per-agent + per-region
+      // analytics. Only set them when the app actually sends them, so an older
+      // build that omits them can't null out a value already on the row.
+      const deviceRow: Record<string, unknown> = {
+        id: clip(row.id, 64),
+        agent_name: clip(row.agent_name, 80),
+        app_version: clip(row.app_version, 32),
+        platform: clip(row.platform, 16) || "android",
+        last_seen: new Date().toISOString(),
+      };
+      if (row.agent_id) deviceRow.agent_id = clip(row.agent_id, 64);
+      if (row.sol_id) deviceRow.sol_id = clip(row.sol_id, 32);
+      await sb.from("devices").upsert(deviceRow, { onConflict: "id" });
     } else if (kind === "key_usage") {
       await sb.from("key_usage").insert({
         device_id: clip(row.device_id, 64),
