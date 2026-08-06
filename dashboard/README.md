@@ -44,6 +44,12 @@ Run in the SQL editor, in order:
   per-plan Offered toggles (`plans.active`), trial length, and a subscriber list.
   The app reads plans live via the `pay` edge function, so changes take effect
   on the next refresh.
+- **Releases** — see how each build/Shorebird patch has rolled out across
+  installs (from telemetry), keep a maintained release/patch log, pull recent
+  commits straight from GitHub (log one with a click), and drive the
+  force-update gate. Building/pushing an OTA patch itself is still a dev-machine
+  `shorebird patch`; this page tracks, records, and gates. Run
+  `../admin/schema_releases.sql` once to enable the log + scalable version view.
 - **App Config** — feature flags, force-update, announcement banner (read by the
   app at runtime, no rebuild needed).
 

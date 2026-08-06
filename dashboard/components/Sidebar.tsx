@@ -10,6 +10,7 @@ const NAV = [
   { href: "/keys", label: "API Keys", icon: "M15 7a4 4 0 11-4 4h-1l-2 2-2-2H3v-3l6-6a4 4 0 016 5z" },
   { href: "/payments", label: "Payments", icon: "M3 7h18v10H3zM3 11h18" },
   { href: "/plans", label: "Plans", icon: "M4 7h16v12H4zM4 7l2-3h12l2 3M9 12h6" },
+  { href: "/releases", label: "Releases", icon: "M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" },
   { href: "/config", label: "App Config", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM4 12h2m12 0h2M12 4v2m0 12v2" },
 ];
 
