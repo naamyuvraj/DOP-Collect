@@ -2,6 +2,7 @@ import PageHead from "@/components/PageHead";
 import { Bars, Donut, TrendArea } from "@/components/LazyCharts";
 import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
 import {
+  getAccountsSummary,
   getCollections,
   getDaily,
   getEventTypes,
@@ -25,13 +26,14 @@ type Ev = {
 };
 
 export default async function Overview() {
-  const [s, daily, types, keys, rev, coll, events] = await Promise.all([
+  const [s, daily, types, keys, rev, coll, acc, events] = await Promise.all([
     getSummary(),
     getDaily(),
     getEventTypes(),
     getKeyUsage(),
     getRevenueByDay(),
     getCollections(),
+    getAccountsSummary(),
     recent<Ev>("events", "device_id,event,props,created_at", 12),
   ]);
 
@@ -52,6 +54,20 @@ export default async function Overview() {
         <Kpi label="AI queries" value={num(s.total_queries)} />
         <Kpi label="Key calls · 24h" value={num(s.key_calls_1d)} />
       </div>
+
+      {/* Accounts under management — the size of the agents' portal books */}
+      <Card
+        title="Accounts under management"
+        className="mt-3.5"
+        right={<span className="text-muted text-xs">from the agents’ portal books (latest sync)</span>}
+      >
+        <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4">
+          <Kpi label="Accounts maintained" value={num(acc.total_accounts)} sub={`across ${num(acc.agents)} agents`} focal />
+          <Kpi label="Agents maintaining" value={num(acc.agents)} />
+          <Kpi label="Avg per agent" value={num(acc.avg_accounts)} sub={`largest ${num(acc.max_accounts)}`} />
+          <Kpi label="Collected (all-time)" value={inr(s.collected_amount)} sub={`${num(s.lists_submitted)} lists on portal`} />
+        </div>
+      </Card>
 
       <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1.4fr_1fr]">
         <Card title="Daily active devices">

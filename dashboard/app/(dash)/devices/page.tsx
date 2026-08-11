@@ -1,6 +1,6 @@
 import PageHead from "@/components/PageHead";
 import { Card, Empty, Pill, Td, Th } from "@/components/ui";
-import { getDevices } from "@/lib/data";
+import { getAgentAccounts, getDevices } from "@/lib/data";
 import { num, shortId, when } from "@/lib/format";
 
 export const revalidate = 60; // ISR: instant repeat loads, data ≤60s stale.
@@ -16,13 +16,14 @@ function activeTone(last: string | null) {
 export default async function Devices() {
   // v_devices = the devices table UNION everyone who has sent events, so a real
   // user shows up even if the identify() upsert never landed.
-  const devices = await getDevices();
+  const [devices, accounts] = await Promise.all([getDevices(), getAgentAccounts()]);
+  const totalAccounts = [...accounts.values()].reduce((a, b) => a + b, 0);
 
   return (
     <>
       <PageHead
         title="Users & Devices"
-        subtitle={`${devices.length} installs`}
+        subtitle={`${devices.length} installs · ${num(totalAccounts)} accounts maintained`}
       />
       <Card>
         <div className="overflow-x-auto">
@@ -32,6 +33,7 @@ export default async function Devices() {
                 <Th>Agent</Th>
                 <Th>Device ID</Th>
                 <Th>Version</Th>
+                <Th>Accounts</Th>
                 <Th>Events</Th>
                 <Th>First seen</Th>
                 <Th>Last seen</Th>
@@ -41,12 +43,14 @@ export default async function Devices() {
             <tbody>
               {devices.map((d) => {
                 const a = activeTone(d.last_seen);
+                const acc = accounts.get(d.id);
                 return (
                   <tr key={d.id}>
                     <Td className="font-semibold">{d.agent_name || "—"}</Td>
                     <Td className="font-mono text-xs">{shortId(d.id)}</Td>
                     <Td>{d.app_version || "—"}</Td>
-                    <Td className="mono">{num(d.events)}</Td>
+                    <Td className="font-semibold">{acc != null ? num(acc) : <span className="text-faint">—</span>}</Td>
+                    <Td className="font-mono">{num(d.events)}</Td>
                     <Td className="text-muted whitespace-nowrap">{d.first_seen ? when(d.first_seen) : "—"}</Td>
                     <Td className="text-muted whitespace-nowrap">{d.last_seen ? when(d.last_seen) : "—"}</Td>
                     <Td><Pill tone={a.tone}>{a.txt}</Pill></Td>

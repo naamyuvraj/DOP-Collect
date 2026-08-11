@@ -86,6 +86,51 @@ export const getPlans = () =>
     "plans"
   );
 
+// --- Accounts under management ---------------------------------------------
+// How many RD accounts each agent maintains (from the latest sync_done, which
+// carries {accounts: N}). Prefers the v_accounts_summary view; falls back to
+// aggregating sync_done events so it works before schema_accounts.sql is run.
+
+export type AccountsSummary = { agents: number; total_accounts: number; avg_accounts: number; max_accounts: number };
+
+/** Latest account count per device_id (from its most recent sync_done). */
+async function latestAccountsByDevice(): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (!dbConfigured()) return map;
+  const { data } = await admin()
+    .from("events")
+    .select("device_id,props,created_at")
+    .eq("event", "sync_done")
+    .order("created_at", { ascending: false })
+    .limit(5000);
+  for (const e of (data as any[]) || []) {
+    if (map.has(e.device_id)) continue; // rows are newest-first → first wins
+    const n = Number(e.props?.accounts);
+    if (Number.isFinite(n) && n >= 0) map.set(e.device_id, n);
+  }
+  return map;
+}
+
+export async function getAccountsSummary(): Promise<AccountsSummary> {
+  const empty = { agents: 0, total_accounts: 0, avg_accounts: 0, max_accounts: 0 };
+  if (!dbConfigured()) return empty;
+  const v = await admin().from("v_accounts_summary").select("*");
+  if (!v.error && v.data?.[0]) return v.data[0] as AccountsSummary;
+  // Fallback: aggregate from events.
+  const latest = await latestAccountsByDevice();
+  const vals = [...latest.values()];
+  const total = vals.reduce((a, b) => a + b, 0);
+  return {
+    agents: latest.size,
+    total_accounts: total,
+    avg_accounts: latest.size ? Math.round(total / latest.size) : 0,
+    max_accounts: vals.length ? Math.max(...vals) : 0,
+  };
+}
+
+/** { device_id -> accounts } for showing each agent's book size on Devices. */
+export const getAgentAccounts = () => latestAccountsByDevice();
+
 export async function recent<T>(
   table: string,
   cols = "*",
