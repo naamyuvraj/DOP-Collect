@@ -36,7 +36,7 @@ const readUsers = unstable_cache(
     // Base on v_devices (devices ∪ everyone who sent events) so an agent who
     // synced but whose identify() upsert never landed is NOT dropped. Merge the
     // extra identity columns (agent_id/sol_id/phone_verified/name) from devices.
-    const [baseRes, devRes, subRes, syncRes, submitRes] = await Promise.all([
+    const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes] = await Promise.all([
       sb.from("v_devices").select("*"),
       // select("*") so a not-yet-migrated column (e.g. mobile) can't error the
       // whole query and wipe out agent_id/sol_id/name/phone_verified.
@@ -44,6 +44,7 @@ const readUsers = unstable_cache(
       sb.from("v_subscriptions").select("agent_id,plan_name,plan_code,status"),
       sb.from("events").select("device_id,props,created_at").eq("event", "sync_done").order("created_at", { ascending: false }).limit(5000),
       sb.from("events").select("device_id,props").eq("event", "list_submitted").limit(5000),
+      sb.from("app_config").select("value").eq("key", "region_labels").maybeSingle(),
     ]);
     const base = (baseRes.error ? (devRes.data as any[]) : (baseRes.data as any[])) || [];
     const extra = new Map<string, any>(((devRes.data as any[]) || []).map((d) => [String(d.id), d]));
@@ -103,7 +104,8 @@ const readUsers = unstable_cache(
       active: rows.filter((r) => r.active).length,
       subscribers: rows.filter((r) => r.sub_status && r.sub_status !== "expired").length,
     };
-    return { rows, totals };
+    const region_labels = (cfgRes.data?.value as Record<string, string>) || {};
+    return { rows, totals, region_labels };
   },
   ["users-data"],
   { revalidate: 60, tags: ["users"] }
