@@ -38,7 +38,7 @@ const readUsers = unstable_cache(
     // Base on v_devices (devices ∪ everyone who sent events) so an agent who
     // synced but whose identify() upsert never landed is NOT dropped. Merge the
     // extra identity columns (agent_id/sol_id/phone_verified/name) from devices.
-    const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes, sessRes] = await Promise.all([
+    const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes, sessRes, acctRes] = await Promise.all([
       sb.from("v_devices").select("*"),
       // select("*") so a not-yet-migrated column (e.g. mobile) can't error the
       // whole query and wipe out agent_id/sol_id/name/phone_verified.
@@ -51,12 +51,19 @@ const readUsers = unstable_cache(
       // session means the phone was verified — don't rely on devices.phone_verified
       // (which only gets set once the OTP function is redeployed).
       sb.from("device_sessions").select("device_id,account_id,revoked_at"),
+      // accounts binds account_id <-> DOP agent_id (1:1). Lets us resolve a
+      // device that only carries the account (not agent_id yet) to its agent, so
+      // all of an agent's phones group together.
+      sb.from("accounts").select("id,agent_id"),
     ]);
     const base = (baseRes.error ? (devRes.data as any[]) : (baseRes.data as any[])) || [];
     const extra = new Map<string, any>(((devRes.data as any[]) || []).map((d) => [String(d.id), d]));
     const subs = (subRes.data as any[]) || [];
     const syncs = (syncRes.data as any[]) || [];
     const submits = (submitRes.data as any[]) || [];
+    // account_id -> agent_id.
+    const acctToAgent = new Map<string, string>();
+    for (const a of (acctRes.data as any[]) || []) if (a.id && a.agent_id) acctToAgent.set(a.id, a.agent_id);
     // device_id -> { account_id, verified } from live sessions.
     const sessByDevice = new Map<string, { account_id: string | null; verified: boolean }>();
     for (const s of (sessRes.data as any[]) || []) {
@@ -87,11 +94,14 @@ const readUsers = unstable_cache(
     const perDevice = base.map((b) => {
       const id = String(b.id);
       const x = extra.get(id) || {};
-      const agentId = x.agent_id || null;
       const sess = sessByDevice.get(id);
+      const accountId = sess?.account_id || x.account_id || null;
+      // Prefer the device's own agent_id; else resolve it from its verified
+      // account, so a phone that only carries the account still joins its agent.
+      const agentId = x.agent_id || (accountId ? acctToAgent.get(accountId) || null : null);
       return {
         id,
-        account_id: sess?.account_id || x.account_id || null,
+        account_id: accountId,
         agentId,
         name: x.name || null,
         mobile: x.mobile || null,
@@ -163,7 +173,9 @@ const readUsers = unstable_cache(
     return { rows, totals, region_labels };
   },
   ["users-data"],
-  { revalidate: 60, tags: ["users"] }
+  // Short cache so the Users tab tracks live activity (and the Overview) closely
+  // — telemetry has no write hook here to bust the tag, so we lean on time.
+  { revalidate: 15, tags: ["users"] }
 );
 
 export async function GET() {
