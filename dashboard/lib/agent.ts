@@ -8,6 +8,7 @@
 // here: this module just answers a question given some recalled context.
 // ---------------------------------------------------------------------------
 import { admin, dbConfigured } from "./supabase";
+import { getAccountsSummary } from "./data";
 import { ChatMessage, groqChat, ToolSpec } from "./groq";
 
 // --- Tool catalog ----------------------------------------------------------
@@ -110,6 +111,15 @@ export const TOOLS: ToolSpec[] = [
       parameters: { type: "object", properties: {} },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "get_accounts",
+      description:
+        "Accounts under management across all agents: how many RD accounts the agents maintain in total (from each agent's latest portal sync), the number of agents, and the average/largest book size. Use for 'how many accounts do our agents handle'.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
 ];
 
 // --- Tool executors --------------------------------------------------------
@@ -193,6 +203,8 @@ async function execTool(name: string, args: Record<string, unknown>): Promise<un
       for (const r of data || []) map[(r as any).key] = (r as any).value;
       return map;
     }
+    case "get_accounts":
+      return await getAccountsSummary();
     default:
       return { error: `unknown tool ${name}` };
   }

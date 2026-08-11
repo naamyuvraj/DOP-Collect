@@ -84,6 +84,7 @@ Deno.serve(async (req) => {
         platform: clip(row.platform, 16) || "android",
         last_seen: new Date().toISOString(),
       };
+      if (row.name) deviceRow.name = clip(row.name, 80);
       if (row.agent_id) deviceRow.agent_id = clip(row.agent_id, 64);
       if (row.sol_id) deviceRow.sol_id = clip(row.sol_id, 32);
       await sb.from("devices").upsert(deviceRow, { onConflict: "id" });

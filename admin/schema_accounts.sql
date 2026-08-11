@@ -8,6 +8,10 @@
 -- Read-only telemetry; service_role only.
 -- ============================================================================
 
+-- The agent's display name (shown on the Users tab). Sent by the app with its
+-- telemetry; nullable until the app update that sends it ships.
+alter table public.devices add column if not exists name text;
+
 -- Latest known account count per device (from its most recent sync_done).
 create or replace view public.v_agent_accounts as
   select distinct on (device_id)
