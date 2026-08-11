@@ -46,6 +46,7 @@ export default function Users() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "inactive">("all");
   const [plan, setPlan] = useState<"all" | "subscribed" | "none">("all");
+  const [verified, setVerified] = useState<"all" | "verified" | "unverified">("all");
   const [mode, setMode] = useState<"agents" | "regions">("agents");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "last_seen", dir: -1 });
   const [open, setOpen] = useState<UserRow | null>(null);
@@ -64,6 +65,8 @@ export default function Users() {
       if (status === "inactive" && r.active) return false;
       if (plan === "subscribed" && !(r.sub_status && r.sub_status !== "expired")) return false;
       if (plan === "none" && r.sub_status && r.sub_status !== "expired") return false;
+      if (verified === "verified" && !r.phone_verified) return false;
+      if (verified === "unverified" && r.phone_verified) return false;
       if (needle) {
         const hay = [r.name, r.mobile, r.agent_name, r.agent_id, r.region, regionOf(r.region), r.plan, r.app_version].join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
@@ -80,7 +83,7 @@ export default function Users() {
       return String(av).localeCompare(String(bv)) * dir;
     });
     return rows;
-  }, [d, q, status, plan, sort, labels]);
+  }, [d, q, status, plan, verified, sort, labels]);
 
   const regions = useMemo(() => {
     const m = new Map<string, { region: string; agents: number; accounts: number; collected: number; active: number }>();
@@ -134,7 +137,7 @@ export default function Users() {
           <Kpi label="Users (agents)" value={num(t.users)} sub={`${num(t.phones)} phones`} />
           <Kpi label="Active · 7d" value={num(t.active)} />
           <Kpi label="Accounts" value={num(t.accounts)} focal />
-          <Kpi label="Collected" value={inr(t.collected)} />
+          <Kpi label="Total collected ₹" value={inr(t.collected)} />
           <Kpi label="Subscribers" value={num(t.subscribers)} />
         </div>
       )}
@@ -144,6 +147,7 @@ export default function Users() {
           <input className="input max-w-xs" placeholder="Search name, mobile, agent, ID, region…" value={q} onChange={(e) => setQ(e.target.value)} />
           <Segmented value={status} onChange={(v) => setStatus(v as any)} options={[["all", "All"], ["active", "Active"], ["inactive", "Inactive"]]} />
           <Segmented value={plan} onChange={(v) => setPlan(v as any)} options={[["all", "Any plan"], ["subscribed", "Subscribed"], ["none", "No plan"]]} />
+          <Segmented value={verified} onChange={(v) => setVerified(v as any)} options={[["all", "Any"], ["verified", "Verified"], ["unverified", "Unverified"]]} />
           <div className="ml-auto flex items-center gap-2">
             <Segmented value={mode} onChange={(v) => setMode(v as any)} options={[["agents", "Agents"], ["regions", "By region"]]} />
             <button className="btn btn-ghost" onClick={exportCsv} disabled={!view.length}>Export CSV</button>
