@@ -9,8 +9,10 @@ export const dynamic = "force-dynamic";
 // the sync/collection history so you can see what an agent has been doing.
 export async function GET(req: NextRequest) {
   if (!isAuthed()) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const device = (req.nextUrl.searchParams.get("device") || "").slice(0, 64);
-  if (!device) return NextResponse.json({ error: "device required" }, { status: 400 });
+  // Accept one device or an agent's several phones (comma-separated).
+  const ids = (req.nextUrl.searchParams.get("device") || "")
+    .split(",").map((s) => s.trim().slice(0, 64)).filter(Boolean).slice(0, 8);
+  if (!ids.length) return NextResponse.json({ error: "device required" }, { status: 400 });
   if (!dbConfigured()) return NextResponse.json({ events: [], syncs: [], collections: [] });
 
   try {
@@ -18,7 +20,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await sb
       .from("events")
       .select("event,props,app_version,created_at")
-      .eq("device_id", device)
+      .in("device_id", ids)
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) return NextResponse.json({ error: error.message }, { status: 200 });

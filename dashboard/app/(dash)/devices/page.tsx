@@ -6,6 +6,8 @@ import { inr, num, when } from "@/lib/format";
 
 type UserRow = {
   device_id: string;
+  device_ids: string[];
+  devices: number;
   name: string | null;
   mobile: string | null;
   agent_name: string | null;
@@ -22,13 +24,14 @@ type UserRow = {
   active: boolean;
 };
 type Labels = Record<string, string>;
-type Data = { rows: UserRow[]; totals: { users?: number; accounts?: number; collected?: number; active?: number; subscribers?: number }; region_labels?: Labels };
+type Data = { rows: UserRow[]; totals: { users?: number; accounts?: number; collected?: number; active?: number; subscribers?: number; phones?: number }; region_labels?: Labels };
 
-type SortKey = "name" | "mobile" | "agent_name" | "region" | "accounts" | "collected" | "plan" | "app_version" | "last_seen";
+type SortKey = "name" | "mobile" | "agent_name" | "devices" | "region" | "accounts" | "collected" | "plan" | "app_version" | "last_seen";
 const COLS: { key: SortKey; label: string; num?: boolean }[] = [
   { key: "name", label: "Name" },
   { key: "mobile", label: "Mobile" },
   { key: "agent_name", label: "Agent" },
+  { key: "devices", label: "Phones", num: true },
   { key: "region", label: "Region" },
   { key: "accounts", label: "Accounts", num: true },
   { key: "collected", label: "Collected", num: true },
@@ -128,7 +131,7 @@ export default function Users() {
         <KpiSkeletons n={5} />
       ) : (
         <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
-          <Kpi label="Users" value={num(t.users)} />
+          <Kpi label="Users (agents)" value={num(t.users)} sub={`${num(t.phones)} phones`} />
           <Kpi label="Active · 7d" value={num(t.active)} />
           <Kpi label="Accounts" value={num(t.accounts)} focal />
           <Kpi label="Collected" value={inr(t.collected)} />
@@ -208,6 +211,7 @@ export default function Users() {
                         <Cell className="font-semibold">{r.name || <span className="text-faint">—</span>}</Cell>
                         <Cell className="font-mono text-xs">{r.mobile || <span className="text-faint">—</span>}</Cell>
                         <Cell>{r.agent_name || <span className="text-faint">—</span>}</Cell>
+                        <Cell right>{r.devices > 1 ? <Pill tone="a">{r.devices}</Pill> : <span className="text-muted">{r.devices}</span>}</Cell>
                         <Cell className="font-mono text-xs">
                           {r.region ? <>{r.region}{regionOf(r.region) && <span className="text-muted font-sans"> · {regionOf(r.region)}</span>}</> : <span className="text-faint">—</span>}
                         </Cell>
@@ -242,7 +246,7 @@ function AgentDrawer({ row, district, onClose }: { row: UserRow; district: strin
   const [det, setDet] = useState<Detail | null>(null);
   useEffect(() => {
     setDet(null);
-    fetch(`/api/user?device=${encodeURIComponent(row.device_id)}`).then((r) => r.json()).then(setDet).catch(() => setDet({ events: [] }));
+    fetch(`/api/user?device=${encodeURIComponent(row.device_ids.join(","))}`).then((r) => r.json()).then(setDet).catch(() => setDet({ events: [] }));
     const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
@@ -275,9 +279,10 @@ function AgentDrawer({ row, district, onClose }: { row: UserRow; district: strin
             <Row k="Agent ID" v={row.agent_id || "—"} mono />
             <Row k="Phone verified" v={row.phone_verified ? "yes" : "no"} />
             <Row k="App version" v={row.app_version || "—"} />
+            <Row k="Phones" v={`${row.devices}${row.devices > 1 ? " (merged)" : ""}`} />
             <Row k="First seen" v={row.first_seen ? when(row.first_seen) : "—"} />
             <Row k="Last seen" v={row.last_seen ? when(row.last_seen) : "—"} />
-            <Row k="Device" v={row.device_id.slice(0, 8)} mono last />
+            <Row k="Devices" v={row.device_ids.map((x) => x.slice(0, 8)).join(", ")} mono last />
           </div>
 
           <div className="card p-4">

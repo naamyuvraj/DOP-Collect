@@ -13,7 +13,9 @@ export const dynamic = "force-dynamic";
 // never stored (OTP keeps only a hash) — we expose phone_verified instead.
 
 export type UserRow = {
-  device_id: string;
+  device_id: string; // primary device (most recently seen) of the group
+  device_ids: string[]; // every install belonging to this agent
+  devices: number; // how many phones this agent is on
   name: string | null;
   mobile: string | null;
   agent_name: string | null;
@@ -70,39 +72,80 @@ const readUsers = unstable_cache(
     for (const s of subs) subByAgent.set(s.agent_id, { plan: s.plan_name ?? s.plan_code ?? null, status: s.status ?? null });
 
     const weekAgo = Date.now() - 7 * 864e5;
-    const rows: UserRow[] = base.map((b) => {
+    // One record per install first…
+    const perDevice = base.map((b) => {
       const id = String(b.id);
       const x = extra.get(id) || {};
       const agentId = x.agent_id || null;
-      const sub = agentId ? subByAgent.get(agentId) : undefined;
       return {
-        device_id: id,
+        id,
+        account_id: x.account_id || null,
+        agentId,
         name: x.name || null,
         mobile: x.mobile || null,
         agent_name: b.agent_name || null,
-        agent_id: agentId,
-        region: x.sol_id || (agentId ? solOf(agentId) || null : null),
+        sol_id: x.sol_id || (agentId ? solOf(agentId) || null : null),
         accounts: accByDevice.has(id) ? accByDevice.get(id)! : null,
         collected: collByDevice.get(id) || 0,
-        plan: sub?.plan ?? null,
-        sub_status: sub?.status ?? null,
         phone_verified: !!x.phone_verified,
         app_version: b.app_version || null,
         first_seen: b.first_seen || null,
         last_seen: b.last_seen || null,
-        active: !!b.last_seen && new Date(b.last_seen).getTime() >= weekAgo,
       };
     });
 
-    // Sort by most recently seen by default.
+    // …then collapse an agent's multiple phones into ONE user. Group by the DOP
+    // agent id when we have it; otherwise the best stable identity we do have
+    // (OTP account binding, then the typed agent name), else the device itself.
+    const groupKey = (d: (typeof perDevice)[number]) =>
+      d.agentId ? `id:${d.agentId}` : d.account_id ? `acc:${d.account_id}` : d.agent_name ? `nm:${d.agent_name.toLowerCase()}` : `dev:${d.id}`;
+
+    const groups = new Map<string, (typeof perDevice)[number][]>();
+    for (const d of perDevice) {
+      const k = groupKey(d);
+      (groups.get(k) || groups.set(k, []).get(k)!).push(d);
+    }
+
+    const pick = <T,>(ds: any[], f: (d: any) => T): T | null => { for (const d of ds) { const v = f(d); if (v != null && v !== "") return v; } return null; };
+    const rows: UserRow[] = [...groups.values()].map((ds) => {
+      const byRecent = [...ds].sort((a, b) => (a.last_seen || "") < (b.last_seen || "") ? 1 : -1);
+      const agentId = pick(byRecent, (d) => d.agentId);
+      const sub = agentId ? subByAgent.get(agentId) : undefined;
+      // Accounts = the agent's book, so MAX across their phones (not the sum —
+      // the same book synced on 4 phones must not count as 4×). Collected = SUM
+      // (distinct submissions across their phones).
+      const accVals = ds.map((d) => d.accounts).filter((v): v is number => v != null);
+      const lastSeen = pick(byRecent, (d) => d.last_seen);
+      return {
+        device_id: byRecent[0].id,
+        device_ids: ds.map((d) => d.id),
+        devices: ds.length,
+        name: pick(byRecent, (d) => d.name),
+        mobile: pick(byRecent, (d) => d.mobile),
+        agent_name: pick(byRecent, (d) => d.agent_name),
+        agent_id: agentId,
+        region: pick(byRecent, (d) => d.sol_id),
+        accounts: accVals.length ? Math.max(...accVals) : null,
+        collected: ds.reduce((s, d) => s + d.collected, 0),
+        plan: sub?.plan ?? null,
+        sub_status: sub?.status ?? null,
+        phone_verified: ds.some((d) => d.phone_verified),
+        app_version: byRecent[0].app_version,
+        first_seen: ds.reduce<string | null>((m, d) => (!m || (d.first_seen && d.first_seen < m) ? d.first_seen : m), null),
+        last_seen: lastSeen,
+        active: !!lastSeen && new Date(lastSeen).getTime() >= weekAgo,
+      };
+    });
+
     rows.sort((a, b) => (a.last_seen || "") < (b.last_seen || "") ? 1 : -1);
 
     const totals = {
       users: rows.length,
-      accounts: rows.reduce((s, r) => s + (r.accounts || 0), 0),
+      accounts: rows.reduce((s, r) => s + (r.accounts || 0), 0), // per-agent, no double-count
       collected: rows.reduce((s, r) => s + r.collected, 0),
       active: rows.filter((r) => r.active).length,
       subscribers: rows.filter((r) => r.sub_status && r.sub_status !== "expired").length,
+      phones: perDevice.length,
     };
     const region_labels = (cfgRes.data?.value as Record<string, string>) || {};
     return { rows, totals, region_labels };
