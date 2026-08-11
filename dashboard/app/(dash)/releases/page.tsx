@@ -14,11 +14,19 @@ type ForceUpdate = { version: string; message: string; enabled: boolean };
 type Data = {
   releases: Release[]; releasesNeedsSql: boolean;
   adoption: Adoption[]; adoptionNeedsSql: boolean;
-  force_update: ForceUpdate; latest_version: string;
+  force_update: ForceUpdate; latest_version: string; version_baseline: string;
 };
 type Git = { commits: Commit[]; gitError: string | null; repo: string };
 
 const emptyForm = { version: "", kind: "patch", shorebird_patch: "", git_sha: "", notes: "" };
+
+// Compare "0.9.43+16"-style versions numerically. a >= b ?
+const verParts = (v: string) => (v || "").split(/[.+]/).map((x) => parseInt(x, 10) || 0);
+function verGte(a: string, b: string) {
+  const pa = verParts(a), pb = verParts(b), n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x !== y) return x > y; }
+  return true;
+}
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -33,6 +41,7 @@ export default function Releases() {
   const [git, setGit] = useState<Git | null>(null); // fetched separately so GitHub never blocks the page
   const [form, setForm] = useState<typeof emptyForm>({ ...emptyForm });
   const [flash, setFlash] = useState("");
+  const [showAll, setShowAll] = useState(false); // reveal versions below the baseline
 
   async function load() {
     setD(await fetch("/api/releases").then((r) => r.json()));
@@ -58,7 +67,7 @@ export default function Releases() {
     await load();
     say("Deleted.");
   }
-  async function setControl(key: "force_update" | "latest_version", value: unknown) {
+  async function setControl(key: "force_update" | "latest_version" | "version_baseline", value: unknown) {
     setD((p) => (p ? { ...p, [key]: value } : p));
     await fetch("/api/releases", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, value }) });
     say("Saved.");
@@ -85,7 +94,12 @@ export default function Releases() {
     );
   }
 
-  const maxDevices = Math.max(1, ...d.adoption.map((a) => a.devices));
+  const baseline = d.version_baseline || "";
+  const newest = d.adoption.reduce((m, a) => (!m || verGte(a.app_version, m) ? a.app_version : m), "");
+  const shownAdoption = showAll || !baseline ? d.adoption : d.adoption.filter((a) => verGte(a.app_version, baseline));
+  const hiddenVersions = d.adoption.length - shownAdoption.length;
+  const shownReleases = showAll || !baseline ? d.releases : d.releases.filter((r) => verGte(r.version, baseline));
+  const maxDevices = Math.max(1, ...shownAdoption.map((a) => a.devices));
   const fu = d.force_update || { version: "", message: "", enabled: false };
 
   return (
@@ -97,7 +111,31 @@ export default function Releases() {
       />
 
       {/* Fleet adoption */}
-      <Card title="Fleet by version" right={<span className="text-muted text-xs">how each build/patch has spread across installs</span>}>
+      <Card
+        title="Fleet by version"
+        right={
+          <div className="flex items-center gap-2 text-xs">
+            {baseline ? (
+              <span className="text-muted">tracking from <b className="font-mono">{baseline}</b></span>
+            ) : (
+              <span className="text-muted">all versions</span>
+            )}
+            {baseline && hiddenVersions > 0 && (
+              <button className="underline text-muted" onClick={() => setShowAll((v) => !v)}>
+                {showAll ? "hide older" : `show ${hiddenVersions} older`}
+              </button>
+            )}
+            {newest && (
+              <button className="btn btn-ghost py-1 px-2 text-xs" title="Hide every version below the current one" onClick={() => { setShowAll(false); setControl("version_baseline", newest); }}>
+                Track from {newest}
+              </button>
+            )}
+            {baseline && (
+              <button className="underline text-faint" onClick={() => setControl("version_baseline", "")}>reset</button>
+            )}
+          </div>
+        }
+      >
         {d.adoptionNeedsSql && (
           <div className="text-amber text-xs font-semibold mb-2">
             Showing a live sample — run <code>admin/schema_releases.sql</code> for the full, scalable view.
@@ -107,7 +145,7 @@ export default function Releases() {
           <table className="w-full text-[13px]">
             <thead><tr><Th>Version</Th><Th>Installs</Th><Th>Events</Th><Th>Share</Th><Th>Last seen</Th></tr></thead>
             <tbody>
-              {d.adoption.map((a, i) => (
+              {shownAdoption.map((a, i) => (
                 <tr key={a.app_version}>
                   <Td className="font-mono text-xs font-bold">
                     {a.app_version} {i === 0 && <Pill tone="g">latest seen</Pill>}
@@ -122,7 +160,7 @@ export default function Releases() {
                   <Td className="text-muted text-xs whitespace-nowrap">{a.last_seen ? when(a.last_seen) : "—"}</Td>
                 </tr>
               ))}
-              {!d.adoption.length && <tr><Td className="text-muted">No version telemetry yet.</Td></tr>}
+              {!shownAdoption.length && <tr><Td className="text-muted">{d.adoption.length ? "No versions at/after the baseline yet." : "No version telemetry yet."}</Td></tr>}
             </tbody>
           </table>
         </div>
@@ -150,7 +188,7 @@ export default function Releases() {
             <div className="text-amber text-xs font-semibold mb-2">Run <code>admin/schema_releases.sql</code> to enable the record.</div>
           )}
           <div className="flex flex-col gap-2 max-h-[360px] overflow-y-auto">
-            {d.releases.map((r) => (
+            {shownReleases.map((r) => (
               <div key={r.id} className="rounded-xl border border-line p-2.5 flex items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
@@ -165,7 +203,7 @@ export default function Releases() {
                 <button className="btn btn-ghost py-1 px-2 text-xs" onClick={() => delRelease(r.id)}>🗑</button>
               </div>
             ))}
-            {!d.releases.length && <Empty>No releases logged yet.</Empty>}
+            {!shownReleases.length && <Empty>{d.releases.length ? "No releases at/after the baseline." : "No releases logged yet."}</Empty>}
           </div>
         </Card>
 

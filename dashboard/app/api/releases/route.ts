@@ -61,7 +61,7 @@ const readReleases = unstable_cache(
     const sb = admin();
     const [rel, cfg, fleet] = await Promise.all([
       sb.from("releases").select("*").order("created_at", { ascending: false }).limit(100),
-      sb.from("app_config").select("key,value").in("key", ["force_update", "latest_version"]),
+      sb.from("app_config").select("key,value").in("key", ["force_update", "latest_version", "version_baseline"]),
       fleetAdoption(),
     ]);
     const config: Record<string, unknown> = {};
@@ -73,6 +73,8 @@ const readReleases = unstable_cache(
       adoptionNeedsSql: fleet.needsSql,
       force_update: config.force_update ?? { version: "", message: "", enabled: false },
       latest_version: config.latest_version ?? "",
+      // Versions below this are hidden by default ("track from the current one").
+      version_baseline: (config.version_baseline as string) ?? "",
     };
   },
   ["releases-data"],
@@ -144,7 +146,7 @@ export async function PUT(req: NextRequest) {
   const bad = guard();
   if (bad) return bad;
   const { key, value } = await req.json().catch(() => ({}));
-  if (key !== "force_update" && key !== "latest_version")
+  if (key !== "force_update" && key !== "latest_version" && key !== "version_baseline")
     return NextResponse.json({ ok: false, error: "unknown config key" }, { status: 400 });
   const { error } = await admin()
     .from("app_config")
