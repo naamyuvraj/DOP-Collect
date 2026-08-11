@@ -38,7 +38,7 @@ const readUsers = unstable_cache(
     // Base on v_devices (devices ∪ everyone who sent events) so an agent who
     // synced but whose identify() upsert never landed is NOT dropped. Merge the
     // extra identity columns (agent_id/sol_id/phone_verified/name) from devices.
-    const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes] = await Promise.all([
+    const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes, sessRes] = await Promise.all([
       sb.from("v_devices").select("*"),
       // select("*") so a not-yet-migrated column (e.g. mobile) can't error the
       // whole query and wipe out agent_id/sol_id/name/phone_verified.
@@ -47,12 +47,23 @@ const readUsers = unstable_cache(
       sb.from("events").select("device_id,props,created_at").eq("event", "sync_done").order("created_at", { ascending: false }).limit(5000),
       sb.from("events").select("device_id,props").eq("event", "list_submitted").limit(5000),
       sb.from("app_config").select("value").eq("key", "region_labels").maybeSingle(),
+      // OTP verification is authoritative here: a live (non-revoked) device
+      // session means the phone was verified — don't rely on devices.phone_verified
+      // (which only gets set once the OTP function is redeployed).
+      sb.from("device_sessions").select("device_id,account_id,revoked_at"),
     ]);
     const base = (baseRes.error ? (devRes.data as any[]) : (baseRes.data as any[])) || [];
     const extra = new Map<string, any>(((devRes.data as any[]) || []).map((d) => [String(d.id), d]));
     const subs = (subRes.data as any[]) || [];
     const syncs = (syncRes.data as any[]) || [];
     const submits = (submitRes.data as any[]) || [];
+    // device_id -> { account_id, verified } from live sessions.
+    const sessByDevice = new Map<string, { account_id: string | null; verified: boolean }>();
+    for (const s of (sessRes.data as any[]) || []) {
+      const cur = sessByDevice.get(s.device_id);
+      const active = !s.revoked_at;
+      if (!cur || active) sessByDevice.set(s.device_id, { account_id: s.account_id ?? cur?.account_id ?? null, verified: active || !!cur?.verified });
+    }
 
     // Latest account count per device (rows are newest-first).
     const accByDevice = new Map<string, number>();
@@ -77,9 +88,10 @@ const readUsers = unstable_cache(
       const id = String(b.id);
       const x = extra.get(id) || {};
       const agentId = x.agent_id || null;
+      const sess = sessByDevice.get(id);
       return {
         id,
-        account_id: x.account_id || null,
+        account_id: sess?.account_id || x.account_id || null,
         agentId,
         name: x.name || null,
         mobile: x.mobile || null,
@@ -87,7 +99,7 @@ const readUsers = unstable_cache(
         sol_id: x.sol_id || (agentId ? solOf(agentId) || null : null),
         accounts: accByDevice.has(id) ? accByDevice.get(id)! : null,
         collected: collByDevice.get(id) || 0,
-        phone_verified: !!x.phone_verified,
+        phone_verified: !!x.phone_verified || !!sess?.verified,
         app_version: b.app_version || null,
         first_seen: b.first_seen || null,
         last_seen: b.last_seen || null,

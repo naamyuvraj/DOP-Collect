@@ -212,7 +212,7 @@ export default function Users() {
                     ))
                   : view.map((r) => (
                       <tr key={r.device_id} onClick={() => setOpen(r)} className="border-t border-line hover:bg-focal/20 cursor-pointer">
-                        <Cell className="font-semibold">{r.name || <span className="text-faint">—</span>}</Cell>
+                        <Cell className="font-semibold">{r.name || r.agent_name || <span className="text-faint">—</span>}</Cell>
                         <Cell className="font-mono text-xs">{r.mobile || <span className="text-faint">—</span>}</Cell>
                         <Cell>{r.agent_name || <span className="text-faint">—</span>}</Cell>
                         <Cell right>{r.devices > 1 ? <Pill tone="a">{r.devices}</Pill> : <span className="text-muted">{r.devices}</span>}</Cell>
