@@ -22,6 +22,7 @@ export type UserRow = {
   agent_id: string | null;
   region: string | null; // SOL ID (post-office branch)
   accounts: number | null;
+  value: number | null; // total ₹ deposited across the book (under management)
   collected: number;
   plan: string | null;
   sub_status: string | null;
@@ -72,12 +73,18 @@ const readUsers = unstable_cache(
       if (!cur || active) sessByDevice.set(s.device_id, { account_id: s.account_id ?? cur?.account_id ?? null, verified: active || !!cur?.verified });
     }
 
-    // Latest account count per device (rows are newest-first).
+    // From each device's LATEST sync_done: account count + total ₹ under
+    // management (deposited across the whole book). Rows are newest-first.
     const accByDevice = new Map<string, number>();
+    const valueByDevice = new Map<string, number>();
+    const seenSync = new Set<string>();
     for (const e of syncs) {
-      if (accByDevice.has(e.device_id)) continue;
+      if (seenSync.has(e.device_id)) continue;
+      seenSync.add(e.device_id);
       const n = Number(e.props?.accounts);
       if (Number.isFinite(n) && n >= 0) accByDevice.set(e.device_id, n);
+      const v = Number(e.props?.total_amount);
+      if (Number.isFinite(v) && v >= 0) valueByDevice.set(e.device_id, v);
     }
     // Collected sum per device (submitted lots).
     const collByDevice = new Map<string, number>();
@@ -108,6 +115,7 @@ const readUsers = unstable_cache(
         agent_name: b.agent_name || null,
         sol_id: x.sol_id || (agentId ? solOf(agentId) || null : null),
         accounts: accByDevice.has(id) ? accByDevice.get(id)! : null,
+        value: valueByDevice.has(id) ? valueByDevice.get(id)! : null,
         collected: collByDevice.get(id) || 0,
         phone_verified: !!x.phone_verified || !!sess?.verified,
         app_version: b.app_version || null,
@@ -137,6 +145,7 @@ const readUsers = unstable_cache(
       // the same book synced on 4 phones must not count as 4×). Collected = SUM
       // (distinct submissions across their phones).
       const accVals = ds.map((d) => d.accounts).filter((v): v is number => v != null);
+      const valVals = ds.map((d) => d.value).filter((v): v is number => v != null);
       const lastSeen = pick(byRecent, (d) => d.last_seen);
       return {
         device_id: byRecent[0].id,
@@ -148,6 +157,7 @@ const readUsers = unstable_cache(
         agent_id: agentId,
         region: pick(byRecent, (d) => d.sol_id),
         accounts: accVals.length ? Math.max(...accVals) : null,
+        value: valVals.length ? Math.max(...valVals) : null,
         collected: ds.reduce((s, d) => s + d.collected, 0),
         plan: sub?.plan ?? null,
         sub_status: sub?.status ?? null,
@@ -164,6 +174,7 @@ const readUsers = unstable_cache(
     const totals = {
       users: rows.length,
       accounts: rows.reduce((s, r) => s + (r.accounts || 0), 0), // per-agent, no double-count
+      value: rows.reduce((s, r) => s + (r.value || 0), 0), // ₹ under management
       collected: rows.reduce((s, r) => s + r.collected, 0),
       active: rows.filter((r) => r.active).length,
       subscribers: rows.filter((r) => r.sub_status && r.sub_status !== "expired").length,

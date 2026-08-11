@@ -14,6 +14,7 @@ type UserRow = {
   agent_id: string | null;
   region: string | null;
   accounts: number | null;
+  value: number | null;
   collected: number;
   plan: string | null;
   sub_status: string | null;
@@ -24,9 +25,9 @@ type UserRow = {
   active: boolean;
 };
 type Labels = Record<string, string>;
-type Data = { rows: UserRow[]; totals: { users?: number; accounts?: number; collected?: number; active?: number; subscribers?: number; phones?: number }; region_labels?: Labels };
+type Data = { rows: UserRow[]; totals: { users?: number; accounts?: number; value?: number; collected?: number; active?: number; subscribers?: number; phones?: number }; region_labels?: Labels };
 
-type SortKey = "name" | "mobile" | "agent_name" | "devices" | "region" | "accounts" | "collected" | "plan" | "app_version" | "last_seen";
+type SortKey = "name" | "mobile" | "agent_name" | "devices" | "region" | "accounts" | "value" | "collected" | "plan" | "app_version" | "last_seen";
 const COLS: { key: SortKey; label: string; num?: boolean }[] = [
   { key: "name", label: "Name" },
   { key: "mobile", label: "Mobile" },
@@ -34,6 +35,7 @@ const COLS: { key: SortKey; label: string; num?: boolean }[] = [
   { key: "devices", label: "Phones", num: true },
   { key: "region", label: "Region" },
   { key: "accounts", label: "Accounts", num: true },
+  { key: "value", label: "Value (₹)", num: true },
   { key: "collected", label: "Collected", num: true },
   { key: "plan", label: "Plan" },
   { key: "app_version", label: "Version" },
@@ -108,10 +110,10 @@ export default function Users() {
   }
 
   function exportCsv() {
-    const head = ["Name", "Mobile", "Agent", "Agent ID", "Region", "District", "Accounts", "Collected", "Plan", "Status", "Phone verified", "Version", "First seen", "Last seen"];
+    const head = ["Name", "Mobile", "Agent", "Agent ID", "Region", "District", "Accounts", "Value (under mgmt)", "Collected", "Plan", "Status", "Phone verified", "Version", "First seen", "Last seen"];
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = view.map((r) =>
-      [r.name, r.mobile, r.agent_name, r.agent_id, r.region, regionOf(r.region), r.accounts, r.collected, r.plan, r.active ? "active" : "dormant", r.phone_verified ? "yes" : "no", r.app_version, r.first_seen, r.last_seen].map(esc).join(",")
+      [r.name, r.mobile, r.agent_name, r.agent_id, r.region, regionOf(r.region), r.accounts, r.value, r.collected, r.plan, r.active ? "active" : "dormant", r.phone_verified ? "yes" : "no", r.app_version, r.first_seen, r.last_seen].map(esc).join(",")
     );
     const csv = [head.map(esc).join(","), ...lines].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -133,11 +135,12 @@ export default function Users() {
       {!d ? (
         <KpiSkeletons n={5} />
       ) : (
-        <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
+        <div className="grid gap-3.5 grid-cols-2 md:grid-cols-6">
           <Kpi label="Users (agents)" value={num(t.users)} sub={`${num(t.phones)} phones`} />
           <Kpi label="Active · 7d" value={num(t.active)} />
-          <Kpi label="Accounts" value={num(t.accounts)} focal />
-          <Kpi label="Total collected ₹" value={inr(t.collected)} />
+          <Kpi label="Accounts" value={num(t.accounts)} />
+          <Kpi label="Under management ₹" value={inr(t.value)} focal sub="deposited across accounts" />
+          <Kpi label="Total collected ₹" value={inr(t.collected)} sub="submitted lists" />
           <Kpi label="Subscribers" value={num(t.subscribers)} />
         </div>
       )}
@@ -220,6 +223,7 @@ export default function Users() {
                           {r.region ? <>{r.region}{regionOf(r.region) && <span className="text-muted font-sans"> · {regionOf(r.region)}</span>}</> : <span className="text-faint">—</span>}
                         </Cell>
                         <Cell right className="font-semibold">{r.accounts != null ? num(r.accounts) : <span className="text-faint">—</span>}</Cell>
+                        <Cell right className="font-semibold">{r.value != null ? inr(r.value) : <span className="text-faint">—</span>}</Cell>
                         <Cell right>{r.collected ? inr(r.collected) : <span className="text-faint">—</span>}</Cell>
                         <Cell>{r.plan ? <Pill tone={r.sub_status === "expired" ? "r" : "g"}>{r.plan}</Pill> : <span className="text-faint">—</span>}</Cell>
                         <Cell>{r.app_version || <span className="text-faint">—</span>}</Cell>
@@ -272,7 +276,8 @@ function AgentDrawer({ row, district, onClose }: { row: UserRow; district: strin
 
         <div className="p-5 flex flex-col gap-3.5">
           <div className="grid grid-cols-2 gap-3">
-            <MiniStat label="Accounts maintained" value={row.accounts != null ? num(row.accounts) : "—"} focal />
+            <MiniStat label="Accounts maintained" value={row.accounts != null ? num(row.accounts) : "—"} />
+            <MiniStat label="Under management ₹" value={row.value != null ? inr(row.value) : "—"} focal />
             <MiniStat label="Collected (submitted)" value={row.collected ? inr(row.collected) : "—"} />
             <MiniStat label="Plan" value={row.plan || "—"} />
             <MiniStat label="Status" value={row.active ? "active" : "dormant"} />

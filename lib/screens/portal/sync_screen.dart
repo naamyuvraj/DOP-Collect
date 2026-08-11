@@ -869,8 +869,13 @@ class _SyncScreenState extends State<SyncScreen> {
       }
       await widget.repo.replaceAll(result.accounts);
       await AppSettings.setLastSyncNow();
-      unawaited(
-          Analytics.track('sync_done', {'accounts': result.accounts.length}));
+      unawaited(Analytics.track('sync_done', {
+        'accounts': result.accounts.length,
+        // Total ₹ deposited across the whole book (assets under management), so
+        // the admin dashboard can show the collection value, not just the count.
+        'total_amount':
+            result.accounts.fold<int>(0, (s, a) => s + a.depositedAmount),
+      }));
       if (!mounted) return;
       _snack(result.error ??
           'Synced ${result.accounts.length} accounts. Run Deep Sync for '
