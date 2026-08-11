@@ -23,6 +23,15 @@ class AppSettings {
   static Future<void> setDisplayName(String v) async =>
       (await SharedPreferences.getInstance()).setString(_kDisplayName, v.trim());
 
+  // The agent's mobile number (digits only), captured at onboarding. Sent with
+  // telemetry so the admin dashboard can list/contact agents.
+  static const _kMobile = 'mobile_number';
+  static Future<String> mobile() async =>
+      (await SharedPreferences.getInstance()).getString(_kMobile) ?? '';
+  static Future<void> setMobile(String v) async =>
+      (await SharedPreferences.getInstance())
+          .setString(_kMobile, v.replaceAll(RegExp(r'\D'), ''));
+
   static const _kOnboarded = 'onboarded';
   static Future<bool> onboarded() async =>
       (await SharedPreferences.getInstance()).getBool(_kOnboarded) ?? false;

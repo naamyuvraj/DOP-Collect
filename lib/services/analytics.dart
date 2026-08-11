@@ -47,6 +47,7 @@ class Analytics {
     _identified = true;
     final name = await AppSettings.agentName();
     final displayName = await AppSettings.displayName();
+    final mobile = await AppSettings.mobile();
     // Attach the DOP agent id + its SOL ID (post-office branch) so the dashboard
     // can track usage per agent and per region. Empty until the agent has logged
     // in (identify is re-sent with force:true right after login).
@@ -55,6 +56,7 @@ class Analytics {
     await _ingest('device', {
       'id': await _did(),
       'name': displayName.isEmpty ? null : displayName,
+      'mobile': mobile.isEmpty ? null : mobile,
       'agent_name': name.isEmpty ? null : name,
       'agent_id': agentId.isEmpty ? null : agentId,
       'sol_id': sol.isEmpty ? null : sol,

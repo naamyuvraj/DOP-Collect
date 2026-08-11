@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 export type UserRow = {
   device_id: string;
   name: string | null;
+  mobile: string | null;
   agent_name: string | null;
   agent_id: string | null;
   region: string | null; // SOL ID (post-office branch)
@@ -37,7 +38,9 @@ const readUsers = unstable_cache(
     // extra identity columns (agent_id/sol_id/phone_verified/name) from devices.
     const [baseRes, devRes, subRes, syncRes, submitRes] = await Promise.all([
       sb.from("v_devices").select("*"),
-      sb.from("devices").select("id,name,agent_id,sol_id,phone_verified"),
+      // select("*") so a not-yet-migrated column (e.g. mobile) can't error the
+      // whole query and wipe out agent_id/sol_id/name/phone_verified.
+      sb.from("devices").select("*"),
       sb.from("v_subscriptions").select("agent_id,plan_name,plan_code,status"),
       sb.from("events").select("device_id,props,created_at").eq("event", "sync_done").order("created_at", { ascending: false }).limit(5000),
       sb.from("events").select("device_id,props").eq("event", "list_submitted").limit(5000),
@@ -74,6 +77,7 @@ const readUsers = unstable_cache(
       return {
         device_id: id,
         name: x.name || null,
+        mobile: x.mobile || null,
         agent_name: b.agent_name || null,
         agent_id: agentId,
         region: x.sol_id || (agentId ? solOf(agentId) || null : null),
