@@ -13,11 +13,18 @@ abstract class AccountRepository {
   Future<RdAccount?> byAccountNumber(String accountNumber);
   Future<void> setStatus(String accountNumber, CollectionStatus status);
 
+  /// Set (or clear, with null/empty) one account's own ASLAAS number.
+  Future<void> setAslaas(String accountNumber, String? aslaas);
+
+  /// Bulk-store ASLAAS numbers harvested off the portal
+  /// (`accountNumber -> aslaas`). Returns how many rows were written.
+  Future<int> applyAslaas(Map<String, String> byAccount);
+
   /// Merge a fresh portal list into the store — the entry point a Sync calls.
   /// Core fields (name, denomination, months paid, next due) are updated from
   /// the portal; locally-held state the list parse does NOT carry — collection
-  /// [status] and Deep-Sync detail (opening date, totals, last-deposit) — is
-  /// preserved. Accounts absent from a (possibly partial) sync are kept, never
+  /// [status], the ASLAAS number, and Deep-Sync detail (opening date, totals,
+  /// last-deposit) — is preserved. Accounts absent from a (possibly partial) sync are kept, never
   /// deleted, so a dropped session can never wipe his data.
   Future<void> replaceAll(List<RdAccount> accounts);
   Future<int> count();
@@ -75,6 +82,38 @@ class SqfliteAccountRepository implements AccountRepository {
   }
 
   @override
+  Future<void> setAslaas(String accountNumber, String? aslaas) async {
+    final db = await _db.database;
+    final v = aslaas?.trim();
+    await db.update(
+      'accounts',
+      {'aslaas': v == null || v.isEmpty ? null : v},
+      where: 'account_number = ?',
+      whereArgs: [accountNumber],
+    );
+  }
+
+  @override
+  Future<int> applyAslaas(Map<String, String> byAccount) async {
+    if (byAccount.isEmpty) return 0;
+    final db = await _db.database;
+    var written = 0;
+    await db.transaction((txn) async {
+      for (final e in byAccount.entries) {
+        final v = e.value.trim();
+        if (v.isEmpty) continue;
+        written += await txn.update(
+          'accounts',
+          {'aslaas': v},
+          where: 'account_number = ?',
+          whereArgs: [e.key],
+        );
+      }
+    });
+    return written;
+  }
+
+  @override
   Future<void> replaceAll(List<RdAccount> accounts) async {
     final db = await _db.database;
     await db.transaction((txn) async {
@@ -91,6 +130,8 @@ class SqfliteAccountRepository implements AccountRepository {
           // Keep the collection mark and Deep-Sync detail the portal list
           // doesn't include; keep the old serial if this parse didn't set one.
           map['status'] = old['status'] ?? map['status'];
+          // The list parse carries no ASLAAS, so a sync must never blank it.
+          map['aslaas'] = old['aslaas'] ?? map['aslaas'];
           map['opening_date'] = old['opening_date'] ?? map['opening_date'];
           map['total_deposit'] = old['total_deposit'] ?? map['total_deposit'];
           map['pending_installments'] =
@@ -170,6 +211,43 @@ class MemoryAccountRepository implements AccountRepository {
   }
 
   @override
+  Future<void> setAslaas(String accountNumber, String? aslaas) async {
+    final i = _items.indexWhere((a) => a.accountNumber == accountNumber);
+    if (i == -1) return;
+    final v = aslaas?.trim() ?? '';
+    // copyWith can't null a field out, so rebuild when clearing.
+    _items[i] = v.isEmpty
+        ? RdAccount(
+            accountNumber: _items[i].accountNumber,
+            customerName: _items[i].customerName,
+            denominationAmount: _items[i].denominationAmount,
+            nextDueDate: _items[i].nextDueDate,
+            monthsPaid: _items[i].monthsPaid,
+            serial: _items[i].serial,
+            status: _items[i].status,
+            openingDate: _items[i].openingDate,
+            totalDeposit: _items[i].totalDeposit,
+            pendingInstallments: _items[i].pendingInstallments,
+            defaultInstallments: _items[i].defaultInstallments,
+            lastDepositDate: _items[i].lastDepositDate,
+          )
+        : _items[i].copyWith(aslaas: v);
+  }
+
+  @override
+  Future<int> applyAslaas(Map<String, String> byAccount) async {
+    var written = 0;
+    for (final e in byAccount.entries) {
+      if (e.value.trim().isEmpty) continue;
+      final i = _items.indexWhere((a) => a.accountNumber == e.key);
+      if (i == -1) continue;
+      _items[i] = _items[i].copyWith(aslaas: e.value.trim());
+      written++;
+    }
+    return written;
+  }
+
+  @override
   Future<void> replaceAll(List<RdAccount> accounts) async {
     for (final a in accounts) {
       final i = _items.indexWhere((x) => x.accountNumber == a.accountNumber);
@@ -181,6 +259,7 @@ class MemoryAccountRepository implements AccountRepository {
         _items[i] = a.copyWith(
           status: old.status,
           serial: a.serial == 0 ? old.serial : a.serial,
+          aslaas: old.aslaas,
           openingDate: old.openingDate,
           totalDeposit: old.totalDeposit,
           pendingInstallments: old.pendingInstallments,

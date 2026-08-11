@@ -13,6 +13,14 @@ import '../../util/format.dart';
 String lotReference(Lot lot) =>
     'L${(lot.createdAt.millisecondsSinceEpoch % 1000000000).toString().padLeft(9, '0')}';
 
+/// This row's ASLAAS number: the ACCOUNT's own (each account has a different
+/// one on the portal). [fallback] is the legacy agency-wide settings value, used
+/// only for lists saved before ASLAAS became per-account, and '' when unknown.
+String aslaasOf(LotItem it, String fallback) {
+  final own = it.aslaas?.trim() ?? '';
+  return own.isNotEmpty ? own : fallback.trim();
+}
+
 /// Plain-text summary for WhatsApp / share-as-text. Honestly a DRAFT the agent
 /// prepared on the phone — not an official DOP submission receipt.
 String lotReportText(Lot lot, {String aslaas = ''}) {
@@ -28,13 +36,15 @@ String lotReportText(Lot lot, {String aslaas = ''}) {
             'E-Banking reference.')
     ..writeln(submitted ? '' : 'List No (local): $ref')
     ..writeln('Date: ${DateFormat('dd-MMM-yyyy').format(lot.createdAt)}')
-    ..writeln('ASLAAS: ${aslaas.isEmpty ? '-' : aslaas}')
     ..writeln('Accounts: ${lot.count}  Total: ${inr(lot.totalAmount)}')
     ..writeln('');
+  // ASLAAS is per line, not per list — each account has its own number.
   for (var i = 0; i < lot.items.length; i++) {
     final it = lot.items[i];
+    final asl = aslaasOf(it, aslaas);
     b.writeln('${i + 1}. ${it.customerName}  ${it.accountNumber}  '
-        'x${it.installments}  ${inr(it.amount)}');
+        'x${it.installments}  ${inr(it.amount)}  '
+        'ASLAAS ${asl.isEmpty ? '-' : asl}');
   }
   return b.toString();
 }
@@ -55,7 +65,7 @@ pw.MultiPage _lotPage(
 }) =>
     lot.referenceNumber != null
         ? _officialPage(lot, agentId: agentId, aslaas: aslaas)
-        : _draftPage(lot, agentName: agentName, agentId: agentId);
+        : _draftPage(lot, agentName: agentName, agentId: agentId, aslaas: aslaas);
 
 /// Matches the DOP portal's Reports PDF for a submitted list.
 pw.MultiPage _officialPage(Lot lot,
@@ -99,7 +109,7 @@ pw.MultiPage _officialPage(Lot lot,
         '', // Bank Name (not captured by the app)
         it.chequeNumber ?? '',
         it.bankAccountNumber ?? '',
-        aslaas.isEmpty ? '' : aslaas,
+        aslaasOf(it, aslaas),
         'Success',
         stamp,
       ],
@@ -204,7 +214,9 @@ pw.MultiPage _officialPage(Lot lot,
 /// A not-yet-submitted list — clearly a DRAFT working copy, never an official
 /// receipt (no Govt-of-India header, no "Success").
 pw.MultiPage _draftPage(Lot lot,
-    {required String agentName, required String agentId}) {
+    {required String agentName,
+    required String agentId,
+    required String aslaas}) {
   final ref = lotReference(lot);
   final date = DateFormat('dd-MMM-yyyy').format(lot.createdAt);
   const headers = <String>[
@@ -215,6 +227,8 @@ pw.MultiPage _draftPage(Lot lot,
     'RD\nDenomination',
     'RD Total\nDeposit Amount',
     'No of\nInstallment',
+    // Per account — this is the sheet he keys from, so each row carries its own.
+    'ASLAAS\nNumber',
     'Status',
   ];
   final data = [
@@ -227,6 +241,7 @@ pw.MultiPage _draftPage(Lot lot,
         _cr(lot.items[i].denomination),
         _cr(lot.items[i].amount),
         '${lot.items[i].installments}',
+        aslaasOf(lot.items[i], aslaas),
         'PENDING',
       ],
   ];

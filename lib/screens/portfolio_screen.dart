@@ -58,6 +58,52 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
 
   void _setTerm(int y) => setState(() => _termYears = y.clamp(1, 20));
 
+  /// This account's own ASLAAS, or the legacy agency-wide setting while it's
+  /// unknown ('—' if neither exists).
+  String _aslaasOf(RdAccount a) {
+    final own = a.aslaas?.trim() ?? '';
+    if (own.isNotEmpty) return own;
+    return _aslaas.isEmpty ? '—' : _aslaas;
+  }
+
+  Future<void> _editAslaas(RdAccount a) async {
+    final ctrl = TextEditingController(text: a.aslaas ?? '');
+    final value = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('ASLAAS number', style: AppTheme.display(17)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${a.customerName} · #${a.accountNumber}',
+                style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              style: AppTheme.body(16, weight: FontWeight.w600),
+              decoration: const InputDecoration(hintText: 'e.g. 801357'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (value == null) return;
+    await widget.repo.setAslaas(a.accountNumber, value);
+    if (mounted) _reload();
+  }
+
   /// Maturity value for the chosen term, using the account's locked rate.
   int _maturityFor(RdAccount a, int term) => PoCalc.compute(
         PoScheme.rd,
@@ -97,7 +143,10 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                 _tile('Opened On', a.openingDateLabel),
                 _tile('Last Deposit', a.lastDepositLabel),
                 _tile('Pending', '${a.installmentsToMaturity}'),
-                _tile('ASLAAS', _aslaas.isEmpty ? '—' : _aslaas),
+                // This account's OWN ASLAAS (the portal keeps a different one
+                // per account). Falls back to the old agency-wide setting only
+                // until this account's real number is known.
+                _tile('ASLAAS', _aslaasOf(a), onTap: () => _editAslaas(a)),
               ]),
               const SizedBox(height: 18),
               _collectionCard(a),
@@ -262,8 +311,8 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     });
   }
 
-  Widget _tile(String label, String value) {
-    return Container(
+  Widget _tile(String label, String value, {VoidCallback? onTap}) {
+    final tile = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: AppTheme.card(radius: 16),
       child: Column(
@@ -283,6 +332,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
         ],
       ),
     );
+    return onTap == null ? tile : GestureDetector(onTap: onTap, child: tile);
   }
 
   Widget _collectionCard(RdAccount a) {

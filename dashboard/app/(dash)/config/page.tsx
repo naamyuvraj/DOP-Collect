@@ -57,6 +57,7 @@ export default function Config() {
             ["analytics_default", "Analytics default on", "New installs report anonymous usage unless the user opts out."],
             ["portal_submit", "Portal auto-submit", "Kill switch for making/paying lists on the DOP portal. Off = the “Submit on Portal” buttons are hidden on every install."],
             ["payments_enabled", "Subscriptions / paywall", "Master switch. On = agents whose plan expired are gated to the paywall. Off = everyone has full access (default)."],
+            ["otp_required", "WhatsApp OTP verification", "Require phone verification at onboarding (1 phone ↔ 1 agent, max 2 devices). Off = no OTP (default). Only turn on AFTER the OTP app build is live on phones."],
           ].map(([key, label, help]) => (
             <div key={key} className="flex items-center justify-between py-3 border-t border-line first:border-0">
               <div className="pr-4">

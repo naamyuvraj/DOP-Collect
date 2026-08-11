@@ -49,12 +49,16 @@ class _DeepSyncScreenState extends State<DeepSyncScreen> {
     Credentials.load().then((c) => _creds = c);
   }
 
+  // Credentials are only ever typed on the real portal origin — the guard is
+  // inside the injected script below (see SyncScreen for why the navigation
+  // allowlist was removed: it broke the portal's post-login window flow).
   Future<void> _autofillIfLogin() async {
     if (!_creds.hasAny) return;
     final idVal = jsonEncode(_creds.agentId);
     final pwVal = jsonEncode(_creds.password);
     await _controller.runJavaScript('''
       (function() {
+        if (location.origin !== 'https://dopagent.indiapost.gov.in') return;
         var id = document.querySelector('[name="AuthenticationFG.USER_PRINCIPAL"]');
         var pw = document.querySelector('[name="AuthenticationFG.ACCESS_CODE"]');
         if (!id && !pw) return;

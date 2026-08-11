@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import '../services/app_restart.dart';
 import '../services/update_service.dart';
 import '../theme/app_theme.dart';
 
-/// A dismissible card that appears on Home when an OTA update is available.
-/// Tapping Update downloads it and prompts a quick restart to finish.
+/// Home card shown once an OTA update has been DOWNLOADED and is ready to apply.
+///
+/// Updates download silently in the background (see main.dart + UpdateService),
+/// so this stays hidden until there's actually a staged patch. Tapping Restart
+/// fully closes the app — the only thing that makes the next launch pick up the
+/// new patch. (The old flow used SystemNavigator.pop(), which just backgrounds
+/// the app, so the update needed two open/close cycles to appear.)
 class UpdateBanner extends StatefulWidget {
   const UpdateBanner({super.key});
 
@@ -15,49 +20,51 @@ class UpdateBanner extends StatefulWidget {
 
 class _UpdateBannerState extends State<UpdateBanner> {
   final _service = UpdateService();
-  bool _available = false;
-  bool _working = false;
+  bool _staged = false;
 
   @override
   void initState() {
     super.initState();
-    _service.isUpdateAvailable().then((v) {
-      if (mounted && v) setState(() => _available = true);
+    // Trigger/observe the background download. If startup already began one,
+    // UpdateService dedupes to the same in-flight download.
+    _service.downloadUpdate().then((staged) {
+      if (mounted && staged) setState(() => _staged = true);
     });
   }
 
-  Future<void> _update() async {
-    setState(() => _working = true);
-    final ok = await _service.downloadUpdate();
-    if (!mounted) return;
-    setState(() => _working = false);
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Update failed. Try again later.')));
-      return;
-    }
-    await showDialog<void>(
+  Future<void> _restart() async {
+    final go = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
         backgroundColor: AppTheme.surface,
         title: Text('Update ready', style: AppTheme.display(18)),
-        content: Text('Tap restart to finish updating the app.',
-            style: AppTheme.body(13, color: AppTheme.inkMuted)),
+        content: Text(
+          'The app will restart to finish updating. It only takes a moment.',
+          style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
+        ),
         actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Later')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppTheme.black),
-            onPressed: () => SystemNavigator.pop(), // close; reopen applies patch
-            child: const Text('Restart'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Restart now'),
           ),
         ],
       ),
     );
+    if (go == true) {
+      // Full restart (native): launches a fresh task AND kills the process, so
+      // the next (cold) start applies the downloaded patch — no manual reopen.
+      AppRestart.restart();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_available) return const SizedBox.shrink();
+    if (!_staged) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
@@ -74,29 +81,24 @@ class _UpdateBannerState extends State<UpdateBanner> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('New version available',
+                Text('Update ready',
                     style: AppTheme.body(14, weight: FontWeight.w800)),
-                Text('Update to get the latest',
-                    style: AppTheme.body(12, color: AppTheme.black.withValues(alpha: 0.6))),
+                Text('Restart to get the latest',
+                    style: AppTheme.body(12,
+                        color: AppTheme.black.withValues(alpha: 0.6))),
               ],
             ),
           ),
           GestureDetector(
-            onTap: _working ? null : _update,
+            onTap: _restart,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
               decoration: BoxDecoration(
                   color: AppTheme.black,
                   borderRadius: BorderRadius.circular(12)),
-              child: _working
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : Text('Update',
-                      style: AppTheme.body(13,
-                          weight: FontWeight.w700, color: Colors.white)),
+              child: Text('Restart',
+                  style: AppTheme.body(13,
+                      weight: FontWeight.w700, color: Colors.white)),
             ),
           ),
         ],

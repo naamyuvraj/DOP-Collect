@@ -62,16 +62,38 @@ Deno.serve(async (req) => {
 
   try {
     const event = JSON.parse(raw);
-    if (event?.event === "payment.captured" || event?.event === "order.paid") {
+    const sb = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+    const kind = event?.event;
+
+    if (kind === "payment.captured" || kind === "order.paid") {
       const p = event?.payload?.payment?.entity;
       const orderId = p?.order_id;
       const paymentId = p?.id;
       if (orderId && paymentId) {
-        const sb = createClient(
-          Deno.env.get("SUPABASE_URL")!,
-          Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-        );
         await activate(sb, String(orderId), String(paymentId));
+      }
+    } else if (kind === "payment.failed") {
+      // Record for dashboard visibility only — never touches subscriptions.
+      const p = event?.payload?.payment?.entity;
+      if (p?.id) {
+        await sb.from("payments").insert({
+          agent_id: p?.notes?.agent_id ?? null,
+          plan_code: p?.notes?.plan ?? null, plan: p?.notes?.plan ?? null,
+          amount: p?.amount ?? null, currency: "INR", provider: "razorpay",
+          ref: String(p.id), order_id: p?.order_id ?? null, status: "failed",
+        }); // best-effort; ignore duplicates
+      }
+    } else if (kind === "refund.created" || kind === "refund.processed") {
+      // Mark the original payment refunded. Access is NOT auto-revoked — partial
+      // refunds are common and revocation is a business decision (do it from the
+      // dashboard by shortening the subscription).
+      const rf = event?.payload?.refund?.entity;
+      if (rf?.payment_id) {
+        await sb.from("payments").update({ status: "refunded" })
+          .eq("provider", "razorpay").eq("ref", String(rf.payment_id));
       }
     }
   } catch (_) {

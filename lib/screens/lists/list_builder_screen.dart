@@ -169,6 +169,9 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
         installments: e.value,
         chequeNumber: chq?.chequeNo,
         bankAccountNumber: chq?.bankAccount,
+        // Each account's OWN ASLAAS — the portal holds a different one per
+        // account, so this is snapshotted per row, never shared across the list.
+        aslaas: a.aslaas,
       );
     }).toList();
 

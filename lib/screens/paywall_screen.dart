@@ -4,6 +4,7 @@ import '../services/subscription.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
 import '../widgets/push_button.dart';
+import 'privacy_screen.dart';
 
 /// If payments are on AND this agent's plan has expired, show the paywall and
 /// block the action. Returns true when the action may proceed. A no-op (returns
@@ -30,10 +31,10 @@ class PaywallScreen extends StatefulWidget {
 class _PaywallScreenState extends State<PaywallScreen> {
   SubStatus? _s;
   String? _busyPlan; // which plan's button is mid-purchase (per-card, not global)
+  bool _restoring = false;
 
-  /// Checkout can't run until the native Razorpay plugin is wired in a release
-  /// build. Until then the paywall is preview-only.
   bool get _checkoutReady => Subscription.opener != null;
+  bool get _active => _s?.status == 'active' || _s?.status == 'trial';
 
   @override
   void initState() {
@@ -54,9 +55,8 @@ class _PaywallScreenState extends State<PaywallScreen> {
       final ok = await Subscription.purchase(plan.code);
       if (!mounted) return;
       if (ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Payment successful — you\'re all set!')));
-        Navigator.of(context).pop();
+        _snack('Payment successful — you\'re all set!');
+        Navigator.of(context).maybePop();
       } else if (Subscription.lastError != null) {
         _showError(Subscription.lastError!);
       } else {
@@ -71,18 +71,40 @@ class _PaywallScreenState extends State<PaywallScreen> {
     }
   }
 
-  void _snack(String m) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(m)));
+  /// Safety net: re-pull entitlement from the server. Covers the case where a
+  /// payment went through (webhook activated it) but the app's cached status is
+  /// stale — so a paid user is never trapped on the paywall.
+  Future<void> _restore() async {
+    setState(() => _restoring = true);
+    final v = await Subscription.refresh();
+    if (!mounted) return;
+    setState(() {
+      _s = v ?? _s;
+      _restoring = false;
+    });
+    if (!Subscription.blocked && _active) {
+      _snack('You\'re active — thanks!');
+      Navigator.of(context).maybePop();
+    } else {
+      _snack('No active subscription found yet. If you just paid, wait a moment '
+          'and try again.');
+    }
+  }
 
-  /// Show the real failure reason (so we can debug, not just "cancelled").
-  void _showError(String msg) => showDialog(
+  void _snack(String m) => ScaffoldMessenger.of(context)
+    ..clearSnackBars()
+    ..showSnackBar(SnackBar(content: Text(m)));
+
+  void _showError(String msg) => showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
           backgroundColor: AppTheme.surface,
-          title: Text('Payment didn\'t go through',
-              style: AppTheme.display(17)),
-          content: Text(msg,
-              style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4)),
+          title: Text('Payment didn\'t go through', style: AppTheme.display(17)),
+          content: Text(
+            '$msg\n\nIf money was deducted, tap "I\'ve already paid" — it may '
+            'take a moment to confirm.',
+            style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
+          ),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context),
@@ -94,18 +116,45 @@ class _PaywallScreenState extends State<PaywallScreen> {
   @override
   Widget build(BuildContext context) {
     final s = _s;
-    final plans = (s?.plans ?? const <Plan>[]).where((p) => !p.isFree).toList();
+    final plans = (s?.plans ?? const <Plan>[]).where((p) => !p.isFree).toList()
+      ..sort((a, b) => a.priceInr.compareTo(b.priceInr));
+    // Best value = lowest effective per-month price.
+    Plan? best;
+    double bestPerMonth = double.infinity;
+    for (final p in plans) {
+      final pm = p.durationDays > 0 ? p.priceInr / (p.durationDays / 30) : 0;
+      if (pm < bestPerMonth) {
+        bestPerMonth = pm.toDouble();
+        best = p;
+      }
+    }
+    final monthly = plans
+        .where((p) => (p.durationDays - 30).abs() <= 5)
+        .fold<double?>(null, (m, p) => p.priceInr / (p.durationDays / 30));
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('DOP Collect Pro'),
         automaticallyImplyLeading: !widget.hardGate,
+        actions: [
+          IconButton(
+            tooltip: 'Refresh status',
+            icon: _restoring
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded),
+            onPressed: _restoring ? null : _restore,
+          ),
+        ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
           _statusBanner(s),
           const SizedBox(height: 18),
-          Text('Choose a plan',
+          Text(_active ? 'Extend your plan' : 'Choose a plan',
               style: AppTheme.display(18, weight: FontWeight.w800)),
           const SizedBox(height: 4),
           Text('Full access — sync, lists, portal submit and the assistant.',
@@ -118,28 +167,64 @@ class _PaywallScreenState extends State<PaywallScreen> {
           ],
           const SizedBox(height: 14),
           if (plans.isEmpty)
-            const Center(
-                child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator()))
+            _plansLoadingOrRetry()
           else
-            for (final p in plans) _planCard(p),
+            for (final p in plans)
+              _planCard(p, isBest: p.code == best?.code, monthlyPerMo: monthly),
+          const SizedBox(height: 20),
+          _restoreRow(),
+          const SizedBox(height: 18),
+          _legalFooter(),
         ],
+      ),
+    );
+  }
+
+  Widget _plansLoadingOrRetry() {
+    // If the first refresh came back with no plans, offer a retry instead of an
+    // endless spinner.
+    final loaded = _s != null;
+    if (!loaded) {
+      return const Center(
+          child: Padding(
+              padding: EdgeInsets.all(24), child: CircularProgressIndicator()));
+    }
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(children: [
+          Text('Couldn\'t load plans.',
+              style: AppTheme.body(13, color: AppTheme.inkMuted)),
+          const SizedBox(height: 8),
+          TextButton(onPressed: _restore, child: const Text('Retry')),
+        ]),
       ),
     );
   }
 
   Widget _statusBanner(SubStatus? s) {
     final (String text, Color tint, Color fg) = switch (s?.status) {
-      'active' => ('Active · ${s!.daysLeft} days left', AppTheme.greenSoft, AppTheme.green),
-      'trial' => ('Free trial · ${s!.daysLeft} days left', AppTheme.focal, AppTheme.black),
-      'expired' => ('Your access has ended — subscribe to continue', AppTheme.redSoft, AppTheme.red),
+      'active' => (
+          'Active · ${s!.daysLeft} day${s.daysLeft == 1 ? '' : 's'} left',
+          AppTheme.greenSoft,
+          AppTheme.green
+        ),
+      'trial' => (
+          'Free trial · ${s!.daysLeft} day${s.daysLeft == 1 ? '' : 's'} left',
+          AppTheme.focal,
+          AppTheme.black
+        ),
+      'expired' => (
+          'Your access has ended — subscribe to continue',
+          AppTheme.redSoft,
+          AppTheme.red
+        ),
       _ => ('Subscribe for full access', AppTheme.surfaceSoft, AppTheme.inkMuted),
     };
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: BoxDecoration(
-          color: tint, borderRadius: BorderRadius.circular(16)),
+      decoration:
+          BoxDecoration(color: tint, borderRadius: BorderRadius.circular(16)),
       child: Row(children: [
         Icon(Icons.workspace_premium_rounded, color: fg, size: 22),
         const SizedBox(width: 10),
@@ -150,41 +235,68 @@ class _PaywallScreenState extends State<PaywallScreen> {
     );
   }
 
-  Widget _planCard(Plan p) {
+  Widget _planCard(Plan p, {required bool isBest, double? monthlyPerMo}) {
     final months = (p.durationDays / 30).round();
     final per = months > 0 ? p.priceInr / months : p.priceInr;
+    // Savings vs the monthly plan's per-month price.
+    int? savePct;
+    if (monthlyPerMo != null && months > 1 && per < monthlyPerMo) {
+      savePct = (100 * (1 - per / monthlyPerMo)).round();
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Container(
         padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
-        decoration: AppTheme.card(radius: 18),
+        decoration: isBest
+            ? AppTheme.card(radius: 18).copyWith(
+                border: Border.all(color: AppTheme.black, width: 1.6),
+              )
+            : AppTheme.card(radius: 18),
         child: Row(
           children: [
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(p.name,
-                      style: AppTheme.display(17, weight: FontWeight.w800)),
-                  const SizedBox(height: 2),
-                  Text('${inr(p.priceInr)} · ${p.durationDays} days'
-                      '${months > 1 ? ' · ~${inr(per)}/mo' : ''}',
-                      style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
+                  Row(children: [
+                    Text(p.name,
+                        style: AppTheme.display(17, weight: FontWeight.w800)),
+                    if (isBest) ...[
+                      const SizedBox(width: 8),
+                      _pill('BEST VALUE', AppTheme.focal, AppTheme.black),
+                    ],
+                  ]),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${inr(p.priceInr)} · ${p.durationDays} days'
+                    '${months > 1 ? ' · ~${inr(per)}/mo' : ''}',
+                    style: AppTheme.body(12.5, color: AppTheme.inkMuted),
+                  ),
+                  if (savePct != null && savePct > 0) ...[
+                    const SizedBox(height: 4),
+                    Text('Save $savePct% vs monthly',
+                        style: AppTheme.body(11.5,
+                            weight: FontWeight.w700, color: AppTheme.green)),
+                  ],
                 ],
               ),
             ),
             SizedBox(
-              width: 116,
+              width: 112,
               child: PushButton(
                 onPressed: _busyPlan != null ? null : () => _choose(p),
                 color: AppTheme.black,
                 foreground: Colors.white,
                 radius: 12,
                 expand: false,
-                child: Text(_busyPlan == p.code
-                    ? '…'
-                    : _checkoutReady
-                        ? 'Choose'
+                child: _busyPlan == p.code
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : Text(_checkoutReady
+                        ? (_active ? 'Extend' : 'Choose')
                         : 'Soon'),
               ),
             ),
@@ -193,4 +305,83 @@ class _PaywallScreenState extends State<PaywallScreen> {
       ),
     );
   }
+
+  Widget _pill(String text, Color bg, Color fg) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
+        child: Text(text,
+            style: AppTheme.body(9.5, weight: FontWeight.w800, color: fg)),
+      );
+
+  Widget _restoreRow() => Center(
+        child: TextButton.icon(
+          onPressed: _restoring ? null : _restore,
+          icon: const Icon(Icons.restart_alt_rounded, size: 18),
+          label: Text('I\'ve already paid — restore access',
+              style: AppTheme.body(13, weight: FontWeight.w700)),
+        ),
+      );
+
+  Widget _legalFooter() {
+    Widget link(String label, VoidCallback onTap) => GestureDetector(
+          onTap: onTap,
+          child: Text(label,
+              style: AppTheme.body(11.5,
+                      color: AppTheme.inkMuted, weight: FontWeight.w600)
+                  .copyWith(decoration: TextDecoration.underline)),
+        );
+    return Column(
+      children: [
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 14,
+          runSpacing: 6,
+          children: [
+            link('Privacy', () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PrivacyScreen()))),
+            link('Terms', () => _policyDialog('Terms of use', _termsText)),
+            link('Refunds', () => _policyDialog('Cancellation & refunds', _refundText)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text('Payments are processed securely by Razorpay. No auto-renewal — '
+            'your plan simply ends and you re-subscribe.',
+            textAlign: TextAlign.center,
+            style: AppTheme.body(11, color: AppTheme.inkFaint, height: 1.35)),
+      ],
+    );
+  }
+
+  void _policyDialog(String title, String body) => showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: AppTheme.surface,
+          title: Text(title, style: AppTheme.display(17)),
+          content: SingleChildScrollView(
+            child: Text(body,
+                style: AppTheme.body(12.5, color: AppTheme.inkMuted, height: 1.5)),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close')),
+          ],
+        ),
+      );
+
+  static const _termsText =
+      'DOP Collect Pro is a subscription to the app\'s collection tools (sync, '
+      'lists, portal submission and the assistant). Access is tied to your DOP '
+      'Agent ID for the plan\'s duration. The app assists with data entry only — '
+      'it never moves money on your behalf; every payment on the post-office '
+      'portal is made by you. Use the app in line with India Post rules.';
+
+  static const _refundText =
+      'Plans are one-time purchases for a fixed period (no auto-renewal) — when '
+      'a plan ends, access simply stops until you subscribe again.\n\n'
+      'If you were charged but access didn\'t activate, tap "I\'ve already paid — '
+      'restore access"; activation can take a moment. For a duplicate or '
+      'wrongful charge, contact support from Settings within 7 days and we\'ll '
+      'verify and refund the transaction to your original payment method.';
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../assistant/assistant_config.dart';
 import '../data/account_repository.dart';
@@ -6,6 +7,7 @@ import '../data/app_settings.dart';
 import '../data/credentials.dart';
 import '../main.dart';
 import '../services/analytics.dart';
+import '../services/otp_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/developer_card.dart';
 import '../widgets/push_button.dart';
@@ -32,7 +34,7 @@ class SettingsScreen extends StatefulWidget {
   /// spotlight targets).
   final Future<void> Function()? onTour;
 
-  static const _version = '0.9.45';
+  static const _version = '0.9.48';
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -129,6 +131,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (ok != true) return;
     Analytics.track('logout');
     await Credentials.clear();
+    // Revoke this device's OTP session server-side too (frees a device slot) and
+    // wipe the local token. Best-effort — never let it block logout.
+    try {
+      await OtpService.logout();
+    } catch (_) {/* ignore */}
+    // Drop the portal's JSESSIONID too — otherwise the next person to open Sync
+    // on this phone could land inside an already-authenticated banking session
+    // with no credentials. Best-effort: never let a cookie error block logout.
+    try {
+      await WebViewCookieManager().clearCookies();
+    } catch (_) {/* ignore — credentials are already wiped */}
     await AppSettings.setOnboarded(false);
     DopCollectApp.onLogout?.call();
   }
@@ -214,7 +227,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('ASLAAS NUMBER', style: AppTheme.label(AppTheme.inkMuted)),
+          Text('DEFAULT ASLAAS NUMBER',
+              style: AppTheme.label(AppTheme.inkMuted)),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -253,7 +267,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          Text('Shown on every list to key into the portal.',
+          Text('Each account has its OWN ASLAAS number — set it on the account '
+              '(or let a portal submit fill it in). This one is only used for '
+              'accounts whose number is not known yet.',
               style: AppTheme.body(11, color: AppTheme.inkMuted)),
         ],
       ),

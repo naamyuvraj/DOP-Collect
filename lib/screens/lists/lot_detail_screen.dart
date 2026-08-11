@@ -45,6 +45,8 @@ class LotDetailScreen extends StatefulWidget {
 }
 
 class _LotDetailScreenState extends State<LotDetailScreen> {
+  /// Legacy agency-wide value from Settings — only a fallback now, for lists
+  /// saved before ASLAAS became per-account.
   String _aslaas = '';
   String _agentName = '';
   String _agentId = '';
@@ -59,9 +61,93 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
     });
     AppSettings.agentName().then((v) => _agentName = v);
     Credentials.load().then((c) => _agentId = c.agentId);
+    _refreshAslaas();
+  }
+
+  /// Top up any item missing its own ASLAAS from the account record — so a
+  /// number harvested from the portal (or typed in) after this list was created
+  /// still shows up here and on the PDF.
+  Future<void> _refreshAslaas() async {
+    final filled = <LotItem>[];
+    var changed = false;
+    for (final it in _lot.items) {
+      if ((it.aslaas ?? '').trim().isNotEmpty) {
+        filled.add(it);
+        continue;
+      }
+      final acc = await widget.accounts.byAccountNumber(it.accountNumber);
+      final own = acc?.aslaas?.trim() ?? '';
+      if (own.isEmpty) {
+        filled.add(it);
+      } else {
+        filled.add(it.copyWith(aslaas: own));
+        changed = true;
+      }
+    }
+    if (!changed || !mounted) return;
+    setState(() => _lot = _lot.copyWith(items: filled));
+    await widget.lots.update(_lot);
+  }
+
+  /// Set ONE account's ASLAAS: stored on the account (so every future list gets
+  /// it) and on this list's row.
+  Future<void> _editAslaas(int index) async {
+    final it = _lot.items[index];
+    final ctrl = TextEditingController(text: it.aslaas ?? '');
+    final value = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('ASLAAS number', style: AppTheme.display(17)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${it.customerName} · #${it.accountNumber}',
+                style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              style: AppTheme.body(16, weight: FontWeight.w600),
+              decoration: const InputDecoration(hintText: 'e.g. 801357'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, ctrl.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (value == null) return;
+    await widget.accounts.setAslaas(it.accountNumber, value);
+    final items = [..._lot.items];
+    // copyWith can't null a field out, so rebuild the row when clearing.
+    items[index] = value.isEmpty
+        ? LotItem(
+            accountNumber: it.accountNumber,
+            customerName: it.customerName,
+            denomination: it.denomination,
+            installments: it.installments,
+            chequeNumber: it.chequeNumber,
+            bankAccountNumber: it.bankAccountNumber,
+          )
+        : it.copyWith(aslaas: value);
+    setState(() => _lot = _lot.copyWith(items: items));
+    await widget.lots.update(_lot);
   }
 
   Lot get lot => _lot;
+
+  /// How many rows have an ASLAAS number of their own.
+  int get _aslaasSet =>
+      lot.items.where((it) => aslaasOf(it, _aslaas).isNotEmpty).length;
 
   /// Remove one account from the list and persist. If it was the last one, the
   /// whole list is offered for deletion.
@@ -96,14 +182,15 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
     final b = StringBuffer()
       ..writeln('DOP Collection List (${lot.mode})')
       ..writeln(lot.dateLabel)
-      ..writeln('ASLAAS: ${_aslaas.isEmpty ? "—" : _aslaas}')
       ..writeln('Accounts: ${lot.count} · Installments: ${lot.totalInstallments} '
           '· Total: ${inr(lot.totalAmount)}')
       ..writeln('');
     for (var i = 0; i < lot.items.length; i++) {
       final it = lot.items[i];
+      final asl = aslaasOf(it, _aslaas);
       b.writeln('${i + 1}. ${it.customerName}  ${it.accountNumber}  '
-          'x${it.installments}  ${inr(it.amount)}');
+          'x${it.installments}  ${inr(it.amount)}  '
+          'ASLAAS ${asl.isEmpty ? "—" : asl}');
     }
     return b.toString();
   }
@@ -168,11 +255,24 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
   }
 
   Future<void> _copy() async {
-    await Clipboard.setData(ClipboardData(text: _asText()));
+    final text = _asText();
+    await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('List copied — paste into WhatsApp/notes')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('List copied — clears in 90s. Paste into WhatsApp/notes.')));
     }
+    // This is customer PII (names + full account numbers). The Android clipboard
+    // is readable by any focused app and Gboard persists its history to disk, so
+    // auto-clear after 90s — but only if it's still OUR text, so we never wipe
+    // something the user copied in the meantime.
+    Future.delayed(const Duration(seconds: 90), () async {
+      try {
+        final cur = await Clipboard.getData(Clipboard.kTextPlain);
+        if (cur?.text == text) {
+          await Clipboard.setData(const ClipboardData(text: ''));
+        }
+      } catch (_) {/* best-effort */}
+    });
   }
 
   /// See the list's PDF first (full-screen, pinch-to-zoom) and download/share it
@@ -323,13 +423,20 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
           const SizedBox(height: 2),
           Text(lot.dateLabel, style: AppTheme.body(12, color: AppTheme.inkFaint)),
           const Divider(height: 20, color: AppTheme.divider),
+          // ASLAAS is per account — the portal holds a different number for each
+          // one — so this only reports coverage; the numbers are on the rows.
           Row(
             children: [
               Text('ASLAAS  ', style: AppTheme.label(AppTheme.inkMuted)),
-              Text(_aslaas.isEmpty ? 'set in Settings' : _aslaas,
+              Text(
+                  _aslaasSet == lot.count
+                      ? 'per account · all ${lot.count} set'
+                      : '$_aslaasSet of ${lot.count} set — tap a row to add',
                   style: AppTheme.body(14,
                       weight: FontWeight.w600,
-                      color: _aslaas.isEmpty ? AppTheme.red : AppTheme.ink)),
+                      color: _aslaasSet == lot.count
+                          ? AppTheme.ink
+                          : AppTheme.red)),
             ],
           ),
           const SizedBox(height: 8),
@@ -360,7 +467,10 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
   }
 
   Widget _itemRow(int i, LotItem it) {
-    return Container(
+    final asl = aslaasOf(it, _aslaas);
+    return GestureDetector(
+      onTap: () => _editAslaas(i),
+      child: Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: AppTheme.card(),
@@ -380,6 +490,11 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
                 const SizedBox(height: 2),
                 Text('#${it.accountNumber}',
                     style: AppTheme.body(12, color: AppTheme.inkMuted)),
+                const SizedBox(height: 2),
+                Text(asl.isEmpty ? 'ASLAAS — tap to add' : 'ASLAAS $asl',
+                    style: AppTheme.body(11.5,
+                        weight: FontWeight.w600,
+                        color: asl.isEmpty ? AppTheme.red : AppTheme.inkMuted)),
               ],
             ),
           ),
@@ -403,6 +518,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
             onPressed: () => _removeItem(i),
           ),
         ],
+      ),
       ),
     );
   }

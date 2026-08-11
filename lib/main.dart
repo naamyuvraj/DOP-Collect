@@ -15,8 +15,13 @@ import 'data/database.dart';
 import 'data/lot_repository.dart';
 import 'data/sample_data.dart';
 import 'models/summaries.dart';
+import 'data/credentials.dart';
 import 'screens/onboarding_login.dart';
+import 'screens/verify_gate_screen.dart';
+import 'data/session.dart';
 import 'services/analytics.dart';
+import 'services/otp_service.dart';
+import 'services/update_service.dart';
 import 'shell.dart';
 import 'theme/app_theme.dart';
 
@@ -58,10 +63,47 @@ Future<void> main() async {
   unawaited(Analytics.identify());
   unawaited(Analytics.track('app_open'));
 
+  // Silently download any Shorebird patch in the background so it stages itself
+  // with no user action — the Home banner then offers a one-tap restart, and it
+  // applies on the next cold start regardless. (Fixes the old "open twice"
+  // behaviour where the patch only downloaded when the user tapped Update.)
+  if (!web) unawaited(UpdateService().downloadUpdate());
+
   // Web build is only for UI preview — skip the first-run gate there.
   final onboarded = web ? true : await AppSettings.onboarded();
 
-  runApp(DopCollectApp(repo: repo, lots: lots, onboarded: onboarded));
+  // OTP gate (option b — enforce the agent↔phone pair for EVERYONE, not only new
+  // onboardings): an already-onboarded user with OTP on but no verified session
+  // on this device must verify before using the app. Computed up front so the
+  // gate shows instantly; the heartbeat below refines it (revoked session).
+  final needsVerify = !web &&
+      onboarded &&
+      RemoteConfig.otpRequired &&
+      !(await SessionStore.exists);
+
+  runApp(DopCollectApp(
+      repo: repo, lots: lots, onboarded: onboarded, needsVerify: needsVerify));
+
+  // 2-device enforcement: if OTP is on and this device's session was revoked
+  // remotely (kicked by the 2-device limit, or disabled by an admin), drop to
+  // the verify gate on this launch. Background so it never delays startup, and
+  // fail-open on a network blip.
+  if (!web && onboarded) unawaited(_enforceSession());
+}
+
+/// Startup session heartbeat. Only acts when OTP is required AND the server says
+/// this device's existing session is no longer valid; otherwise it's a no-op.
+Future<void> _enforceSession() async {
+  try {
+    if (!RemoteConfig.otpRequired) return;
+    if (!await SessionStore.exists) return; // no session → gate already shown
+    if (await OtpService.sessionValid()) return; // valid, or offline (fail-open)
+    // Session revoked (2-device limit / disabled): drop to the verify gate,
+    // keeping the user onboarded so their setup isn't wiped.
+    await SessionStore.clear();
+    OtpService.signedOutRemotely = true; // the gate surfaces the reason
+    DopCollectApp.setNeedsVerify?.call(true);
+  } catch (_) {/* never let this crash startup */}
 }
 
 class DopCollectApp extends StatefulWidget {
@@ -70,13 +112,18 @@ class DopCollectApp extends StatefulWidget {
     required this.repo,
     required this.lots,
     required this.onboarded,
+    this.needsVerify = false,
   });
   final AccountRepository repo;
   final LotRepository lots;
   final bool onboarded;
+  final bool needsVerify;
 
   /// Set by the app root so Settings can log out (drops to onboarding).
   static void Function()? onLogout;
+
+  /// Set by the app root so the startup heartbeat can raise the verify gate.
+  static void Function(bool)? setNeedsVerify;
 
   @override
   State<DopCollectApp> createState() => _DopCollectAppState();
@@ -84,13 +131,36 @@ class DopCollectApp extends StatefulWidget {
 
 class _DopCollectAppState extends State<DopCollectApp> {
   late bool _onboarded = widget.onboarded;
+  late bool _needsVerify = widget.needsVerify;
 
   @override
   void initState() {
     super.initState();
     DopCollectApp.onLogout = () {
-      if (mounted) setState(() => _onboarded = false);
+      if (mounted) {
+        setState(() {
+          _onboarded = false;
+          _needsVerify = false;
+        });
+      }
     };
+    DopCollectApp.setNeedsVerify = (v) {
+      if (mounted) setState(() => _needsVerify = v);
+    };
+  }
+
+  /// Full sign-out from the verify gate: wipe credentials + session, drop to
+  /// onboarding.
+  Future<void> _fullLogout() async {
+    await Credentials.clear();
+    await OtpService.logout();
+    await AppSettings.setOnboarded(false);
+    if (mounted) {
+      setState(() {
+        _onboarded = false;
+        _needsVerify = false;
+      });
+    }
   }
 
   @override
@@ -109,14 +179,28 @@ class _DopCollectAppState extends State<DopCollectApp> {
       ),
       home: RemoteConfig.updateRequired
           ? const ForceUpdateScreen()
-          : _onboarded
-              ? MainShell(
-                  key: const ValueKey('shell'),
-                  repo: widget.repo,
-                  lots: widget.lots)
-              : OnboardingLogin(
+          : !_onboarded
+              ? OnboardingLogin(
                   key: const ValueKey('onboarding'),
-                  onDone: () => setState(() => _onboarded = true)),
+                  onDone: () => setState(() => _onboarded = true))
+              : _needsVerify
+                  ? VerifyGateScreen(
+                      key: const ValueKey('verify-gate'),
+                      reason: OtpService.signedOutRemotely
+                          ? 'You were signed out because your account is now '
+                              'active on 2 other phones. Verify again to use it '
+                              'on this one.'
+                          : null,
+                      onVerified: () {
+                        OtpService.signedOutRemotely = false;
+                        setState(() => _needsVerify = false);
+                      },
+                      onLogout: _fullLogout,
+                    )
+                  : MainShell(
+                      key: const ValueKey('shell'),
+                      repo: widget.repo,
+                      lots: widget.lots),
     );
   }
 }

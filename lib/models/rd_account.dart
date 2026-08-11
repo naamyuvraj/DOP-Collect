@@ -23,6 +23,12 @@ class RdAccount {
   final int serial;
   final CollectionStatus status;
 
+  /// This account's own ASLAAS number, as held on the portal
+  /// (`ASLAAS_NO_ARRAY[i]` on the installment screen). It differs per account —
+  /// it is NOT one number for the whole agency — so it lives here, not in
+  /// settings. Null until harvested from the portal or typed in.
+  final String? aslaas;
+
   // --- Detail fields (Deep Sync; null until fetched) ---
   final DateTime? openingDate;
   final int? totalDeposit; // exact, from detail page
@@ -38,6 +44,7 @@ class RdAccount {
     required this.monthsPaid,
     this.serial = 0,
     this.status = CollectionStatus.pending,
+    this.aslaas,
     this.openingDate,
     this.totalDeposit,
     this.pendingInstallments,
@@ -132,6 +139,7 @@ class RdAccount {
   RdAccount copyWith({
     CollectionStatus? status,
     int? serial,
+    String? aslaas,
     DateTime? openingDate,
     int? totalDeposit,
     int? pendingInstallments,
@@ -146,6 +154,7 @@ class RdAccount {
         monthsPaid: monthsPaid,
         serial: serial ?? this.serial,
         status: status ?? this.status,
+        aslaas: aslaas ?? this.aslaas,
         openingDate: openingDate ?? this.openingDate,
         totalDeposit: totalDeposit ?? this.totalDeposit,
         pendingInstallments: pendingInstallments ?? this.pendingInstallments,
@@ -161,6 +170,7 @@ class RdAccount {
         'months_paid': monthsPaid,
         'serial': serial,
         'status': status.name,
+        'aslaas': aslaas,
         'opening_date': openingDate?.toIso8601String(),
         'total_deposit': totalDeposit,
         'pending_installments': pendingInstallments,
@@ -177,6 +187,7 @@ class RdAccount {
         serial: (m['serial'] as num?)?.toInt() ?? 0,
         status:
             CollectionStatus.values.byName(m['status'] as String? ?? 'pending'),
+        aslaas: _text(m['aslaas']),
         openingDate: _dt(m['opening_date']),
         totalDeposit: (m['total_deposit'] as num?)?.toInt(),
         pendingInstallments: (m['pending_installments'] as num?)?.toInt(),
@@ -186,4 +197,10 @@ class RdAccount {
 
   static DateTime? _dt(Object? v) =>
       v == null ? null : DateTime.tryParse(v as String);
+
+  /// Non-empty text or null — an empty ASLAAS cell means "not set", not "".
+  static String? _text(Object? v) {
+    final s = (v as String?)?.trim() ?? '';
+    return s.isEmpty ? null : s;
+  }
 }

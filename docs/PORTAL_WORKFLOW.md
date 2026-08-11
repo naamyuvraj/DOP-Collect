@@ -105,7 +105,7 @@ selector names are recorded here.
 - Get Rebate & Default: submit `Action.CALCULATE_REBATE` (value "Get Rebate & Default Fee") — portal fills rebate/default.
 - Save this record: submit `Action.ADD_TO_LIST` (value "Save") → the row's **Modified** cell flips NO→YES.
 - Mode: select `CustomAgentRDAccountFG.MODE_RD_PAYMENT` (C/DC/NDC) — **disabled here** (locked from the list page).
-- **ASLAAS is NOT entered here** — it's a pre-stored, read-only column (`ASLAAS_NO_ARRAY[i]`), managed via the "Update ASLAAS Number" menu.
+- **ASLAAS is NOT entered here** — it's a pre-stored, read-only column (`ASLAAS_NO_ARRAY[i]`), managed via the "Update ASLAAS Number" menu. It is **per account** (each row has a different number), so the app *reads* it here (`readAslaasNumbers()`) after a prepare/submit and stores it on the account; lists print each account's own number.
 - Other actions on this screen: `Action.DELETE_SAVED_RECORD` (Delete), `Action.BACK_TO_ACCOUNT_LIST` (Back).
 
 **Step 7 — Pay All (`portal_02` → result `portal_03_pay_all_reference.html`):**

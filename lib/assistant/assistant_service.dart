@@ -215,8 +215,10 @@ class AssistantService {
   }
 
   Future<List<Map<String, Object?>>> _run(String sql) async {
-    final db = await _db.database;
-    return db.rawQuery(sql); // read-only path
+    // Read-only connection: SqlGuard sanitises the SQL first, and even if it
+    // ever misses something, SQLite rejects any write on this handle.
+    final db = await _db.readOnlyDatabase;
+    return db.rawQuery(sql);
   }
 
   AnswerKind _kind(String? k) {

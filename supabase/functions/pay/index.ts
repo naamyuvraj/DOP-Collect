@@ -82,6 +82,10 @@ Deno.serve(async (req) => {
         .data?.value ?? 14
     ) || 14;
 
+    const paymentsEnabled =
+      (await sb.from("app_config").select("value").eq("key", "payments_enabled").maybeSingle())
+        .data?.value === true;
+
     const loadPlans = async () =>
       (await sb.from("plans").select("*").eq("active", true).order("sort")).data || [];
 
@@ -91,6 +95,16 @@ Deno.serve(async (req) => {
         .from("subscriptions").select("*").eq("agent_id", agentId).maybeSingle();
       if (!sub) {
         const end = new Date(Date.now() + trialDays * 86400_000).toISOString();
+        // While the paywall is OFF, don't persist a row for every agent id that
+        // ever opens the app (unauthenticated => trial-row spam). Return an
+        // ephemeral trial; a real row is created lazily once payments are on.
+        if (!paymentsEnabled) {
+          return {
+            sub: { agent_id: agentId, plan_code: "trial", current_period_end: end },
+            status: "trial",
+            daysLeft: trialDays,
+          };
+        }
         const ins = await sb.from("subscriptions")
           .insert({ agent_id: agentId, plan_code: "trial", status: "trial", current_period_end: end })
           .select("*").single();

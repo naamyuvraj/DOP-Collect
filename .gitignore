@@ -4,7 +4,9 @@
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
-pubspec.lock
+# pubspec.lock IS committed: this is an application (not a package) handling
+# banking credentials, so builds must be reproducible and dependency changes
+# must be reviewable (supply-chain control). See SECURITY_AUDIT.md S10.
 
 # IDE
 .idea/

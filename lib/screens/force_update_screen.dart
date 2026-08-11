@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/app_restart.dart';
 import '../services/remote_config.dart';
 import '../services/update_service.dart';
 import '../theme/app_theme.dart';
@@ -19,9 +20,26 @@ class ForceUpdateScreen extends StatefulWidget {
 class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
   final _updater = UpdateService();
   bool _busy = false;
+  bool _ready = false; // a patch is downloaded and ready to apply on restart
   String? _note;
 
+  @override
+  void initState() {
+    super.initState();
+    // A patch may already be staged from a background download — if so, go
+    // straight to the one-tap restart.
+    _updater.isPatchStaged().then((s) {
+      if (mounted && s) setState(() => _ready = true);
+    });
+  }
+
   Future<void> _update() async {
+    if (_ready) {
+      // Full restart (new task + process kill) so the cold start applies the
+      // patch — no manual reopen.
+      AppRestart.restart();
+      return;
+    }
     setState(() {
       _busy = true;
       _note = null;
@@ -30,10 +48,11 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
     if (!mounted) return;
     setState(() {
       _busy = false;
+      _ready = ok;
       _note = ok
-          ? 'Update ready. Fully close the app and open it again.'
-          : 'No update found yet. Close and reopen the app, or update from the '
-              'Play Store.';
+          ? 'Update downloaded — tap "Restart & finish".'
+          : 'No update found yet. Reopen the app to try again, or update from '
+              'the Play Store.';
     });
   }
 
@@ -80,10 +99,18 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: Colors.white))
                       else
-                        const Icon(Icons.download_rounded,
-                            size: 20, color: Colors.white),
+                        Icon(
+                            _ready
+                                ? Icons.restart_alt_rounded
+                                : Icons.download_rounded,
+                            size: 20,
+                            color: Colors.white),
                       const SizedBox(width: 8),
-                      Text(_busy ? 'Checking…' : 'Update now'),
+                      Text(_busy
+                          ? 'Checking…'
+                          : _ready
+                              ? 'Restart & finish'
+                              : 'Update now'),
                     ],
                   ),
                 ),

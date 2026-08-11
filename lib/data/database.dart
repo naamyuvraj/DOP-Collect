@@ -21,23 +21,65 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   Database? _db;
+  Database? _roDb;
 
   Future<Database> get database async => _db ??= await _open();
+
+  /// A second, SELECT-only connection to the SAME encrypted DB, used ONLY to run
+  /// the AI assistant's LLM-generated SQL. Defence in depth: even if the
+  /// string-based `SqlGuard` ever misses a mutation/DDL, SQLite itself rejects
+  /// any write on a read-only handle — so a string parser is no longer the only
+  /// thing standing between the model and the data.
+  ///
+  /// Opened AFTER the main DB (so the file exists, is keyed, and every
+  /// migration incl. `v_accounts` has run) and with singleInstance:false so it's
+  /// a genuinely distinct read-only connection, not the cached read-write one.
+  Future<Database> get readOnlyDatabase async {
+    if (_roDb != null) return _roDb!;
+    await database; // ensure created + encrypted + migrated first
+    final dir = await getDatabasesPath();
+    final path = p.join(dir, 'dop_collect.db');
+    final prefs = await SharedPreferences.getInstance();
+    final encrypted = prefs.getBool(_kEncrypted) ?? false;
+    return _roDb ??= await openDatabase(
+      path,
+      password: encrypted ? await _dbKey() : null,
+      readOnly: true,
+      singleInstance: false,
+    );
+  }
 
   static const _secure = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
   static const _kEncrypted = 'db_encrypted_v1';
 
+  /// True after a launch where the encrypted DB could not be opened with the
+  /// current key and had to be recreated (Keystore key lost). The UI can read
+  /// this to prompt the agent to Sync again.
+  static bool needsResync = false;
+  static const _kResync = 'db_needs_resync_v1';
+
   /// 256-bit DB key, generated once and kept in the Keystore.
   Future<String> _dbKey() async {
-    var k = await _secure.read(key: 'db_key');
+    String? k;
+    try {
+      k = await _secure.read(key: 'db_key');
+    } catch (_) {
+      // Secure storage unreadable (rare — corruption / device migration).
+      // Fall through to generate a fresh key; the encrypted DB will then be
+      // unreadable and recovered (recreated) in _open, and a Sync repopulates
+      // it. Better than crash-looping on a locked-out Keystore.
+      k = null;
+    }
     if (k == null || k.isEmpty) {
       final r = Random.secure();
       k = List<int>.generate(32, (_) => r.nextInt(256))
           .map((b) => b.toRadixString(16).padLeft(2, '0'))
           .join();
-      await _secure.write(key: 'db_key', value: k);
+      try {
+        await _secure.write(key: 'db_key', value: k);
+      } catch (_) {/* if we can't persist it, we at least start this session */}
     }
     return k;
   }
@@ -61,13 +103,46 @@ class AppDatabase {
       }
     }
 
+    needsResync = prefs.getBool(_kResync) ?? false;
+    try {
+      return await _openAt(path, key, encrypted);
+    } catch (e) {
+      // The (encrypted) DB couldn't be opened — almost always the Keystore key
+      // was lost, so the ciphertext is unrecoverable regardless. A Sync fully
+      // repopulates from the portal, so move the unreadable file ASIDE (never a
+      // silent hard-delete) and start fresh rather than brick the app forever.
+      if (encrypted && await File(path).exists()) {
+        final aside = '$path.unreadable';
+        try {
+          if (await File(aside).exists()) await File(aside).delete();
+          await File(path).rename(aside);
+        } catch (_) {
+          try {
+            await File(path).delete();
+          } catch (_) {/* last resort */}
+        }
+        needsResync = true;
+        await prefs.setBool(_kResync, true);
+        return _openAt(path, key, true);
+      }
+      rethrow;
+    }
+  }
+
+  /// Clear the "please Sync again" flag once the agent has re-synced.
+  Future<void> clearResyncFlag() async {
+    needsResync = false;
+    (await SharedPreferences.getInstance()).remove(_kResync);
+  }
+
+  Future<Database> _openAt(String path, String key, bool encrypted) {
     return openDatabase(
       path,
       // Only pass the key once the file is actually encrypted; otherwise open
       // the plaintext DB as-is (migration failed / not yet done) so the app
       // never fails to start and no data is lost.
       password: encrypted ? key : null,
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await _createAccounts(db);
         await _createLots(db);
@@ -78,6 +153,12 @@ class AppDatabase {
         if (oldV < 3) await _addDetailColumns(db);
         if (oldV < 4) await _createAssistantView(db);
         if (oldV < 5) await _addLotSubmissionColumns(db);
+        if (oldV < 6) await _addAslaasColumn(db);
+      },
+      // Force key validation NOW so a bad/lost key fails here (recoverable
+      // above) instead of later, mid-screen, as a crash.
+      onOpen: (db) async {
+        await db.rawQuery('SELECT count(*) FROM sqlite_master');
       },
     );
   }
@@ -134,6 +215,7 @@ class AppDatabase {
         months_paid           INTEGER NOT NULL,
         serial                INTEGER NOT NULL DEFAULT 0,
         status                TEXT NOT NULL DEFAULT 'pending',
+        aslaas                TEXT,
         opening_date          TEXT,
         total_deposit         INTEGER,
         pending_installments  INTEGER,
@@ -155,6 +237,13 @@ class AppDatabase {
     ]) {
       await db.execute('ALTER TABLE accounts ADD COLUMN $col');
     }
+  }
+
+  /// v6: each account's own ASLAAS number. It was previously one agent-level
+  /// value in settings, which put the SAME number on every account of a list —
+  /// wrong, since the portal holds a distinct ASLAAS per account.
+  Future<void> _addAslaasColumn(Database db) async {
+    await db.execute('ALTER TABLE accounts ADD COLUMN aslaas TEXT');
   }
 
   /// Read-only view the AI assistant queries. Exposes clean, pre-computed

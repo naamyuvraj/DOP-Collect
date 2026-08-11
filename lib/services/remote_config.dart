@@ -97,6 +97,10 @@ class RemoteConfig {
   /// native checkout ship in a release build.
   static bool get paymentsEnabled => _flag('payments_enabled', def: false);
 
+  /// Require WhatsApp OTP phone verification during onboarding. Off (default) =>
+  /// the phone step is optional. Flip on once the OTP flow is tested end-to-end.
+  static bool get otpRequired => _flag('otp_required', def: false);
+
   /// Home-screen announcement banner.
   static ({String text, bool enabled}) get announcement {
     final m = _obj('announcement');

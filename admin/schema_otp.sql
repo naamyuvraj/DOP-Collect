@@ -34,6 +34,21 @@ create index if not exists idx_sessions_live
   on public.device_sessions (account_id) where revoked_at is null;
 create index if not exists idx_sessions_token on public.device_sessions (token_hash);
 
+-- Pending OTP codes (WhatsApp channel). Unlike the SMS OTP flow, MSG91 does NOT
+-- generate/verify WhatsApp OTPs — we do. We store only sha256(phone+':'+otp),
+-- never the raw code. One pending code per phone; replaced on resend, deleted on
+-- success/expiry. `attempts` caps brute force.
+create table if not exists public.otp_codes (
+  phone_hash text primary key,
+  otp_hash   text not null,               -- sha256(salt:'91xxxxxxxxxx':123456)
+  salt       text,                         -- per-code random salt (offline-brute-force guard)
+  expires_at timestamptz not null,
+  attempts   int not null default 0,
+  created_at timestamptz not null default now()
+);
+alter table public.otp_codes add column if not exists salt text;
+create index if not exists idx_otp_codes_expiry on public.otp_codes (expires_at);
+
 -- OTP attempts — rate-limit audit (no raw phone, no code).
 create table if not exists public.otp_requests (
   id          bigint generated always as identity primary key,
@@ -57,11 +72,15 @@ alter table public.devices add column if not exists phone_verified boolean defau
 alter table public.accounts        enable row level security;
 alter table public.device_sessions enable row level security;
 alter table public.otp_requests    enable row level security;
+alter table public.otp_codes       enable row level security;
 -- No anon policies on purpose → only the service-role edge function reads/writes.
 
 -- Config defaults (dashboard-tunable). otp_required gates onboarding; ship off.
+-- otp_limits: cooldown (s between sends), maxSendPerHour (per phone), maxIpPerHour
+-- + maxDevicePerHour (across all phones — anti-enumeration/cost), ttl (code
+-- lifetime s), maxAttempts (wrong tries before burn), digits (OTP length 4–8).
 insert into public.app_config (key, value) values
   ('otp_required', 'false'::jsonb),
   ('max_devices',  '2'::jsonb),
-  ('otp_limits',   '{"cooldown":30,"maxSendPerHour":5}'::jsonb)
+  ('otp_limits',   '{"cooldown":30,"maxSendPerHour":5,"maxIpPerHour":30,"maxDevicePerHour":10,"ttl":180,"maxAttempts":5,"digits":4}'::jsonb)
 on conflict (key) do nothing;

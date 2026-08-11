@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Force all app traffic over HTTPS (Groq, Supabase, google_fonts are TLS).
-     Blocking cleartext stops accidental/MITM downgrade to http.
-     EXCEPTION: the legacy India Post portal (loaded in a WebView) may pull an
-     http subresource, so cleartext is permitted for its domains only, to avoid
-     ever breaking the sync. -->
+<!-- Force ALL app traffic over HTTPS, including the India Post portal WebView.
+     The portal login is HTTPS (see Portal.agentLoginUrl) and a WebView already
+     blocks mixed active content, so no cleartext carve-out is needed. Removing
+     it closes the MITM path: on a hostile network an attacker could otherwise
+     answer for http://<anything>.indiapost.gov.in and, combined with the login
+     autofill, harvest the agent's banking credentials. Only system CAs are
+     trusted, so a user-installed proxy CA can't intercept TLS either. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">indiapost.gov.in</domain>
-    </domain-config>
 </network-security-config>

@@ -102,11 +102,26 @@ class PortalSyncEngine {
   Future<List<RdAccount>> parseCurrentPage() async =>
       AgentListParser.parsePage(await currentPageHtml());
 
-  Future<bool> _isSessionExpired() async {
-    final html = await currentPageHtml();
-    return html.contains('Session is Expired') ||
-        html.contains('Session Expired');
-  }
+  /// ONE cheap in-page probe for the page's state — returns a short token
+  /// ('list' | 'expired' | 'blocked' | 'other') instead of serialising the
+  /// whole DOM across the JS bridge on every check. Uses visible text only, so
+  /// it's tiny and fast even on the heavy legacy portal pages. This is the hot
+  /// path during a sync (called per page + on every table-wait poll).
+  static const _pageStateJs = r'''
+    (function(){
+      var t = (document.body && document.body.innerText) || '';
+      if (/Session\s+is\s+Expired|Session\s+Expired/i.test(t)) return 'expired';
+      if (/close this window/i.test(t) && /new browser window/i.test(t)) return 'blocked';
+      if ((/account\s*no|account\s*name/i.test(t)) &&
+          (/Page\s+\d+\s+of\s+\d+/i.test(t))) return 'list';
+      return 'other';
+    })();
+  ''';
+
+  Future<String> _pageState() async =>
+      _unwrap(await controller.runJavaScriptReturningResult(_pageStateJs));
+
+  Future<bool> _isSessionExpired() async => (await _pageState()) == 'expired';
 
   /// Detects Finacle's stale-transaction-token guard page — "Please close this
   /// window and try accessing the application in a new browser window." — shown
@@ -114,17 +129,10 @@ class PortalSyncEngine {
   /// a browser Back/Forward). Deep Sync avoids triggering it, but we still probe
   /// for it so a poisoned session surfaces as a clear error instead of silently
   /// ending after one account.
-  Future<bool> _isBlockedPage() async {
-    final html = (await currentPageHtml()).toLowerCase();
-    return html.contains('close this window') &&
-        html.contains('new browser window');
-  }
+  Future<bool> _isBlockedPage() async => (await _pageState()) == 'blocked';
 
   /// Is the account list currently rendered? (has the table + "Page X of N").
-  Future<bool> _onListPage() async {
-    final html = await currentPageHtml();
-    return _hasAccountTable(html);
-  }
+  Future<bool> _onListPage() async => (await _pageState()) == 'list';
 
   /// Public probe so the screen can auto-start once login lands on the list.
   Future<bool> isOnListPage() => _onListPage();
@@ -137,12 +145,6 @@ class PortalSyncEngine {
         "(function(){return (document.querySelector('#Accounts, a[name=\"HREF_Accounts\"], input[name*=\"GOTO_NEXT\"]')) ? 'true' : 'false';})();";
     return _unwrap(await controller.runJavaScriptReturningResult(js))
         .contains('true');
-  }
-
-  static bool _hasAccountTable(String html) {
-    final lower = html.toLowerCase();
-    return (lower.contains('account no') || lower.contains('account name')) &&
-        RegExp(r'Page\s+\d+\s+of\s+\d+', caseSensitive: false).hasMatch(html);
   }
 
   static int totalPages(String html) {
@@ -803,6 +805,39 @@ class PortalSyncEngine {
     }
   }
 
+  /// Read every row's ASLAAS number off the installment screen as
+  /// `accountNumber -> aslaas`. The portal stores a DIFFERENT ASLAAS per
+  /// account (`ASLAAS_NO_ARRAY[i]`, a read-only column maintained under "Update
+  /// ASLAAS Number"), so this is the authoritative source — the app used to
+  /// print one agency-wide number on every account of a list, which was wrong.
+  /// Rows are paired by array index, so reordering can't cross-assign them.
+  /// Returns {} when not on that screen or the column is absent.
+  Future<Map<String, String>> readAslaasNumbers() async {
+    const js = '''
+      (function(){
+        var out={};
+        var accs=document.querySelectorAll('[id*="ACCOUNT_NUMBER_ARRAY["]');
+        for(var i=0;i<accs.length;i++){
+          var m=accs[i].id.match(/\\[(\\d+)\\]/); if(!m) continue;
+          var num=(accs[i].textContent||'').replace(/\\D/g,'');
+          if(!num) continue;
+          var a=document.querySelector('[id*="ASLAAS_NO_ARRAY['+m[1]+']"]');
+          if(!a) continue;
+          var val=(a.textContent||'').trim();
+          if(val) out[num]=val;
+        }
+        return JSON.stringify(out);
+      })();
+    ''';
+    final raw = _unwrap(await controller.runJavaScriptReturningResult(js));
+    try {
+      return (jsonDecode(raw) as Map).map(
+          (k, v) => MapEntry(k as String, (v as String).trim()));
+    } catch (_) {
+      return const {};
+    }
+  }
+
   /// The portal array index of the first row whose account is in [targets] and
   /// is NOT yet Modified=YES, or -1 if all targets are done. Reading the account
   /// off the row each time means row reordering after a Save can never misalign
@@ -1116,18 +1151,22 @@ class PortalSyncEngine {
     await c.future.timeout(timeout, onTimeout: () => _pageLoad = null);
   }
 
-  /// Poll until the account table is present (handles late-rendering DOM).
+  /// Poll until the account table is present (handles late-rendering DOM). Uses
+  /// the cheap [_pageState] probe, so each poll is a tiny JS call, not a full
+  /// DOM serialisation — tighter polling stays cheap.
   Future<bool> _waitForTable(Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      if (_hasAccountTable(await currentPageHtml())) return true;
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      if ((await _pageState()) == 'list') return true;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
     }
     return false;
   }
 
+  // Small buffer after onPageFinished for the portal's own scripts to wire up.
+  // The table-wait poll is the real readiness gate, so this stays short.
   Future<void> _settle() =>
-      Future<void>.delayed(const Duration(milliseconds: 350));
+      Future<void>.delayed(const Duration(milliseconds: 150));
 
   static const _nextJs = r'''
     (function() {

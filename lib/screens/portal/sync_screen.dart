@@ -121,6 +121,19 @@ class _SyncScreenState extends State<SyncScreen> {
     super.dispose();
   }
 
+  // --- Origin lock ----------------------------------------------------------
+  // The WebView drives a live banking login, so the credential autofill must
+  // only ever run on the REAL portal origin. That guard lives inside every
+  // injected script (`location.origin` check below) — if the WebView is ever
+  // steered elsewhere (open redirect, hostile DNS, a followed link), the creds
+  // are simply never typed/submitted.
+  //
+  // NOTE: an `onNavigationRequest` host-allowlist was tried here too, but it
+  // broke the DOP portal's own post-login window/redirect flow ("please close
+  // this window…"), so it was removed. The origin gate below is the actual
+  // protection against credential theft and does not touch navigation.
+  static const _portalOrigin = 'https://dopagent.indiapost.gov.in';
+
   // --- Auto captcha (on-device OCR) ----------------------------------------
   // Reads the login captcha image locally with ML Kit and pre-fills the code.
   // The image is drawn to a canvas in-page and passed out as a data URL, so no
@@ -206,6 +219,10 @@ class _SyncScreenState extends State<SyncScreen> {
   /// back to value/text matching so a relabelled deployment still works.
   static const _loginJs = r'''
     (function(){
+      // No origin check here: credentials are only ever TYPED on the real portal
+      // (the autofill script is origin-gated), so clicking a login button on any
+      // other page would submit an empty form — harmless. Keeping an exact-origin
+      // gate here only risked blocking a legitimate login on an origin variant.
       var b=document.querySelector('input[name*="VALIDATE_CREDENTIALS" i]')
         || document.querySelector('input[type="submit"][value*="Log" i]')
         || document.querySelector('input[type="button"][value*="Log" i]')
@@ -265,13 +282,16 @@ class _SyncScreenState extends State<SyncScreen> {
         return;
       }
       // Auto-submit. The portal keeps the Login button disabled for a moment
-      // after the captcha field is filled (it validates on input), so clicking
-      // instantly used to no-op and the agent had to tap Login himself. Give it
-      // a beat and retry a few times; only a REAL submit counts toward the
-      // 2-per-screen lockout guard (a failed find is never burned).
+      // after the captcha field is filled (it validates on input), and on a slow
+      // phone/network that can take a couple of seconds — the old 3×450ms window
+      // (~1.35s) sometimes expired first, forcing a manual tap. Poll longer:
+      // 10×500ms (~5s), clicking the instant the button enables. Only a REAL
+      // submit counts toward the 2-per-screen lockout guard (a failed find /
+      // disabled button is never burned).
       if (_loginClicks < 2) {
-        for (var attempt = 0; attempt < 3; attempt++) {
-          await Future<void>.delayed(const Duration(milliseconds: 450));
+        for (var attempt = 0; attempt < 10; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          if (!mounted) return;
           final clicked =
               _decode(await _controller.runJavaScriptReturningResult(_loginJs));
           if (clicked.contains('true')) {
@@ -310,6 +330,8 @@ class _SyncScreenState extends State<SyncScreen> {
     final pwVal = jsonEncode(_creds.password);
     final js = '''
       (function() {
+        // Never type real banking credentials into anything but the portal.
+        if (location.origin !== '$_portalOrigin') return;
         function fire(el){['input','change','keyup','blur'].forEach(function(t){
           el.dispatchEvent(new Event(t,{bubbles:true}));});}
         var id = document.querySelector('[name="AuthenticationFG.USER_PRINCIPAL"]');
@@ -395,6 +417,10 @@ class _SyncScreenState extends State<SyncScreen> {
         await _engine.navigateToAccountList();
         continue;
       }
+
+      // Each account's own ASLAAS is displayed on this screen — grab it while
+      // we're here so lists print the right number per account.
+      await _harvestAslaas();
 
       // 2) Key only the rows that differ from "one installment" — advance
       // deposits (added more than once) and cheque rows. The rest ride Pay
@@ -579,6 +605,17 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
+  /// Store each account's OWN ASLAAS number, read off the installment screen
+  /// (the portal keeps a different one per account). Best-effort and silent: a
+  /// missing column just leaves the numbers as they were.
+  Future<void> _harvestAslaas() async {
+    try {
+      final byAccount = await _engine.readAslaasNumbers();
+      if (byAccount.isEmpty) return;
+      await widget.repo.applyAslaas(byAccount);
+    } catch (_) {/* never block the mission on this */}
+  }
+
   /// Prepare-list mission: pick mode, tick this lot's accounts across pages,
   /// Save. Leaves the WebView on the installment screen for manual Pay All.
   Future<void> _prepare() async {
@@ -607,6 +644,7 @@ class _SyncScreenState extends State<SyncScreen> {
       }
       final miss = res.missing(widget.prepareAccounts!);
       final missNote = miss.isEmpty ? '' : ' (${miss.length} not found)';
+      await _harvestAslaas();
       if (res.saved) {
         if (widget.isSubmit) {
           // Busy overlay off; the keying step drives its own progress + Stop.

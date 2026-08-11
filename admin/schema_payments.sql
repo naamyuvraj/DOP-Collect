@@ -59,8 +59,15 @@ alter table public.payments add column if not exists order_id  text;
 create unique index if not exists uq_payments_razorpay_ref
   on public.payments (ref) where provider = 'razorpay' and ref is not null;
 
+-- RLS must be ENABLED on every money table (S6): with RLS on and no anon
+-- policy, anon is denied — but if RLS is OFF, the table is wide open. Idempotent.
 alter table public.plans         enable row level security;
 alter table public.subscriptions enable row level security;
+alter table public.orders        enable row level security;
+alter table public.payments      enable row level security;
+-- Verify after running:  (all three must be TRUE)
+--   select relname, relrowsecurity from pg_class
+--   where relname in ('payments','orders','subscriptions');
 -- Plans are public pricing → anon may read. Subscriptions: service role only.
 drop policy if exists "anon read plans" on public.plans;
 create policy "anon read plans" on public.plans for select to anon using (true);

@@ -1,10 +1,14 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../dev_profile.dart';
 import '../theme/app_theme.dart';
+
+/// Support contact — shown in the About card and referenced by the paywall's
+/// refund note and the privacy policy. Keep in sync with docs/privacy.html.
+const String supportEmail = 'support.dop.collect@gmail.com';
 
 /// "About the developer" card shown in Settings.
 class DeveloperCard extends StatelessWidget {
@@ -45,7 +49,39 @@ class DeveloperCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(devBio,
               style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.45)),
+          const SizedBox(height: 14),
+          _supportRow(context),
         ],
+      ),
+    );
+  }
+
+  /// Tappable support email (copies to the clipboard) — the "contact support"
+  /// path promised by the paywall's refund note and the privacy policy.
+  Widget _supportRow(BuildContext context) {
+    return GestureDetector(
+      onTap: () async {
+        await Clipboard.setData(const ClipboardData(text: supportEmail));
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Support email copied.')));
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: AppTheme.card(fill: AppTheme.surfaceSoft, radius: 12),
+        child: Row(
+          children: [
+            const Icon(Icons.mail_outline_rounded,
+                size: 18, color: AppTheme.inkMuted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(supportEmail,
+                  style: AppTheme.body(13, weight: FontWeight.w700)),
+            ),
+            const Icon(Icons.copy_rounded, size: 15, color: AppTheme.inkFaint),
+          ],
+        ),
       ),
     );
   }

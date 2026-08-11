@@ -41,9 +41,16 @@ create table if not exists public.app_config (
   updated_at  timestamptz default now()
 );
 alter table public.app_config enable row level security;
+-- SECURITY (S13): anon may read only client-facing keys — NOT groq_limits (set
+-- just below) or any other server-only threshold. Kept in sync with the same
+-- policy in schema_management.sql; edge functions use the service role (bypasses
+-- RLS) so they still read every key.
 drop policy if exists "anon read config" on public.app_config;
 create policy "anon read config" on public.app_config
-  for select to anon using (true);
+  for select to anon using (key in (
+    'assistant_cloud', 'analytics_default', 'portal_submit',
+    'payments_enabled', 'announcement', 'force_update', 'otp_required'
+  ));
 
 -- Optional: tune the proxy limits from the dashboard (App Config). Defaults
 -- baked into the edge function are used if this row is absent.

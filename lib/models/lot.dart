@@ -15,6 +15,10 @@ class LotItem {
   final String? chequeNumber;
   final String? bankAccountNumber;
 
+  /// This account's OWN ASLAAS number, snapshotted when the list was created.
+  /// One number per account — never the agency-wide value it used to be.
+  final String? aslaas;
+
   const LotItem({
     required this.accountNumber,
     required this.customerName,
@@ -22,6 +26,7 @@ class LotItem {
     required this.installments,
     this.chequeNumber,
     this.bankAccountNumber,
+    this.aslaas,
   });
 
   int get amount => denomination * installments;
@@ -30,6 +35,7 @@ class LotItem {
     int? installments,
     String? chequeNumber,
     String? bankAccountNumber,
+    String? aslaas,
   }) =>
       LotItem(
         accountNumber: accountNumber,
@@ -38,6 +44,7 @@ class LotItem {
         installments: installments ?? this.installments,
         chequeNumber: chequeNumber ?? this.chequeNumber,
         bankAccountNumber: bankAccountNumber ?? this.bankAccountNumber,
+        aslaas: aslaas ?? this.aslaas,
       );
 
   Map<String, Object?> toJson() => {
@@ -48,6 +55,7 @@ class LotItem {
         // Only written when set, so existing cash items keep their compact shape.
         if (chequeNumber != null) 'cn': chequeNumber,
         if (bankAccountNumber != null) 'ba': bankAccountNumber,
+        if (aslaas != null) 'as': aslaas,
       };
 
   factory LotItem.fromJson(Map<String, Object?> j) => LotItem(
@@ -57,6 +65,7 @@ class LotItem {
         installments: (j['i'] as num).toInt(),
         chequeNumber: j['cn'] as String?,
         bankAccountNumber: j['ba'] as String?,
+        aslaas: j['as'] as String?,
       );
 }
 

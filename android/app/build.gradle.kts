@@ -53,10 +53,28 @@ android {
     buildTypes {
         release {
             // Use the upload key for Play once key.properties exists; otherwise
-            // the debug key (keeps the current in-place update line working).
+            // the debug key (keeps the current in-place Shorebird update line
+            // working). SECURITY (SECURITY_AUDIT.md S3): a release APK signed
+            // with the debug key can be stripped, trojanised and re-signed by
+            // anyone (the debug keystore is identical on every machine). This
+            // MUST NOT happen for a Play Store build — so warn loudly here, and
+            // hard-fail when an official release is requested via
+            //   ./gradlew ... -PrequireReleaseSigning=true
             signingConfig = if (hasReleaseKey) {
                 signingConfigs.getByName("release")
             } else {
+                if (project.hasProperty("requireReleaseSigning")) {
+                    throw GradleException(
+                        "android/key.properties is required for a release build. " +
+                        "Create the upload keystore before publishing to Play."
+                    )
+                }
+                logger.warn(
+                    "\n*** WARNING: release build is DEBUG-SIGNED (no android/key.properties). " +
+                    "Fine for local/Shorebird testing, but DO NOT publish this APK to the " +
+                    "Play Store. Generate the upload keystore and build with " +
+                    "-PrequireReleaseSigning=true for production. ***\n"
+                )
                 signingConfigs.getByName("debug")
             }
             // Disable R8/shrinking: ML Kit references optional non-Latin text

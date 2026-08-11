@@ -1,29 +1,36 @@
-// Supabase Edge Function: otp
+// Supabase Edge Function: otp  (WhatsApp channel via MSG91)
 // ---------------------------------------------------------------------------
-// MSG91 OTP proxy + identity/session authority. The app carries NO MSG91 auth
+// WhatsApp OTP proxy + identity/session authority. The app carries NO MSG91 auth
 // key — it lives here as a secret. This function:
-//   * send / resend / verify a phone OTP via MSG91 v5 (control.msg91.com)
+//   * send / resend a 6-digit OTP over WhatsApp (MSG91 template message)
+//   * verify it (we generate + store + check the code — MSG91 only DELIVERS the
+//     WhatsApp template; it does not verify WhatsApp OTPs, unlike SMS)
 //   * binds one phone <-> one DOP agent id (1:1)
 //   * issues a device session token and enforces MAX 2 devices per account
 //     (a 3rd verify kicks the oldest — "session out")
 //   * session_check heartbeat + logout
 //
-// The app calls this with the public anon key; the raw phone only transits to
-// MSG91, and only a SHA-256 hash is stored.
+// Only a SHA-256 hash of the phone AND of the code is ever stored; the raw phone
+// only transits to MSG91 for delivery.
 //
 // Secrets (supabase secrets set ...):
-//   MSG91_AUTHKEY, MSG91_TEMPLATE_ID, MSG91_SENDER (optional)
+//   MSG91_AUTHKEY                – MSG91 auth key
+//   MSG91_WA_INTEGRATED_NUMBER   – your WhatsApp business number, digits only
+//   MSG91_WA_TEMPLATE_NAME       – approved template name (body var = the OTP)
+//   MSG91_WA_TEMPLATE_LANG       – template language code (e.g. en_US / en)
+//   MSG91_WA_NAMESPACE           – (optional) template namespace, if your account uses one
+//   MSG91_WA_HAS_BUTTON          – (optional) "true" if it's an auth template with a copy-code button
 //   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 //
 // Deploy:
-//   supabase functions deploy otp --project-ref ojorpmtptryldizogtkz
+//   supabase functions deploy otp --project-ref ojorpmtptryldizogtkz --use-api
 // ---------------------------------------------------------------------------
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-integrity-token",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const json = (o: unknown, status = 200) =>
@@ -32,16 +39,37 @@ const json = (o: unknown, status = 200) =>
     headers: { ...CORS, "Content-Type": "application/json" },
   });
 
-const MSG91 = "https://control.msg91.com/api/v5/otp";
+const WA_SEND =
+  "https://api.msg91.com/api/v5/whatsapp/whatsapp-outbound-message/bulk/";
 
 async function sha256(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-function randomToken(): string {
-  const a = new Uint8Array(32);
+function randomToken(bytes = 32): string {
+  const a = new Uint8Array(bytes);
   crypto.getRandomValues(a);
   return [...a].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+/** Constant-time hex-string compare (don't leak the code hash via timing). */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+/** Salted hash of a code so a leak of otp_codes can't be brute-forced offline. */
+const codeHash = (salt: string, phone: string, otp: string) =>
+  sha256(`${salt}:${phone}:${otp}`);
+/** Cryptographically-random numeric OTP (rejection sampling => no modulo bias). */
+function genOtp(len = 6): string {
+  let out = "";
+  const buf = new Uint8Array(1);
+  while (out.length < len) {
+    crypto.getRandomValues(buf);
+    if (buf[0] < 250) out += (buf[0] % 10).toString(); // 250 = 25*10, unbiased
+  }
+  return out;
 }
 /** India: keep last 10 digits, prefix 91. */
 function normPhone(raw: string): string {
@@ -49,12 +77,65 @@ function normPhone(raw: string): string {
   return "91" + ten;
 }
 
+interface WaCfg {
+  number: string;
+  template: string;
+  lang: string;
+  namespace: string;
+  hasButton: boolean;
+}
+
+/** Deliver the OTP as a WhatsApp template message (body variable = the code). */
+async function sendWhatsApp(
+  authkey: string, cfg: WaCfg, phone12: string, otp: string,
+): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  const components: Record<string, unknown> = {
+    body_1: { type: "text", value: otp },
+  };
+  // Meta authentication templates carry the code in a copy-code button too.
+  if (cfg.hasButton) {
+    components.button_1 = { subtype: "url", type: "text", value: otp };
+  }
+  const payload = {
+    integrated_number: cfg.number,
+    content_type: "template",
+    payload: {
+      messaging_product: "whatsapp",
+      type: "template",
+      template: {
+        name: cfg.template,
+        language: { code: cfg.lang, policy: "deterministic" },
+        ...(cfg.namespace ? { namespace: cfg.namespace } : {}),
+        to_and_components: [{ to: [phone12], components }],
+      },
+    },
+  };
+  const resp = await fetch(WA_SEND, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", authkey },
+    body: JSON.stringify(payload),
+  });
+  const data = await resp.json().catch(() => ({}));
+  // MSG91 WhatsApp bulk API signals failure a few different ways depending on
+  // the error; treat only a clean 2xx with no error marker as success.
+  const d = data as { type?: string; status?: string; hasError?: boolean };
+  const looksError =
+    d?.type === "error" || d?.status === "error" || d?.hasError === true;
+  return { ok: resp.ok && !looksError, status: resp.status, data: data as Record<string, unknown> };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ ok: false, error: "POST only" }, 405);
 
   const authkey = Deno.env.get("MSG91_AUTHKEY") || "";
-  const templateId = Deno.env.get("MSG91_TEMPLATE_ID") || "";
+  const wa: WaCfg = {
+    number: Deno.env.get("MSG91_WA_INTEGRATED_NUMBER") || "",
+    template: Deno.env.get("MSG91_WA_TEMPLATE_NAME") || "",
+    lang: Deno.env.get("MSG91_WA_TEMPLATE_LANG") || "en_US",
+    namespace: Deno.env.get("MSG91_WA_NAMESPACE") || "",
+    hasButton: (Deno.env.get("MSG91_WA_HAS_BUTTON") || "").toLowerCase() === "true",
+  };
   const sb = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -65,7 +146,12 @@ Deno.serve(async (req) => {
     .from("app_config").select("value").eq("key", "otp_limits").maybeSingle();
   const L = (cfgRow?.value as Record<string, number>) || {};
   const cooldown = L.cooldown ?? 30;
-  const maxSendPerHour = L.maxSendPerHour ?? 5;
+  const maxSendPerHour = L.maxSendPerHour ?? 5;     // per PHONE / hour
+  const maxIpPerHour = L.maxIpPerHour ?? 30;        // per IP / hour (all phones)
+  const maxDevicePerHour = L.maxDevicePerHour ?? 10; // per DEVICE / hour
+  const ttl = L.ttl ?? 600;                 // code lifetime, seconds
+  const maxAttempts = L.maxAttempts ?? 5;   // wrong tries before burn
+  const otpDigits = Math.min(8, Math.max(4, Number(L.digits ?? 4))); // 4–8, default 4
   const { data: mdRow } = await sb
     .from("app_config").select("value").eq("key", "max_devices").maybeSingle();
   const maxDevices = Number(mdRow?.value ?? 2) || 2;
@@ -109,47 +195,84 @@ Deno.serve(async (req) => {
     if (phone.length !== 12) return json({ ok: false, code: "bad_phone" }, 400);
     const phoneHash = await sha256(phone);
     const deviceId = String(body.deviceId || "").slice(0, 64);
+    const ip = (req.headers.get("x-forwarded-for") || "noip").split(",")[0].trim();
+
+    // Play Integrity gate (dormant until app_config.require_integrity=true),
+    // matching pay/groq/ingest. Fails closed once enabled.
+    const { data: intCfg } = await sb
+      .from("app_config").select("value").eq("key", "require_integrity").maybeSingle();
+    if (intCfg?.value === true && !req.headers.get("x-integrity-token"))
+      return json({ ok: false, code: "integrity_required" }, 403);
 
     if (action === "send" || action === "resend") {
-      if (!authkey || !templateId)
+      if (!authkey || !wa.number || !wa.template)
         return json({ ok: false, code: "not_configured" }, 503);
-      // Resend cooldown + hourly cap (abuse/cost guard).
+      // Abuse/cost guard. Per-phone cooldown + hourly cap, PLUS per-IP and
+      // per-device hourly caps across ALL phones — without the latter two, an
+      // anon-key holder could enumerate phone numbers and spam paid WhatsApp
+      // OTPs to strangers (5/phone/hr each).
       if ((await bump(`otpcd:${phoneHash}`, cooldown)) > 1)
         return json({ ok: false, code: "cooldown", cooldown }, 429);
       if ((await bump(`otp:${phoneHash}`, 3600)) > maxSendPerHour)
         return json({ ok: false, code: "rate_limited" }, 429);
+      if ((await bump(`otpip:${ip}`, 3600)) > maxIpPerHour)
+        return json({ ok: false, code: "rate_limited" }, 429);
+      if (deviceId && (await bump(`otpdev:${deviceId}`, 3600)) > maxDevicePerHour)
+        return json({ ok: false, code: "rate_limited" }, 429);
 
-      let url: string, resp: Response;
-      if (action === "send") {
-        url = `${MSG91}?template_id=${encodeURIComponent(templateId)}&mobile=${phone}&otp_length=6&otp_expiry=10`;
-      } else {
-        const via = body.via === "voice" ? "voice" : "text";
-        url = `${MSG91}/retry?mobile=${phone}&retrytype=${via}`;
-      }
-      resp = await fetch(url, { method: "POST", headers: { authkey } });
-      const data = await resp.json().catch(() => ({}));
-      const ok = resp.ok && data?.type !== "error";
-      logReq(deviceId, phoneHash, action, ok ? "ok" : "provider_error", data?.request_id);
-      if (!ok)
-        return json({ ok: false, code: "provider_down", message: data?.message ?? "" }, 502);
-      return json({ ok: true, reqId: data?.request_id ?? null, cooldown });
+      // Generate + store (SALTED hash only — a leak of otp_codes can't be
+      // brute-forced offline), then deliver over WhatsApp.
+      const otp = genOtp(otpDigits);
+      const salt = randomToken(16);
+      await sb.from("otp_codes").upsert({
+        phone_hash: phoneHash,
+        otp_hash: await codeHash(salt, phone, otp),
+        salt,
+        expires_at: new Date(Date.now() + ttl * 1000).toISOString(),
+        attempts: 0,
+        created_at: new Date().toISOString(),
+      }, { onConflict: "phone_hash" });
+
+      const send = await sendWhatsApp(authkey, wa, phone, otp);
+      const reqId = (send.data as { request_id?: string })?.request_id;
+      logReq(deviceId, phoneHash, action, send.ok ? "ok" : "provider_error", reqId);
+      if (!send.ok)
+        return json({
+          ok: false, code: "provider_down",
+          message: (send.data as { message?: string })?.message ?? "",
+        }, 502);
+      return json({ ok: true, cooldown });
     }
 
     if (action === "verify") {
-      if (!authkey) return json({ ok: false, code: "not_configured" }, 503);
       const otp = String(body.otp || "").replace(/\D/g, "");
       const agentId = String(body.agentId || "").trim();
 
-      const vResp = await fetch(`${MSG91}/verify?mobile=${phone}&otp=${otp}`, {
-        method: "GET", headers: { authkey },
-      });
-      const vData = await vResp.json().catch(() => ({}));
-      const verified = vResp.ok && vData?.type === "success";
-      if (!verified) {
-        const expired = String(vData?.message || "").toLowerCase().includes("expire");
-        logReq(deviceId, phoneHash, "verify", expired ? "expired" : "invalid");
-        return json({ ok: false, code: expired ? "expired" : "invalid_otp" }, 401);
+      const { data: code } = await sb
+        .from("otp_codes").select("*").eq("phone_hash", phoneHash).maybeSingle();
+      if (!code) {
+        logReq(deviceId, phoneHash, "verify", "expired");
+        return json({ ok: false, code: "expired" }, 401); // none pending
       }
+      if (new Date(code.expires_at).getTime() < Date.now()) {
+        await sb.from("otp_codes").delete().eq("phone_hash", phoneHash);
+        logReq(deviceId, phoneHash, "verify", "expired");
+        return json({ ok: false, code: "expired" }, 401);
+      }
+      if ((code.attempts ?? 0) >= maxAttempts) {
+        await sb.from("otp_codes").delete().eq("phone_hash", phoneHash);
+        logReq(deviceId, phoneHash, "verify", "too_many_attempts");
+        return json({ ok: false, code: "too_many_attempts" }, 429);
+      }
+      const expect = await codeHash(String(code.salt ?? ""), phone, otp);
+      if (!timingSafeEqual(expect, String(code.otp_hash ?? ""))) {
+        await sb.from("otp_codes")
+          .update({ attempts: (code.attempts ?? 0) + 1 }).eq("phone_hash", phoneHash);
+        logReq(deviceId, phoneHash, "verify", "invalid");
+        return json({ ok: false, code: "invalid_otp" }, 401);
+      }
+      // Correct — consume the code so it can't be replayed.
+      await sb.from("otp_codes").delete().eq("phone_hash", phoneHash);
 
       // --- 1:1 bind phone <-> agent id -----------------------------------
       const { data: byPhone } = await sb
@@ -195,6 +318,15 @@ Deno.serve(async (req) => {
         await sb.from("device_sessions")
           .update({ revoked_at: new Date().toISOString(), revoked_reason: "device_limit" })
           .in("id", excess.map((r) => r.id));
+
+      // Mark this install as verified + link it to the account, so the admin
+      // dashboard can track only properly-verified users (phone_verified was a
+      // dead column before this).
+      if (deviceId) {
+        await sb.from("devices")
+          .update({ phone_verified: true, account_id: accountId })
+          .eq("id", deviceId);
+      }
 
       logReq(deviceId, phoneHash, "verify", "ok");
       return json({ ok: true, token, accountId });

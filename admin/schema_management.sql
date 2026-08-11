@@ -23,9 +23,18 @@ create table if not exists public.app_config (
 );
 alter table public.app_config enable row level security;
 -- The app may READ config (anon) to honour flags; only service_role writes.
+-- SECURITY (SECURITY_AUDIT.md S13): scope anon reads to CLIENT-FACING keys only.
+-- Server-only thresholds (groq_limits, otp_limits, require_integrity, max_devices,
+-- otp_required, trial_days…) are read by edge functions with the service role,
+-- which bypasses RLS — so keeping them out of the anon allowlist stops anyone who
+-- extracts the APK's anon key from reading our exact rate-limit thresholds.
+-- Add a new key here whenever the app itself needs to read it.
 drop policy if exists "anon read config" on public.app_config;
 create policy "anon read config" on public.app_config
-  for select to anon using (true);
+  for select to anon using (key in (
+    'assistant_cloud', 'analytics_default', 'portal_submit',
+    'payments_enabled', 'announcement', 'force_update', 'otp_required'
+  ));
 
 -- Sensible defaults.
 insert into public.app_config (key, value) values
