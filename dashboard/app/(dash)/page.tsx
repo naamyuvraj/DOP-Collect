@@ -46,35 +46,33 @@ export default async function Overview() {
 
   return (
     <>
-      <PageHead title="Overview" subtitle="Agents, their books, and app activity" />
+      <PageHead title="Overview" subtitle="Agents · books · activity" />
 
-      {/* Agent-level headline — one DOP agent = one unit (phones deduped) */}
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-        <Kpi label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} />
-        <Kpi label="Active · 7d" value={num(t.active)} />
-        <Kpi label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} />
-        <Kpi label="Under management ₹" value={inr(t.value)} sub="deposited across books" focal />
-        <Kpi label="Collected ₹" value={inr(t.collected)} sub={`${num(t.lists)} lists on portal`} />
-        <Kpi label="Installs" value={num(t.installs)} sub="phones" />
+        <Kpi icon="👤" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} />
+        <Kpi icon="🟢" label="Active" value={num(t.active)} sub="7 days" />
+        <Kpi icon="📒" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} />
+        <Kpi icon="💰" label="Under mgmt" value={inr(t.value)} sub="book value" focal />
+        <Kpi icon="🏦" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
+        <Kpi icon="📱" label="Installs" value={num(t.installs)} sub="phones" />
       </div>
 
-      {/* Supporting — money & engagement */}
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 mt-3.5">
-        <Kpi label="Revenue (subs) ₹" value={inr(s.revenue)} />
-        <Kpi label="Subscribers" value={num(t.subscribers)} />
-        <Kpi label="AI queries" value={num(t.ai_queries)} />
-        <Kpi label="Key calls · 24h" value={num(s.key_calls_1d)} />
+        <Kpi icon="💳" label="Revenue" value={inr(s.revenue)} />
+        <Kpi icon="⭐" label="Subscribers" value={num(t.subscribers)} />
+        <Kpi icon="🤖" label="AI" value={num(t.ai_queries)} />
+        <Kpi icon="🔑" label="Keys" value={num(s.key_calls_1d)} sub="24h" />
       </div>
 
       <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1.4fr_1fr]">
-        <Card title="Daily active devices">
+        <Card title="Active · daily">
           {dailyView.length ? (
             <TrendArea data={dailyView} x="d" y="dau" />
           ) : (
             <Empty>No activity yet.</Empty>
           )}
         </Card>
-        <Card title="LLM key usage">
+        <Card title="Key usage">
           {keyView.length ? (
             <Donut data={keyView} nameKey="name" valueKey="calls" />
           ) : (
@@ -84,14 +82,14 @@ export default async function Overview() {
       </div>
 
       <div className="grid gap-3.5 mt-3.5 lg:grid-cols-2">
-        <Card title="Portal collections (₹/day)">
+        <Card title="Collections · ₹/day">
           {collView.some((c) => c.amount) ? (
             <Bars data={collView} x="d" y="amount" color="#21A06A" />
           ) : (
             <Empty>No lists made on the portal yet.</Empty>
           )}
         </Card>
-        <Card title="Lists made on portal">
+        <Card title="Lists · daily">
           {collView.some((c) => c.lists) ? (
             <TrendArea data={collView} x="d" y="lists" />
           ) : (
@@ -101,14 +99,14 @@ export default async function Overview() {
       </div>
 
       <div className="grid gap-3.5 mt-3.5 lg:grid-cols-2">
-        <Card title="Activity by type">
+        <Card title="Activity">
           {types.length ? (
             <Bars data={types.slice(0, 8)} x="event" y="n" horizontal />
           ) : (
             <Empty>No events yet.</Empty>
           )}
         </Card>
-        <Card title="Revenue (app subscriptions)">
+        <Card title="Revenue">
           {revView.some((r) => r.revenue) ? (
             <Bars data={revView} x="d" y="revenue" color="#EFE94C" />
           ) : (
@@ -117,7 +115,7 @@ export default async function Overview() {
         </Card>
       </div>
 
-      <Card title="Recent activity" className="mt-3.5">
+      <Card title="Latest activity" className="mt-3.5">
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>

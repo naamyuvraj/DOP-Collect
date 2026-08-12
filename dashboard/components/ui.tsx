@@ -5,19 +5,24 @@ export function Kpi({
   value,
   sub,
   focal,
+  icon,
 }: {
   label: string;
   value: ReactNode;
   sub?: string;
   focal?: boolean;
+  icon?: string;
 }) {
   return (
-    <div className={`card p-[18px] ${focal ? "!bg-focal" : ""}`}>
+    <div className={`card p-4 relative transition hover:-translate-y-0.5 ${focal ? "!bg-focal" : ""}`}>
+      {icon && (
+        <span className="absolute top-3 right-3 grid place-items-center w-7 h-7 rounded-full bg-canvas/70 text-[15px]">
+          {icon}
+        </span>
+      )}
       <div className="lbl">{label}</div>
-      <div className="text-[30px] font-extrabold leading-none mt-1.5">
-        {value}
-      </div>
-      {sub && <div className="text-muted text-[13px] font-semibold mt-1">{sub}</div>}
+      <div className="text-[26px] font-extrabold leading-none mt-2 tracking-tight">{value}</div>
+      {sub && <div className="text-muted text-[12px] font-semibold mt-1.5">{sub}</div>}
     </div>
   );
 }
