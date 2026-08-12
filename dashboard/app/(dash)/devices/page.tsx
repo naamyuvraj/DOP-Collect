@@ -25,7 +25,7 @@ type UserRow = {
   active: boolean;
 };
 type Labels = Record<string, string>;
-type Data = { rows: UserRow[]; totals: { users?: number; accounts?: number; value?: number; collected?: number; active?: number; subscribers?: number; phones?: number }; region_labels?: Labels };
+type Data = { rows: UserRow[]; totals: { agents?: number; verified?: number; active?: number; installs?: number; accounts?: number; value?: number; collected?: number; lists?: number; subscribers?: number }; region_labels?: Labels };
 
 type SortKey = "name" | "mobile" | "agent_name" | "devices" | "region" | "accounts" | "value" | "collected" | "plan" | "app_version" | "last_seen";
 const COLS: { key: SortKey; label: string; num?: boolean }[] = [
@@ -136,12 +136,12 @@ export default function Users() {
         <KpiSkeletons n={5} />
       ) : (
         <div className="grid gap-3.5 grid-cols-2 md:grid-cols-6">
-          <Kpi label="Users (agents)" value={num(t.users)} sub={`${num(t.phones)} phones`} />
+          <Kpi label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} />
+          <Kpi label="Verified" value={num(t.verified)} />
           <Kpi label="Active · 7d" value={num(t.active)} />
           <Kpi label="Accounts" value={num(t.accounts)} />
-          <Kpi label="Under management ₹" value={inr(t.value)} focal sub="deposited across accounts" />
-          <Kpi label="Total collected ₹" value={inr(t.collected)} sub="submitted lists" />
-          <Kpi label="Subscribers" value={num(t.subscribers)} />
+          <Kpi label="Under management ₹" value={inr(t.value)} focal sub="deposited across books" />
+          <Kpi label="Collected ₹" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
         </div>
       )}
 
