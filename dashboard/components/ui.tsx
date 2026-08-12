@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import { Icon } from "./icons";
 
 export function Kpi({
   label,
@@ -16,8 +17,8 @@ export function Kpi({
   return (
     <div className={`card p-4 relative transition hover:-translate-y-0.5 ${focal ? "!bg-focal" : ""}`}>
       {icon && (
-        <span className="absolute top-3 right-3 grid place-items-center w-7 h-7 rounded-full bg-canvas/70 text-[15px]">
-          {icon}
+        <span className={`absolute top-3 right-3 grid place-items-center w-7 h-7 rounded-full ${focal ? "bg-ink/10 text-ink" : "bg-canvas text-muted"}`}>
+          <Icon name={icon} />
         </span>
       )}
       <div className="lbl">{label}</div>

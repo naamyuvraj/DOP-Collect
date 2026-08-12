@@ -49,19 +49,19 @@ export default async function Overview() {
       <PageHead title="Overview" subtitle="Agents · books · activity" />
 
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-        <Kpi icon="👤" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} />
-        <Kpi icon="🟢" label="Active" value={num(t.active)} sub="7 days" />
-        <Kpi icon="📒" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} />
-        <Kpi icon="💰" label="Under mgmt" value={inr(t.value)} sub="book value" focal />
-        <Kpi icon="🏦" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
-        <Kpi icon="📱" label="Installs" value={num(t.installs)} sub="phones" />
+        <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} />
+        <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
+        <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} />
+        <Kpi icon="value" label="Under mgmt" value={inr(t.value)} sub="book value" focal />
+        <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
+        <Kpi icon="installs" label="Installs" value={num(t.installs)} sub="phones" />
       </div>
 
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 mt-3.5">
-        <Kpi icon="💳" label="Revenue" value={inr(s.revenue)} />
-        <Kpi icon="⭐" label="Subscribers" value={num(t.subscribers)} />
-        <Kpi icon="🤖" label="AI" value={num(t.ai_queries)} />
-        <Kpi icon="🔑" label="Keys" value={num(s.key_calls_1d)} sub="24h" />
+        <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} />
+        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} />
+        <Kpi icon="ai" label="AI" value={num(t.ai_queries)} />
+        <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" />
       </div>
 
       <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1.4fr_1fr]">

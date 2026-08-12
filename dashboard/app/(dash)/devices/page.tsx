@@ -136,12 +136,12 @@ export default function Users() {
         <KpiSkeletons n={5} />
       ) : (
         <div className="grid gap-3.5 grid-cols-2 md:grid-cols-6">
-          <Kpi icon="👤" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} />
-          <Kpi icon="✅" label="Verified" value={num(t.verified)} />
-          <Kpi icon="🟢" label="Active" value={num(t.active)} sub="7 days" />
-          <Kpi icon="📒" label="Accounts" value={num(t.accounts)} />
-          <Kpi icon="💰" label="Under mgmt" value={inr(t.value)} focal sub="book value" />
-          <Kpi icon="🏦" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
+          <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} />
+          <Kpi icon="verified" label="Verified" value={num(t.verified)} />
+          <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
+          <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} />
+          <Kpi icon="value" label="Under mgmt" value={inr(t.value)} focal sub="book value" />
+          <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
         </div>
       )}
 
