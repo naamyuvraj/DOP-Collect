@@ -52,7 +52,7 @@ export default async function Overview() {
         <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} />
         <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
         <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} />
-        <Kpi icon="value" label="Under mgmt" value={inr(t.value)} sub="book value" focal />
+        <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month" focal />
         <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
         <Kpi icon="installs" label="Installs" value={num(t.installs)} sub="phones" />
       </div>

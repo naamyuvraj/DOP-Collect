@@ -36,7 +36,7 @@ const COLS: { key: SortKey; label: string; num?: boolean }[] = [
   { key: "devices", label: "Phones", num: true },
   { key: "region", label: "Region" },
   { key: "accounts", label: "Accounts", num: true },
-  { key: "value", label: "Value (₹)", num: true },
+  { key: "value", label: "Monthly ₹", num: true },
   { key: "collected", label: "Collected", num: true },
   { key: "plan", label: "Plan" },
   { key: "app_version", label: "Version" },
@@ -114,7 +114,7 @@ export default function Users() {
   }
 
   function exportCsv() {
-    const head = ["Name", "Mobile", "Agent", "Agent ID", "Region", "District", "Accounts", "Value (under mgmt)", "Collected", "Plan", "Status", "Phone verified", "Version", "First seen", "Last seen"];
+    const head = ["Name", "Mobile", "Agent", "Agent ID", "Region", "District", "Accounts", "Monthly book", "Collected", "Plan", "Status", "Phone verified", "Version", "First seen", "Last seen"];
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = view.map((r) =>
       [r.name, r.mobile, r.agent_name, r.agent_id, r.region, regionOf(r.region), r.accounts, r.value, r.collected, r.plan, r.active ? "active" : "dormant", r.phone_verified ? "yes" : "no", r.app_version, r.first_seen, r.last_seen].map(esc).join(",")
@@ -144,7 +144,7 @@ export default function Users() {
           <Kpi icon="verified" label="Verified" value={num(t.verified)} />
           <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
           <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} />
-          <Kpi icon="value" label="Under mgmt" value={inr(t.value)} focal sub="book value" />
+          <Kpi icon="value" label="Monthly book" value={inr(t.value)} focal sub="RD / month" />
           <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
         </div>
       )}
@@ -281,7 +281,7 @@ function AgentDrawer({ row, district, onClose }: { row: UserRow; district: strin
         <div className="p-5 flex flex-col gap-3.5">
           <div className="grid grid-cols-2 gap-3">
             <MiniStat label="Accounts maintained" value={row.accounts != null ? num(row.accounts) : "—"} />
-            <MiniStat label="Under management ₹" value={row.value != null ? inr(row.value) : "—"} focal />
+            <MiniStat label="Monthly book ₹" value={row.value != null ? inr(row.value) : "—"} focal />
             <MiniStat label="Collected (submitted)" value={row.collected ? inr(row.collected) : "—"} />
             <MiniStat label="Plan" value={row.plan || "—"} />
             <MiniStat label="Status" value={row.active ? "active" : "dormant"} />
