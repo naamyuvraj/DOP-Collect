@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Card } from "@/components/ui";
+import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Cfg = Record<string, any>;
 
@@ -19,18 +20,20 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 }
 
 export default function Config() {
-  const [cfg, setCfg] = useState<Cfg>({});
+  const [cfg, setCfg] = useState<Cfg>(() => peekCached<Cfg>("config") || {});
   const [saved, setSaved] = useState("");
 
   async function load() {
-    setCfg(await fetch("/api/config").then((r) => r.json()));
+    const c = await fetch("/api/config").then((r) => r.json());
+    setCached("config", c);
+    setCfg(c);
   }
   useEffect(() => {
-    load();
+    if (!isFresh("config")) load();
   }, []);
 
   async function save(key: string, value: any) {
-    setCfg((c) => ({ ...c, [key]: value }));
+    setCfg((c) => { const next = { ...c, [key]: value }; setCached("config", next); return next; });
     await fetch("/api/config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -57,7 +60,7 @@ export default function Config() {
             ["analytics_default", "Analytics default on", "New installs report anonymous usage unless the user opts out."],
             ["portal_submit", "Portal auto-submit", "Kill switch for making/paying lists on the DOP portal. Off = the “Submit on Portal” buttons are hidden on every install."],
             ["payments_enabled", "Subscriptions / paywall", "Master switch. On = agents whose plan expired are gated to the paywall. Off = everyone has full access (default)."],
-            ["otp_required", "WhatsApp OTP verification", "Require phone verification at onboarding (1 phone ↔ 1 agent, max 2 devices). Off = no OTP (default). Only turn on AFTER the OTP app build is live on phones."],
+            ["otp_required", "Phone verification", "Require phone verification at onboarding (1 phone ↔ 1 agent, max 2 devices). Off = no verification (default). Only turn on AFTER the app build with verification is live on phones."],
           ].map(([key, label, help]) => (
             <div key={key} className="flex items-center justify-between py-3 border-t border-line first:border-0">
               <div className="pr-4">

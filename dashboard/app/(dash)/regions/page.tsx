@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Td, Th } from "@/components/ui";
 import { num, when } from "@/lib/format";
+import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Region = {
   sol_id: string;
@@ -26,9 +27,10 @@ type Data = {
 };
 
 export default function Regions() {
-  const [d, setD] = useState<Data | null>(null);
+  const [d, setD] = useState<Data | null>(() => peekCached<Data>("regions"));
   useEffect(() => {
-    fetch("/api/regions").then((r) => r.json()).then(setD);
+    if (isFresh("regions")) return;
+    fetch("/api/regions").then((r) => r.json()).then((x) => { setCached("regions", x); setD(x); });
   }, []);
   if (!d) {
     return (

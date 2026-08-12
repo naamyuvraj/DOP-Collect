@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel } from "@/components/ui";
 import { inr, num, when } from "@/lib/format";
+import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type UserRow = {
   device_id: string;
@@ -43,8 +44,8 @@ const COLS: { key: SortKey; label: string; num?: boolean }[] = [
 ];
 
 export default function Users() {
-  const [d, setD] = useState<Data | null>(null);
-  const [labels, setLabels] = useState<Labels>({});
+  const [d, setD] = useState<Data | null>(() => peekCached<Data>("users"));
+  const [labels, setLabels] = useState<Labels>(() => peekCached<Data>("users")?.region_labels || {});
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "inactive">("all");
   const [plan, setPlan] = useState<"all" | "subscribed" | "none">("all");
@@ -54,7 +55,8 @@ export default function Users() {
   const [open, setOpen] = useState<UserRow | null>(null);
 
   useEffect(() => {
-    fetch("/api/users").then((r) => r.json()).then((data: Data) => { setD(data); setLabels(data.region_labels || {}); }).catch(() => setD({ rows: [], totals: {} }));
+    if (isFresh("users")) return; // shown from cache; still fresh — no refetch
+    fetch("/api/users").then((r) => r.json()).then((data: Data) => { setCached("users", data); setD(data); setLabels(data.region_labels || {}); }).catch(() => { if (!peekCached("users")) setD({ rows: [], totals: {} }); });
   }, []);
 
   const regionOf = (sol: string | null) => (sol ? labels[sol] || null : null);
@@ -106,6 +108,8 @@ export default function Users() {
     const next = { ...labels };
     if (name.trim()) next[sol] = name.trim(); else delete next[sol];
     setLabels(next);
+    const cu = peekCached<Data>("users");
+    if (cu) setCached("users", { ...cu, region_labels: next });
     await fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "region_labels", value: next }) });
   }
 

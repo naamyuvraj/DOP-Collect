@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Bars } from "@/components/LazyCharts";
 import { Card, Empty, Pill, Td, Th } from "@/components/ui";
+import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Key = {
   id: number;
@@ -14,18 +15,19 @@ type Key = {
 type Usage = { key_index: number; calls: number; ok_calls: number; ok_pct: number };
 
 export default function Keys() {
-  const [keys, setKeys] = useState<Key[]>([]);
-  const [usage, setUsage] = useState<Usage[]>([]);
+  const [keys, setKeys] = useState<Key[]>(() => peekCached<any>("keys")?.keys || []);
+  const [usage, setUsage] = useState<Usage[]>(() => peekCached<any>("keys")?.usage || []);
   const [form, setForm] = useState({ provider: "groq", label: "", key: "" });
   const [busy, setBusy] = useState(false);
 
   async function load() {
     const r = await fetch("/api/keys").then((r) => r.json());
+    setCached("keys", r);
     setKeys(r.keys || []);
     setUsage(r.usage || []);
   }
   useEffect(() => {
-    load();
+    if (!isFresh("keys")) load();
   }, []);
 
   async function add() {

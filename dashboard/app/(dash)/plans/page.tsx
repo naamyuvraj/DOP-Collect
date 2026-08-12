@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Td, Th } from "@/components/ui";
 import { inr, num } from "@/lib/format";
+import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Plan = {
   code: string;
@@ -41,14 +42,15 @@ function Toggle({ on, onChange, tone = "green" }: { on: boolean; onChange: (v: b
 const empty: Plan = { code: "", name: "", price_inr: 0, duration_days: 30, active: true, sort: 99 };
 
 export default function Plans() {
-  const [data, setData] = useState<Data | null>(null);
-  const [rows, setRows] = useState<Plan[]>([]);
+  const [data, setData] = useState<Data | null>(() => peekCached<Data>("plans"));
+  const [rows, setRows] = useState<Plan[]>(() => peekCached<Data>("plans")?.plans || []);
   const [adding, setAdding] = useState<Plan | null>(null);
   const [busy, setBusy] = useState("");
   const [flash, setFlash] = useState("");
 
   async function load() {
     const d = (await fetch("/api/plans").then((r) => r.json())) as Data;
+    setCached("plans", d);
     setData(d);
     setRows(d.plans || []);
     // The trial row's Days is the single control; keep the value `pay` reads
@@ -66,7 +68,7 @@ export default function Plans() {
     }
   }
   useEffect(() => {
-    load();
+    if (!isFresh("plans")) load();
   }, []);
 
   function say(m: string) {

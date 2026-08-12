@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Card, Empty, Pill, Skel, Td, Th } from "@/components/ui";
 import { num, when } from "@/lib/format";
+import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Adoption = { app_version: string; devices: number; events: number; last_seen?: string };
 type Release = {
@@ -37,18 +38,20 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 }
 
 export default function Releases() {
-  const [d, setD] = useState<Data | null>(null);
-  const [git, setGit] = useState<Git | null>(null); // fetched separately so GitHub never blocks the page
+  const [d, setD] = useState<Data | null>(() => peekCached<Data>("releases"));
+  const [git, setGit] = useState<Git | null>(() => peekCached<Git>("git")); // fetched separately so GitHub never blocks the page
   const [form, setForm] = useState<typeof emptyForm>({ ...emptyForm });
   const [flash, setFlash] = useState("");
   const [showAll, setShowAll] = useState(false); // reveal versions below the baseline
 
   async function load() {
-    setD(await fetch("/api/releases").then((r) => r.json()));
+    const data = await fetch("/api/releases").then((r) => r.json());
+    setCached("releases", data);
+    setD(data);
   }
   useEffect(() => {
-    load();
-    fetch("/api/git").then((r) => r.json()).then(setGit).catch(() => setGit({ commits: [], gitError: "git unavailable", repo: "" }));
+    if (!isFresh("releases")) load();
+    if (!isFresh("git")) fetch("/api/git").then((r) => r.json()).then((g) => { setCached("git", g); setGit(g); }).catch(() => setGit({ commits: [], gitError: "git unavailable", repo: "" }));
   }, []);
   function say(m: string) { setFlash(m); setTimeout(() => setFlash(""), 2000); }
 
