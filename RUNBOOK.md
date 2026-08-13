@@ -77,10 +77,25 @@ The deployed app sends `agent_id`/`sol_id` but not `name`/`mobile`. Ship the
 current build so `identify()` sends them.
 
 ```
-# bump pubspec.yaml version AND lib/services/supabase_config.dart buildVersion together, then:
-shorebird patch android -- --no-tree-shake-icons     # Dart-only change → OTA patch
-# (use `shorebird release android -- --no-tree-shake-icons` if native deps changed)
+# OTA patch (Dart-only change). On a patch bump buildVersion ONLY (+22 -> +23);
+# pubspec stays pinned to the release the patch attaches to.
+shorebird patch android -- --dart-define-from-file=env.json --no-tree-shake-icons
+
+# New release (native deps changed). Bump pubspec AND buildVersion together.
+shorebird release android -- --dart-define-from-file=env.json --no-tree-shake-icons
 ```
+
+> **`--dart-define-from-file=env.json` is not optional.** `SupabaseConfig.url`
+> and `anonKey` are `String.fromEnvironment`, so they are resolved at COMPILE
+> time. Build a patch without the flag and they compile to empty strings,
+> `SupabaseConfig.configured` turns false, and every cloud call in the app
+> silently short-circuits — paywall, OTP, remote config, analytics and the cloud
+> assistant all go dead on every device that takes the patch. Nothing crashes
+> and nothing logs; screens just come up empty.
+>
+> To check a patch landed correctly: open the dashboard **Devices** tab and
+> confirm `last_seen` is still moving. If it froze the moment you patched, the
+> flag was missing — re-patch with it.
 
 Onboarding note: **Name** (display) and **Agent Name** are two different fields.
 The agent must fill **Name** for the Name column to populate; the mobile is

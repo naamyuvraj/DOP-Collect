@@ -135,8 +135,18 @@ class CollectPhrase {
     'रुपये', 'रुपए', 'खाते', 'खाता',
   };
 
-  /// Number and currency words, stripped from the name for the same reason the
-  /// digits are: "paanch sau" is the amount, not part of who paid.
+  /// Currency words, always noise in a name.
+  static final _currencyWord = RegExp(
+      r'(?<![a-z])(rupaye|rupay|rupee|rupees|rs|rupiya)(?![a-z])'
+      r'|(रुपये|रुपए|रुपया)');
+
+  /// Number words, stripped from the name for the same reason the digits are:
+  /// "paanch sau" is the amount, not part of who paid.
+  ///
+  /// Applied ONLY when the amount was actually spelled out, because several of
+  /// these are also names — Das is one of the commonest surnames in the book,
+  /// and stripping it from "Ramesh Das" whenever he said "500" would quietly
+  /// widen the search to every Ramesh.
   static final _numberish = RegExp(
       r'(?<![a-z])(ek|do|teen|tin|char|chaar|panch|paanch|chah|chhe|saat|sat|'
       r'aath|nau|das|dus|bees|bis|tees|tis|chalis|chaalis|pachas|pachaas|'
@@ -178,6 +188,7 @@ class CollectPhrase {
     // Read the amount before anything is stripped — "do sau" has to be seen as
     // two hundred while both words are still in place.
     final amount = SpeechText.amountIn(q);
+    final spelledOut = amount != null && !RegExp(r'\d').hasMatch(q);
 
     // He clearly said a quantity we could not turn into a figure. Refusing is
     // the only honest move: falling back to his daily rule would put a number
@@ -185,11 +196,12 @@ class CollectPhrase {
     if (amount == null && !undo && SpeechText.hasUnparsedNumber(q)) return null;
 
     // Everything that is not the verb, the amount or filler is the name.
-    final rest = q
+    var rest = q
         .replaceAll(_tookVerb, ' ')
         .replaceAll(_undoVerb, ' ')
-        .replaceAll(_numberish, ' ')
+        .replaceAll(_currencyWord, ' ')
         .replaceAll(RegExp(r'[0-9]'), ' ');
+    if (spelledOut) rest = rest.replaceAll(_numberish, ' ');
     final words = rest
         .split(RegExp(r'\s+'))
         .where((w) => w.isNotEmpty && !_filler.contains(w))

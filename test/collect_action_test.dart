@@ -70,6 +70,13 @@ void main() {
       expect(r!.amount, 500);
       expect(r.name, 'ramesh');
     });
+
+    test('a surname that is also a number word survives', () {
+      // Das is both "ten" and one of the commonest surnames in the book.
+      final r = CollectPhrase.parse('ramesh das se 500 liya');
+      expect(r!.amount, 500);
+      expect(r.name, 'ramesh das');
+    });
   });
 
   group('CollectPhrase — Devanagari, which is what the Hindi mic returns', () {
