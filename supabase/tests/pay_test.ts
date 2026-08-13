@@ -236,6 +236,106 @@ Deno.test("F5: a NON-duplicate insert failure is reported as an error, not succe
   );
 });
 
+// ---------------------------------------------------------------------------
+// Trial length + the day count
+// ---------------------------------------------------------------------------
+
+/** Whole days between now and an ISO instant, part-days rounded up. */
+const daysTo = (iso: string) =>
+  Math.ceil((new Date(iso).getTime() - Date.now()) / 86400_000);
+
+Deno.test("the trial runs for the length the paywall advertises", async () => {
+  // The live plans table advertises a 60-day free trial while app_config has no
+  // trial_days at all, so the grant silently used the code's 14-day default.
+  // Two different numbers for one promise.
+  const db = await seeded();
+  db.tables.plans.push({
+    code: "trial", name: "Free trial", price_inr: 0, duration_days: 60,
+    active: true, sort: 0,
+  });
+  db.tables.app_config.push({ key: "payments_enabled", value: true });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "status", token: MY_TOKEN });
+
+  assertEquals(res.json.status, "trial");
+  assertEquals(res.json.daysLeft, 60, "must match the advertised trial plan");
+  const sub = db.tables.subscriptions.find((s) => s.agent_id === MINE)!;
+  assertEquals(daysTo(String(sub.current_period_end)), 60);
+});
+
+Deno.test("app_config.trial_days is used only when there is no trial plan", async () => {
+  const db = await seeded(); // seeded() has no `trial` plan row
+  db.tables.app_config.push({ key: "trial_days", value: 21 });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "status", token: MY_TOKEN });
+  assertEquals(res.json.daysLeft, 21);
+});
+
+Deno.test("with neither, the trial falls back to 14 days", async () => {
+  const db = await seeded();
+  begin(db, { env: ENV });
+  const res = await post(handler, { action: "status", token: MY_TOKEN });
+  assertEquals(res.json.daysLeft, 14);
+});
+
+Deno.test("daysLeft counts a part day as a whole day", async () => {
+  const db = await seeded();
+  db.tables.subscriptions.push({
+    agent_id: MINE, plan_code: "m1", status: "active",
+    current_period_end: new Date(Date.now() + 30 * 60_000).toISOString(),
+  });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "status", token: MY_TOKEN });
+  assertEquals(res.json.status, "active", "30 minutes of access is access");
+  assertEquals(res.json.daysLeft, 1, "never 0 while it still works");
+});
+
+Deno.test("an expired plan reports 0 days, never a negative", async () => {
+  const db = await seeded();
+  db.tables.subscriptions.push({
+    agent_id: MINE, plan_code: "m1", status: "active",
+    current_period_end: new Date(Date.now() - 5 * 86400_000).toISOString(),
+  });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "status", token: MY_TOKEN });
+  assertEquals(res.json.status, "expired");
+  assertEquals(res.json.daysLeft, 0);
+});
+
+Deno.test("renewing early adds to the remaining time, it does not reset it", async () => {
+  const db = await withOrder();
+  db.tables.subscriptions.push({
+    agent_id: MINE, plan_code: "m1", status: "active",
+    current_period_end: new Date(Date.now() + 10 * 86400_000).toISOString(),
+  });
+  begin(db, { env: ENV });
+
+  await post(handler, await verifyBody()); // m1 = 30 more days
+
+  const sub = db.tables.subscriptions.find((s) => s.agent_id === MINE)!;
+  assertEquals(daysTo(String(sub.current_period_end)), 40,
+    "10 remaining + 30 bought; renewing early must not burn the 10");
+});
+
+Deno.test("renewing after expiry starts from today, not from the old end", async () => {
+  const db = await withOrder();
+  db.tables.subscriptions.push({
+    agent_id: MINE, plan_code: "m1", status: "expired",
+    current_period_end: new Date(Date.now() - 100 * 86400_000).toISOString(),
+  });
+  begin(db, { env: ENV });
+
+  await post(handler, await verifyBody());
+
+  const sub = db.tables.subscriptions.find((s) => s.agent_id === MINE)!;
+  assertEquals(daysTo(String(sub.current_period_end)), 30,
+    "a lapsed agent gets a full period, not one backdated into the past");
+});
+
 Deno.test("F5: an unknown order is refused", async () => {
   const db = await seeded(); // no orders row
   begin(db, { env: ENV });

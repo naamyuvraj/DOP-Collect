@@ -28,11 +28,37 @@ class Plan {
 
 /// Current entitlement for this agent.
 class SubStatus {
-  final String status; // trial | active | expired
+  final String status; // trial | active | expired | unknown
   final String planCode;
-  final int daysLeft;
   final List<Plan> plans;
-  SubStatus(this.status, this.planCode, this.daysLeft, this.plans);
+
+  /// When access runs out. Kept so [daysLeft] can be recomputed as the clock
+  /// moves: the server's count is only true at the instant it answered, and
+  /// this status is cached to disk and read back on a later cold start. Without
+  /// it an agent offline for a week still read "12 days left". Null only for
+  /// an older cache written before this field existed.
+  final DateTime? periodEnd;
+
+  /// What the server said when it last answered — the fallback for a cache with
+  /// no [periodEnd].
+  final int _reportedDaysLeft;
+
+  SubStatus(this.status, this.planCode, int daysLeft, this.plans,
+      {this.periodEnd})
+      : _reportedDaysLeft = daysLeft;
+
+  /// Whole days of access remaining, counting a part-day as a day.
+  int get daysLeft {
+    final end = periodEnd;
+    if (end == null) return _reportedDaysLeft;
+    final ms = end.difference(DateTime.now()).inMilliseconds;
+    return ms <= 0 ? 0 : (ms / Duration.millisecondsPerDay).ceil();
+  }
+
+  /// Server-driven on purpose. A local clock that has run past [periodEnd] is
+  /// NOT treated as expired — the device may simply be offline or its clock
+  /// wrong, and locking a paying agent out on that basis is the one failure
+  /// this whole flow is built to avoid.
   bool get expired => status == 'expired';
 }
 
@@ -131,8 +157,13 @@ class Subscription {
     if (raw != null) {
       try {
         final j = jsonDecode(raw) as Map<String, dynamic>;
-        _current = SubStatus(j['status'] as String, j['planCode'] as String,
-            (j['daysLeft'] as num).toInt(), const []);
+        _current = SubStatus(
+          j['status'] as String,
+          j['planCode'] as String,
+          (j['daysLeft'] as num).toInt(),
+          const [],
+          periodEnd: DateTime.tryParse((j['periodEnd'] as String?) ?? ''),
+        );
       } catch (_) {/* unreadable cache — stay at "unknown" */}
     }
     unawaited(refresh());
@@ -164,14 +195,21 @@ class Subscription {
     // instead of overwriting a known plan with a non-answer, and don't cache a
     // non-answer over a real one.
     if (status == 'unknown') {
-      _current = SubStatus(_current?.status ?? 'unknown',
-          _current?.planCode ?? '', _current?.daysLeft ?? 0, plans);
+      _current = SubStatus(
+        _current?.status ?? 'unknown',
+        _current?.planCode ?? '',
+        _current?.daysLeft ?? 0,
+        plans,
+        periodEnd: _current?.periodEnd,
+      );
       onChanged?.call();
       return _current;
     }
 
+    final periodEnd = DateTime.tryParse((j['periodEnd'] as String?) ?? '');
     _current = SubStatus(status, (j['planCode'] as String?) ?? '',
-        (j['daysLeft'] as num?)?.toInt() ?? 0, plans);
+        (j['daysLeft'] as num?)?.toInt() ?? 0, plans,
+        periodEnd: periodEnd);
     onChanged?.call();
     final p = await SharedPreferences.getInstance();
     await p.setString(
@@ -180,6 +218,9 @@ class Subscription {
           'status': _current!.status,
           'planCode': _current!.planCode,
           'daysLeft': _current!.daysLeft,
+          // Stored so a later cold start can age the count instead of
+          // replaying whatever number the server happened to send.
+          if (periodEnd != null) 'periodEnd': periodEnd.toIso8601String(),
         }));
     return _current;
   }

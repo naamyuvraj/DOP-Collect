@@ -113,17 +113,27 @@ Deno.serve(async (req) => {
     if ((await bump(`pay:${device}:d`, 86400)) > 300) return json({ ok: false, error: "rate_limited" }, 429);
     if ((await bump(`pay:ip:${ip}`, 3600)) > 200) return json({ ok: false, error: "rate_limited" }, 429);
 
-    const trialDays = Number(
-      (await sb.from("app_config").select("value").eq("key", "trial_days").maybeSingle())
-        .data?.value ?? 14
-    ) || 14;
-
     const paymentsEnabled =
       (await sb.from("app_config").select("value").eq("key", "payments_enabled").maybeSingle())
         .data?.value === true;
 
-    const loadPlans = async () =>
+    const plans =
       (await sb.from("plans").select("*").eq("active", true).order("sort")).data || [];
+    const loadPlans = () => plans;
+
+    // How long a trial runs. ONE source of truth: the `trial` plan row, because
+    // that is the number the paywall shows the agent ("Free trial · 60 days").
+    // These used to disagree — the plan list advertised 60 days while the grant
+    // came from app_config.trial_days, which isn't set, so the code silently
+    // used its 14-day default. app_config is honoured only when there is no
+    // trial plan at all; 14 is the last resort.
+    const trialPlan = (plans as { code?: string; duration_days?: number }[])
+      .find((p) => p.code === "trial");
+    const cfgTrialDays =
+      (await sb.from("app_config").select("value").eq("key", "trial_days").maybeSingle())
+        .data?.value;
+    const trialDays =
+      Number(trialPlan?.duration_days ?? cfgTrialDays ?? 14) || 14;
 
     // --- The public half -----------------------------------------------------
     // The plan list is a PRICE LIST, not agent data: the paywall has to render
