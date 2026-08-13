@@ -47,6 +47,9 @@ export default function Plans() {
   const [adding, setAdding] = useState<Plan | null>(null);
   const [busy, setBusy] = useState("");
   const [flash, setFlash] = useState("");
+  // Repairing an agent who has NO subscriber row yet — the stranded-first-purchase
+  // case, where there is no row to click.
+  const [repair, setRepair] = useState({ agentId: "", days: 30 });
 
   async function load() {
     const d = (await fetch("/api/plans").then((r) => r.json())) as Data;
@@ -132,6 +135,24 @@ export default function Plans() {
     setAdding(null);
     await load();
     say("Plan added.");
+  }
+
+  // Repair one agent's access by hand. The one activation failure that cannot
+  // self-heal is "payment recorded, subscription not extended" — the payment id
+  // is already on file, so a replay reads it as settled and skips the extension.
+  // The edge functions log the agent id and plan for exactly this moment.
+  async function adjust(agentId: string, body: Record<string, unknown>, label: string) {
+    if (!agentId.trim()) return say("Agent ID is required.");
+    setBusy(`sub:${agentId}`);
+    const res = await fetch("/api/subscriptions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: agentId.trim(), ...body }),
+    }).then((r) => r.json());
+    setBusy("");
+    if (res.error) return say(res.error);
+    await load();
+    say(`${agentId.trim()}: ${label}.`);
   }
 
   async function del(code: string) {
@@ -271,7 +292,7 @@ export default function Plans() {
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
-              <tr><Th>Agent</Th><Th>Plan</Th><Th>Status</Th><Th>Days left</Th><Th>Renews / ended</Th></tr>
+              <tr><Th>Agent</Th><Th>Plan</Th><Th>Status</Th><Th>Days left</Th><Th>Renews / ended</Th><Th>Fix access</Th></tr>
             </thead>
             <tbody>
               {data.subscribers.slice(0, 100).map((s) => (
@@ -285,11 +306,75 @@ export default function Plans() {
                   <Td className="text-muted text-xs">
                     {s.current_period_end ? new Date(s.current_period_end).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}
                   </Td>
+                  <Td>
+                    <div className="flex gap-1.5">
+                      {[7, 30].map((d) => (
+                        <button
+                          key={d}
+                          className="btn btn-ghost py-1 px-2 text-xs"
+                          title={`Grant ${d} more days — stacks onto any time left`}
+                          disabled={busy === `sub:${s.agent_id}`}
+                          onClick={() => adjust(s.agent_id, { addDays: d }, `+${d} days`)}
+                        >
+                          +{d}d
+                        </button>
+                      ))}
+                      <button
+                        className="btn btn-ghost py-1 px-2 text-xs"
+                        title="End access now — use after a full refund"
+                        disabled={busy === `sub:${s.agent_id}`}
+                        onClick={() => {
+                          if (confirm(`End access for ${s.agent_id} right now?`))
+                            adjust(s.agent_id, { endNow: true }, "access ended");
+                        }}
+                      >
+                        End
+                      </button>
+                    </div>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </table>
           {!data.subscribers.length && <Empty>No subscribers yet.</Empty>}
+        </div>
+
+        {/* The stranded-payment repair. An agent who paid but never got a
+            subscription row won't appear in the table above, so they need a
+            place to be typed in. */}
+        <div className="mt-4 pt-4 border-t border-line">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className="input font-mono text-xs w-52"
+              placeholder="Agent ID"
+              value={repair.agentId}
+              onChange={(e) => setRepair({ ...repair, agentId: e.target.value })}
+            />
+            <input
+              className="input w-20"
+              type="number"
+              value={repair.days}
+              onChange={(e) => setRepair({ ...repair, days: Number(e.target.value) })}
+            />
+            <span className="text-muted text-xs">days</span>
+            <button
+              className="btn py-1.5 px-3"
+              disabled={busy === `sub:${repair.agentId.trim()}`}
+              onClick={() =>
+                adjust(repair.agentId, { addDays: repair.days }, `+${repair.days} days`)
+                  .then(() => setRepair({ agentId: "", days: 30 }))
+              }
+            >
+              Grant
+            </button>
+          </div>
+          <p className="text-muted text-xs mt-2">
+            For a payment that went through but didn’t activate. The edge-function logs name it:
+            look for <b>subscription not extended</b> (or <b>activate_failed</b> / <b>stranded</b>) — the
+            agent ID and plan are logged alongside. Granted days stack onto any time left, exactly like a
+            real purchase, and every adjustment is recorded as a <b>manual</b> row in Transactions
+            (kept out of revenue).
+          </p>
         </div>
       </Card>
     </>

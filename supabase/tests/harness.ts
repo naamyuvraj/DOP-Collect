@@ -35,8 +35,10 @@ globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
 
 const handlers = new Map<string, Handler>();
 
+export type FnName = "otp" | "pay" | "ingest" | "groq" | "razorpay-webhook";
+
 /** Import a function once and capture its handler. */
-export async function load(fn: "otp" | "pay" | "ingest" | "groq"): Promise<Handler> {
+export async function load(fn: FnName): Promise<Handler> {
   const cached = handlers.get(fn);
   if (cached) return cached;
 
@@ -84,6 +86,28 @@ export async function post(
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
+    }),
+  );
+  const text = await res.text();
+  let json: Record<string, unknown> = {};
+  try { json = JSON.parse(text); } catch { json = { _raw: text }; }
+  return { status: res.status, json };
+}
+
+/**
+ * POST a RAW body. The webhook signs the exact bytes it receives, so its tests
+ * must control the serialisation rather than let [post] re-encode an object.
+ */
+export async function postRaw(
+  handler: Handler,
+  raw: string,
+  headers: Record<string, string> = {},
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  const res = await handler(
+    new Request("https://fn.test/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: raw,
     }),
   );
   const text = await res.text();

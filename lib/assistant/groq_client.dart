@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../data/session.dart';
 import '../services/analytics.dart';
 import '../services/supabase_config.dart';
 import 'assistant_config.dart';
@@ -40,6 +41,10 @@ class GroqClient {
     if (!SupabaseConfig.configured) return null;
     try {
       final deviceId = await Analytics.deviceId();
+      // Carries this device's verified session so the proxy can check the
+      // subscription server-side (the client paywall fails open by design). No
+      // session just means it can't identify us, and it serves the call anyway.
+      final session = await SessionStore.load();
       final resp = await _http
           .post(
             Uri.parse('${SupabaseConfig.url}/functions/v1/groq'),
@@ -56,6 +61,7 @@ class GroqClient {
               'temperature': temperature,
               'maxTokens': maxTokens,
               'models': AssistantConfig.groqModels,
+              if (session != null) 'token': session.token,
             }),
           )
           .timeout(AssistantConfig.requestTimeout);

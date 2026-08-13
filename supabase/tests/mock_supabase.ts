@@ -13,8 +13,16 @@ export interface Db {
   tables: Record<string, Row[]>;
   /** Unique constraints, e.g. { payments: ["ref"] } -> insert dup gives 23505. */
   unique: Record<string, string[]>;
-  /** Force the next insert into `table` to fail with `error` (F5 coverage). */
-  failInsert?: { table: string; error: { code?: string; message: string } };
+  /**
+   * Force the next write to `table` to fail with `error` (F5 / P3 coverage).
+   * `op` narrows it to one kind of write; omitted, it matches the row-creating
+   * ones (insert + upsert). Self-clears, so only the next matching write fails.
+   */
+  failWrite?: {
+    table: string;
+    op?: "insert" | "upsert" | "update";
+    error: { code?: string; message: string };
+  };
   /** Every rpc('bump_rate') call, and what it returned. */
   rpcCalls: { name: string; args: Row; returned: number }[];
   /** Counter values keyed by rate-limit bucket. */
@@ -39,6 +47,7 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
 class Query implements PromiseLike<{ data: unknown; error: unknown }> {
   private filters: { col: string; val: unknown }[] = [];
+  private negFilters: { col: string; val: unknown }[] = [];
   private inFilter: { col: string; vals: unknown[] } | null = null;
   private orderBy: { col: string; asc: boolean } | null = null;
   private mode: "many" | "maybeSingle" | "single" = "many";
@@ -58,6 +67,7 @@ class Query implements PromiseLike<{ data: unknown; error: unknown }> {
     return this;
   }
   eq(col: string, val: unknown) { this.filters.push({ col, val }); return this; }
+  neq(col: string, val: unknown) { this.negFilters.push({ col, val }); return this; }
   is(col: string, val: unknown) { this.filters.push({ col, val }); return this; }
   in(col: string, vals: unknown[]) { this.inFilter = { col, vals }; return this; }
   order(col: string, o?: { ascending?: boolean }) {
@@ -76,6 +86,13 @@ class Query implements PromiseLike<{ data: unknown; error: unknown }> {
       const got = r[f.col] ?? null;
       if ((f.val ?? null) !== got) return false;
     }
+    // Postgres three-valued logic: `col <> v` evaluates to NULL — i.e. NOT a
+    // match — when the column itself is NULL. A mock that let NULLs through here
+    // would make the payments "claim" update look safer than it really is.
+    for (const f of this.negFilters) {
+      const got = r[f.col];
+      if (got === null || got === undefined || got === f.val) return false;
+    }
     if (this.inFilter && !this.inFilter.vals.includes(r[this.inFilter.col])) {
       return false;
     }
@@ -85,17 +102,23 @@ class Query implements PromiseLike<{ data: unknown; error: unknown }> {
   private run(): { data: unknown; error: unknown } {
     const all = this.rows();
 
+    const fail = this.db.failWrite;
+    if (
+      fail && fail.table === this.table &&
+      (fail.op
+        ? fail.op === this.op
+        : this.op === "insert" || this.op === "upsert")
+    ) {
+      this.db.failWrite = undefined;
+      return { data: null, error: fail.error };
+    }
+
     if (this.op === "insert" || this.op === "upsert") {
       const incoming = (Array.isArray(this.payload) ? this.payload : [this.payload!]);
       const written: Row[] = [];
       for (const raw of incoming) {
         const row = clone(raw);
         if (this.op === "insert") {
-          const fail = this.db.failInsert;
-          if (fail && fail.table === this.table) {
-            this.db.failInsert = undefined;
-            return { data: null, error: fail.error };
-          }
           const uniq = this.db.unique[this.table];
           if (uniq && all.some((r) => uniq.every((c) => r[c] === row[c]))) {
             return {

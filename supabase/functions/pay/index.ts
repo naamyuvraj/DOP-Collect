@@ -44,6 +44,14 @@ async function hmacHex(key: string, msg: string): Promise<string> {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** A row of the `plans` price list. */
+interface PlanRow {
+  code: string;
+  name?: string;
+  price_inr?: number;
+  duration_days?: number;
+}
+
 async function sha256(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -107,8 +115,18 @@ Deno.serve(async (req) => {
 
     const device = (req.headers.get("x-device-id") || agentId || "anon").slice(0, 64);
     const ip = (req.headers.get("x-forwarded-for") || "noip").split(",")[0].trim();
-    const bump = async (k: string, s: number): Promise<number> =>
-      ((await sb.rpc("bump_rate", { p_device: k, p_window_secs: s })).data as number) ?? 0;
+    const bump = async (k: string, s: number): Promise<number> => {
+      const r = await sb.rpc("bump_rate", { p_device: k, p_window_secs: s });
+      // Deliberately fails OPEN: a broken counter must not stop an agent paying
+      // or the paywall rendering. It must not be silent either — with Play
+      // Integrity still dormant these limits are the only abuse control on the
+      // anon key, and returning 0 disables every one of them at once.
+      if (r.error) {
+        console.error("bump_rate failed — rate limiting is OFF for this call", k, r.error);
+        return 0;
+      }
+      return (r.data as number) ?? 0;
+    };
     if ((await bump(`pay:${device}`, 60)) > 30) return json({ ok: false, error: "rate_limited" }, 429);
     if ((await bump(`pay:${device}:d`, 86400)) > 300) return json({ ok: false, error: "rate_limited" }, 429);
     if ((await bump(`pay:ip:${ip}`, 3600)) > 200) return json({ ok: false, error: "rate_limited" }, 429);
@@ -127,8 +145,7 @@ Deno.serve(async (req) => {
     // came from app_config.trial_days, which isn't set, so the code silently
     // used its 14-day default. app_config is honoured only when there is no
     // trial plan at all; 14 is the last resort.
-    const trialPlan = (plans as { code?: string; duration_days?: number }[])
-      .find((p) => p.code === "trial");
+    const trialPlan = (plans as PlanRow[]).find((p) => p.code === "trial");
     const cfgTrialDays =
       (await sb.from("app_config").select("value").eq("key", "trial_days").maybeSingle())
         .data?.value;
@@ -192,8 +209,23 @@ Deno.serve(async (req) => {
     // idempotent: the unique payment `ref` index makes replay/race a no-op.
     const activate = async (orderId: string, paymentId: string) => {
       const { data: ord } = await sb
-        .from("orders").select("agent_id, plan_code").eq("order_id", orderId).maybeSingle();
+        .from("orders").select("agent_id, plan_code, amount").eq("order_id", orderId)
+        .maybeSingle();
       if (!ord) return { ok: false, error: "unknown_order" } as const;
+      // Confirm only your OWN order. Activation credits `ord.agent_id` and needs
+      // a genuine Razorpay signature, so this was never a way to take someone
+      // else's entitlement — but "any live session may push any order through"
+      // is a wider door than this flow needs, and it made the session check on
+      // `verify` decorative. The webhook is unaffected: it has no session and is
+      // authenticated by Razorpay's own signature over the raw body.
+      if (ord.agent_id !== agentId) {
+        console.error("verify: order belongs to another agent", orderId, agentId);
+        return { ok: false, error: "not_your_order" } as const;
+      }
+      // Deliberately NOT filtered on `active`, unlike the `order` branch: an
+      // order placed while a tier was on sale must still activate after that
+      // tier is retired. What you may BUY is today's price list; what you have
+      // already PAID for is the order.
       const { data: plan } = await sb
         .from("plans").select("code, price_inr, duration_days").eq("code", ord.plan_code).maybeSingle();
       if (!plan) return { ok: false, error: "bad_plan" } as const;
@@ -202,30 +234,72 @@ Deno.serve(async (req) => {
           .select("current_period_end").eq("agent_id", ord.agent_id).maybeSingle();
         return s?.current_period_end ?? null;
       };
-      const pay = await sb.from("payments").insert({
-        agent_id: ord.agent_id, plan_code: plan.code, amount: plan.price_inr,
+      // `payments.amount` is RUPEES throughout (numeric(10,2), summed by v_mrr,
+      // rendered by the dashboard's inr()); `orders.amount` is paise, because
+      // that is what Razorpay was told to charge. Prefer the order: it is what
+      // the agent actually paid, whereas the plan's price may have been edited
+      // in the dashboard between checkout and capture.
+      const paidInr = typeof ord.amount === "number"
+        ? ord.amount / 100
+        : Number(plan.price_inr);
+      const row = {
+        agent_id: ord.agent_id, plan_code: plan.code, amount: paidInr,
         currency: "INR", provider: "razorpay", ref: paymentId, order_id: orderId,
         status: "success", plan: plan.code,
-      });
-      // ONLY a unique-ref collision means "the webhook already handled this" —
-      // treat that as done and don't extend twice. Any other insert failure
-      // (missing column, RLS, connection) left the subscription un-extended, so
-      // it must surface as an error: reporting a paid agent "ok" while their
-      // expiry never moved is the one outcome this flow must never produce.
+      };
+      const pay = await sb.from("payments").insert(row);
+      // Any failure OTHER than a unique-ref collision (missing column, RLS,
+      // connection) left the subscription un-extended, so it must surface as an
+      // error: reporting a paid agent "ok" while their expiry never moved is the
+      // one outcome this flow must never produce.
       if (pay.error) {
         if (pay.error.code !== "23505") {
           console.error("payments insert failed", orderId, paymentId, pay.error);
           return { ok: false, error: "record_failed" } as const;
         }
-        return { ok: true, already: true, periodEnd: await endOf() } as const;
+        // A row already EXISTS for this payment id — which is not the same as
+        // this payment being SETTLED. The webhook writes a `failed` row on
+        // payment.failed, and Razorpay reuses the payment id when such a payment
+        // is later authorised and captured (late authorisation). Reading every
+        // 23505 as "the other path already did this" swallowed that capture: the
+        // agent paid, and their expiry never moved.
+        //
+        // So claim the row and let the database pick the winner. Excluding the
+        // SETTLED states means exactly one caller can flip a row that is neither
+        // — the loser's UPDATE re-checks its WHERE after the row lock is
+        // released and matches nothing — which keeps the verify/webhook race to
+        // a single extension while still letting a genuine failed->captured
+        // through. `refunded` is excluded too: a late redelivery of a capture we
+        // have since refunded must not quietly hand the time back.
+        const claim = await sb.from("payments").update(row)
+          .eq("provider", "razorpay").eq("ref", paymentId)
+          .neq("status", "success").neq("status", "refunded")
+          .select("id");
+        if (claim.error) {
+          console.error("payments claim failed", orderId, paymentId, claim.error);
+          return { ok: false, error: "record_failed" } as const;
+        }
+        if (!(claim.data as unknown[] | null)?.length) {
+          return { ok: true, already: true, periodEnd: await endOf() } as const;
+        }
+        // Claim won — fall through and extend, exactly once.
       }
       const cur = await endOf();
       const base = Math.max(Date.now(), cur ? new Date(cur).getTime() : 0);
       const newEnd = new Date(base + Number(plan.duration_days) * 86400_000).toISOString();
-      await sb.from("subscriptions").upsert({
+      const ext = await sb.from("subscriptions").upsert({
         agent_id: ord.agent_id, plan_code: plan.code, status: "active",
         current_period_end: newEnd, updated_at: new Date().toISOString(),
       });
+      // The payment is on record but access was NOT extended — the same "must
+      // never report ok" rule as above. This one can't be retried automatically
+      // (the payment row now exists, so a replay short-circuits), so it is the
+      // case that needs a human: log everything needed to grant the days by hand.
+      if (ext.error) {
+        console.error("subscription not extended", orderId, paymentId,
+          ord.agent_id, plan.code, ext.error);
+        return { ok: false, error: "activate_failed" } as const;
+      }
       return { ok: true, periodEnd: newEnd } as const;
     };
 
@@ -240,9 +314,16 @@ Deno.serve(async (req) => {
 
     if (action === "order") {
       if (!keyId || !keySecret) return json({ ok: false, error: "not_configured" }, 503);
-      const { data: plan } = await sb
-        .from("plans").select("*").eq("code", String(body.planCode)).maybeSingle();
-      if (!plan || Number(plan.price_inr) <= 0)
+      // Sell only what the price list actually OFFERS. `plans` is the same
+      // active-only list `status` hands the paywall, so "what you may buy" and
+      // "what you were shown" are one query and cannot drift. Looking the row up
+      // by code alone meant a RETIRED tier was still buyable at its old price by
+      // anyone who remembered the code — which made `plans.active`, the
+      // dashboard's advertised per-plan kill switch, purely cosmetic. A plan
+      // saved with a 0-day duration is refused for the same reason a 0-price one
+      // is: it would take the money and grant nothing.
+      const plan = (plans as PlanRow[]).find((p) => p.code === String(body.planCode));
+      if (!plan || Number(plan.price_inr) <= 0 || Number(plan.duration_days) <= 0)
         return json({ ok: false, error: "bad_plan" }, 400);
       const rzp = await fetch("https://api.razorpay.com/v1/orders", {
         method: "POST",
@@ -267,9 +348,20 @@ Deno.serve(async (req) => {
         );
       // Record the order so verify/webhook derive the plan from HERE, not the
       // client (prevents paying for a cheap plan and claiming an expensive one).
-      await sb.from("orders").insert({
+      //
+      // This insert MUST be checked. Both activation paths look the order up and
+      // give up when it's missing (`unknown_order` / a silent webhook return), so
+      // an unrecorded order means: the agent pays, nothing activates, and there
+      // is no row anywhere tying the charge to them. Failing here instead costs
+      // nothing — no money has moved yet, and the Razorpay order simply expires
+      // unpaid — whereas failing one step later costs a real payment.
+      const rec = await sb.from("orders").insert({
         order_id: order.id, agent_id: agentId, plan_code: plan.code, amount: order.amount,
       });
+      if (rec.error) {
+        console.error("order not recorded", order.id, agentId, rec.error);
+        return json({ ok: false, error: "not_recorded" }, 500);
+      }
       return json({
         ok: true, orderId: order.id, amount: order.amount,
         currency: order.currency, keyId, planName: plan.name,

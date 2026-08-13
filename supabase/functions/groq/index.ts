@@ -24,6 +24,12 @@ const json = (o: unknown, status = 200) =>
     headers: { ...CORS, "Content-Type": "application/json" },
   });
 
+async function sha256(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -36,6 +42,7 @@ Deno.serve(async (req) => {
       temperature = 0,
       maxTokens = 512,
       models,
+      token,
     } = await req.json();
 
     const sb = createClient(
@@ -50,6 +57,41 @@ Deno.serve(async (req) => {
       .from("app_config").select("value").eq("key", "require_integrity").maybeSingle();
     if (intCfg?.value === true && !req.headers.get("x-integrity-token"))
       return json({ error: "integrity_required" }, 403);
+
+    // --- Entitlement (dormant until app_config.payments_enabled is on) ------
+    // The app's paywall is a CLIENT gate. It fails open on purpose — locking a
+    // paying agent out mid-collection-round because the data dropped is a worse
+    // failure than a few free calls — and its cached status sits in
+    // SharedPreferences, so clearing app data or simply staying offline hands
+    // the UI back. This function is the paid capability that actually costs
+    // money to serve, so it checks entitlement HERE, where none of that reaches.
+    //
+    // Deliberately narrow: it refuses only an agent we can POSITIVELY identify
+    // as expired. Identity comes from the device session token, exactly as in
+    // `pay` — no token, an unknown or revoked one, or no subscription row at all
+    // all mean "we don't know who this is", and we allow. That is the same
+    // ordering constraint `pay` documents: otp_required must be ON before
+    // payments_enabled, or no device has a session for any of this to read.
+    const { data: payCfg } = await sb
+      .from("app_config").select("value").eq("key", "payments_enabled").maybeSingle();
+    if (payCfg?.value === true && token) {
+      const { data: sess } = await sb
+        .from("device_sessions").select("account_id, revoked_at")
+        .eq("token_hash", await sha256(String(token))).maybeSingle();
+      if (sess && !sess.revoked_at) {
+        const { data: acct } = await sb
+          .from("accounts").select("agent_id, disabled").eq("id", sess.account_id)
+          .maybeSingle();
+        const agentId = acct?.disabled ? "" : String(acct?.agent_id ?? "").trim();
+        if (agentId) {
+          const { data: sub } = await sb
+            .from("subscriptions").select("current_period_end").eq("agent_id", agentId)
+            .maybeSingle();
+          if (sub && new Date(sub.current_period_end).getTime() <= Date.now())
+            return json({ error: "subscription_expired" }, 402);
+        }
+      }
+    }
 
     // --- Rate limiting (abuse guard) ---------------------------------------
     // The app authenticates with the public anon key, so anyone who extracts it

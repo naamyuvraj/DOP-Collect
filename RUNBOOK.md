@@ -112,6 +112,65 @@ captured from the phone they verify.
 
 ---
 
+## Switching payments on
+
+Order matters here. `payments_enabled` is the last switch, not the first.
+
+```
+supabase functions deploy pay              --use-api
+supabase functions deploy groq             --use-api
+supabase functions deploy razorpay-webhook --use-api --no-verify-jwt
+```
+
+`--no-verify-jwt` on the webhook only — Razorpay sends no Supabase auth. Getting
+that wrong makes every event 401 and the whole fallback path silently dead.
+
+1. **Run `admin/schema_payments.sql`.** Without the `orders` table, `pay` now
+   refuses to hand out an order (`not_recorded`, 500) rather than letting an
+   agent pay for something nothing can activate. A blank paywall at this point
+   means the schema hasn't been run.
+2. **Set the secrets:** `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` on the `pay`
+   function, and `RAZORPAY_WEBHOOK_SECRET` on **both** the webhook function and
+   the Razorpay dashboard's webhook config. They must be the same string.
+3. **Prove the webhook works before you need it.** With no secret set, or the
+   wrong one, it rejects every event with a 400 and no alert — and it is the
+   thing that saves an agent whose app died right after paying. Send a test
+   event from the Razorpay dashboard and confirm a 200 in the function logs.
+4. **Turn `otp_required` ON first.** Entitlement is keyed to the DOP agent id,
+   which `pay` and `groq` read from the device session — no session, no identity,
+   no paywall. `pay` fails open (nobody is blocked, the paywall just does
+   nothing), so this is silent if you get it backwards.
+5. **Run `admin/backfill_trials.sql` — before the flip, not after.** While
+   payments are off, `pay` hands out an *ephemeral* trial and persists nothing;
+   the moment the switch flips it starts writing real rows, so every existing
+   agent would be granted a fresh full trial and first revenue would be one
+   trial length away. The script writes an already-expired row for every agent
+   that exists now, so only genuinely new agents get a trial. It has a dry-run
+   query at the top — read the count first. Run it **after** the flip and it
+   quietly misses exactly the agents it was meant to catch, because they will
+   already have created their own trial rows.
+6. **Then flip `payments_enabled`** (dashboard → Plans). Everything above is
+   inert until this moment, including the server-side entitlement check in
+   `groq`.
+7. **Buy one real plan end to end** on a live device. Check `payments`,
+   `orders`, `subscriptions` all gained a row and the app's banner moved.
+
+### When an agent says they paid and have no access
+
+1. Dashboard → **Payments** → is their payment listed as `success`?
+2. Function logs (`pay` and `razorpay-webhook`) — grep for the payment id. The
+   three that mean "money taken, access not granted" are:
+   `subscription not extended`, `activate_failed`, `stranded`. Each logs the
+   agent id and plan.
+3. Fix it: dashboard → **Plans** → **Subscribers** → `+30d` on their row, or
+   type the agent id into the **Grant** box if they have no row at all. Granted
+   days stack exactly like a purchase, and land in Transactions as a `manual`
+   row (excluded from revenue).
+4. If the payment isn't in `payments` at all, it never reached us — check the
+   Razorpay dashboard for the charge before granting anything.
+
+---
+
 ## Reset (optional, destructive)
 
 To wipe all telemetry + verification state and track only new verified users:

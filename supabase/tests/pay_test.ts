@@ -5,7 +5,7 @@
 
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { type Db, newDb } from "./mock_supabase.ts";
-import { BASE_ENV, begin, load, post, sha256Hex } from "./harness.ts";
+import { BASE_ENV, begin, fetchCalls, load, post, sha256Hex } from "./harness.ts";
 
 const ENV = {
   ...BASE_ENV,
@@ -154,6 +154,82 @@ Deno.test("S7: an order is recorded against the SESSION's agent, not the claim",
 });
 
 // ---------------------------------------------------------------------------
+// P2 — you may only buy what the price list offers
+// ---------------------------------------------------------------------------
+
+Deno.test("P2: a RETIRED plan cannot be bought, even by code", async () => {
+  const db = await seeded();
+  // Pulled from sale in the dashboard — `status` stops listing it, so the only
+  // way to name it is to have remembered the code.
+  db.tables.plans.push({
+    code: "legacy", name: "Old cheap tier", price_inr: 49, duration_days: 365,
+    active: false, sort: 9,
+  });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "order", planCode: "legacy", token: MY_TOKEN });
+
+  assertEquals(res.status, 400);
+  assertEquals(res.json.error, "bad_plan");
+  assertEquals(db.tables.orders.length, 0);
+  assertEquals(fetchCalls.length, 0, "Razorpay must never be asked for this order");
+});
+
+Deno.test("P2: a 0-day plan is refused — it would take money and grant nothing", async () => {
+  const db = await seeded();
+  db.tables.plans.push({
+    code: "broken", name: "Misconfigured", price_inr: 199, duration_days: 0,
+    active: true, sort: 9,
+  });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "order", planCode: "broken", token: MY_TOKEN });
+  assertEquals(res.status, 400);
+  assertEquals(res.json.error, "bad_plan");
+  assertEquals(fetchCalls.length, 0);
+});
+
+Deno.test("P2: the free trial still cannot be 'bought'", async () => {
+  const db = await seeded();
+  db.tables.plans.push({
+    code: "trial", name: "Free trial", price_inr: 0, duration_days: 60,
+    active: true, sort: 0,
+  });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "order", planCode: "trial", token: MY_TOKEN });
+  assertEquals(res.status, 400);
+  assertEquals(res.json.error, "bad_plan");
+});
+
+// ---------------------------------------------------------------------------
+// P1 — an order that wasn't recorded must never reach the checkout sheet
+// ---------------------------------------------------------------------------
+
+Deno.test("P1: an unrecorded order fails BEFORE the agent can pay for it", async () => {
+  const db = await seeded();
+  // The Razorpay order will be created fine; ours is the write that fails.
+  db.failWrite = {
+    table: "orders",
+    error: { code: "42P01", message: 'relation "orders" does not exist' },
+  };
+  begin(db, {
+    env: ENV,
+    reply: () => ({ status: 200, json: { id: "order_LOST", amount: 19900, currency: "INR" } }),
+  });
+
+  const res = await post(handler, { action: "order", planCode: "m1", token: MY_TOKEN });
+
+  // Handing back an orderId here opens the sheet, the agent pays, and then BOTH
+  // activation paths bail on the missing order — money gone, nothing to trace.
+  assertEquals(res.status, 500);
+  assertEquals(res.json.ok, false);
+  assertEquals(res.json.error, "not_recorded");
+  assertEquals(res.json.orderId, undefined, "no order id may reach the client");
+  assertEquals(db.tables.orders.length, 0);
+});
+
+// ---------------------------------------------------------------------------
 // F5 — "already processed" must mean a genuine duplicate
 // ---------------------------------------------------------------------------
 
@@ -217,7 +293,7 @@ Deno.test("F5: a replay is 'already', and does NOT extend twice", async () => {
 Deno.test("F5: a NON-duplicate insert failure is reported as an error, not success", async () => {
   const db = await withOrder();
   // e.g. a missing column, an RLS change, a connection blip.
-  db.failInsert = {
+  db.failWrite = {
     table: "payments",
     error: { code: "42703", message: 'column "plan" does not exist' },
   };
@@ -234,6 +310,106 @@ Deno.test("F5: a NON-duplicate insert failure is reported as an error, not succe
     undefined,
     "no entitlement should exist when the payment could not be recorded",
   );
+});
+
+// ---------------------------------------------------------------------------
+// P9 — verify confirms your own order, not just any order
+// ---------------------------------------------------------------------------
+
+Deno.test("P9: a session cannot push ANOTHER agent's order through verify", async () => {
+  const db = await withOrder();
+  db.tables.orders.push({
+    order_id: "order_theirs", agent_id: THEIRS, plan_code: "m1", amount: 19900,
+  });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, await verifyBody("order_theirs", "pay_2"));
+
+  assertEquals(res.status, 400);
+  assertEquals(res.json.error, "not_your_order");
+  assertEquals(db.tables.payments.length, 0);
+  // And nothing moved for either party.
+  const theirs = db.tables.subscriptions.find((s) => s.agent_id === THEIRS)!;
+  assertEquals(theirs.plan_code, "y1", "their yearly plan is untouched");
+  assertEquals(db.tables.subscriptions.find((s) => s.agent_id === MINE), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// P3 — "a row exists for this ref" is not the same as "this payment settled"
+// ---------------------------------------------------------------------------
+
+Deno.test("P3: a payment that FAILED and was later captured still activates", async () => {
+  const db = await withOrder();
+  // Razorpay reuses the payment id on late authorisation: payment.failed landed
+  // first and the webhook recorded it, then the same payment was captured.
+  db.tables.payments.push({
+    id: crypto.randomUUID(), agent_id: MINE, provider: "razorpay", ref: "pay_1",
+    status: "failed", amount: 199, currency: "INR",
+  });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, await verifyBody());
+
+  assertEquals(res.json.ok, true);
+  assertEquals(res.json.note, undefined, "this is NOT a duplicate — it is the capture");
+  const sub = db.tables.subscriptions.find((s) => s.agent_id === MINE);
+  assert(sub, "the agent paid; access must exist");
+  assertEquals(sub!.status, "active");
+  assertEquals(sub!.plan_code, "m1");
+  // The failed row was claimed, not duplicated — still one row per payment id.
+  assertEquals(db.tables.payments.filter((p) => p.ref === "pay_1").length, 1);
+  assertEquals(db.tables.payments[0].status, "success");
+});
+
+Deno.test("P3: claiming is once-only — a settled payment still can't extend twice", async () => {
+  const db = await withOrder();
+  db.tables.payments.push({
+    id: crypto.randomUUID(), agent_id: MINE, provider: "razorpay", ref: "pay_1",
+    status: "failed", amount: 199, currency: "INR",
+  });
+  begin(db, { env: ENV });
+
+  const first = await post(handler, await verifyBody());
+  const firstEnd = String(first.json.periodEnd);
+  const again = await post(handler, await verifyBody());
+
+  assertEquals(again.json.note, "already_processed", "the row is settled now");
+  assertEquals(again.json.periodEnd, firstEnd, "period must not move on a replay");
+});
+
+Deno.test("P3: a claim that fails is an error, not a silent 'already processed'", async () => {
+  const db = await withOrder();
+  db.tables.payments.push({
+    id: crypto.randomUUID(), agent_id: MINE, provider: "razorpay", ref: "pay_1",
+    status: "failed", amount: 199, currency: "INR",
+  });
+  db.failWrite = {
+    table: "payments", op: "update",
+    error: { code: "42501", message: "permission denied" },
+  };
+  begin(db, { env: ENV });
+
+  const res = await post(handler, await verifyBody());
+  assertEquals(res.json.ok, false);
+  assertEquals(res.json.error, "record_failed");
+  assertEquals(db.tables.subscriptions.find((s) => s.agent_id === MINE), undefined);
+});
+
+Deno.test("P3: a recorded payment whose subscription didn't extend reports failure", async () => {
+  const db = await withOrder();
+  db.failWrite = {
+    table: "subscriptions", op: "upsert",
+    error: { code: "40001", message: "could not serialize access" },
+  };
+  begin(db, { env: ENV });
+
+  const res = await post(handler, await verifyBody());
+
+  // Money is on record and access is not. Saying "ok" here would leave the agent
+  // staring at a paywall with a receipt in hand and nothing to show us.
+  assertEquals(res.json.ok, false);
+  assertEquals(res.json.error, "activate_failed");
+  assertEquals(db.tables.subscriptions.find((s) => s.agent_id === MINE), undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -304,6 +480,33 @@ Deno.test("an expired plan reports 0 days, never a negative", async () => {
   const res = await post(handler, { action: "status", token: MY_TOKEN });
   assertEquals(res.json.status, "expired");
   assertEquals(res.json.daysLeft, 0);
+});
+
+Deno.test("P11: an expired trial row is never re-granted a trial", async () => {
+  // This is what admin/backfill_trials.sql writes for every agent that already
+  // exists when payments are switched on: a trial row that ended at the flip.
+  // If `resolve()` ever handed those agents a fresh trial, the backfill — and
+  // with it the first month of revenue — would be silently undone.
+  const db = await seeded();
+  db.tables.plans.push({
+    code: "trial", name: "Free trial", price_inr: 0, duration_days: 60,
+    active: true, sort: 0,
+  });
+  db.tables.subscriptions.push({
+    agent_id: MINE, plan_code: "trial", status: "expired",
+    current_period_end: new Date(Date.now() - 1000).toISOString(),
+    trial_used: true,
+  });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "status", token: MY_TOKEN });
+
+  assertEquals(res.json.status, "expired", "straight to the paywall");
+  assertEquals(res.json.daysLeft, 0);
+  assertEquals(
+    db.tables.subscriptions.filter((s) => s.agent_id === MINE).length, 1,
+    "no second row, no second trial",
+  );
 });
 
 Deno.test("renewing early adds to the remaining time, it does not reset it", async () => {
