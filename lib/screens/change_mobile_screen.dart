@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/app_settings.dart';
 import '../data/credentials.dart';
+import '../services/analytics.dart';
 import '../theme/app_theme.dart';
 import '../widgets/push_button.dart';
 import 'otp_verify_screen.dart';
@@ -70,6 +73,11 @@ class _ChangeMobileScreenState extends State<ChangeMobileScreen> {
     setState(() => _busy = false);
     if (ok == true) {
       await AppSettings.setMobile(_digits); // session phone already updated by verify
+      // Push it now. `identify` runs once per launch and no-ops afterwards
+      // without `force`, so without this the number only reached the server on
+      // the NEXT cold start — and the admin dashboard kept showing the old one
+      // in the meantime, which reads as "the change didn't work".
+      unawaited(Analytics.identify(force: true));
       if (!mounted) return;
       Navigator.of(context).pop(true);
       _snack('Mobile number updated.');

@@ -61,6 +61,17 @@ export default function Users() {
 
   const regionOf = (sol: string | null) => (sol ? labels[sol] || null : null);
 
+  /// Refetch past the client cache. An admin edit has to be visible at once —
+  /// waiting out the freshness window is what makes a save look like it failed.
+  async function reload() {
+    try {
+      const data: Data = await fetch("/api/users", { cache: "no-store" }).then((r) => r.json());
+      setCached("users", data);
+      setD(data);
+      setLabels(data.region_labels || {});
+    } catch {/* keep what's on screen */}
+  }
+
   const view = useMemo(() => {
     if (!d) return [];
     const needle = q.trim().toLowerCase();
@@ -242,7 +253,15 @@ export default function Users() {
         </div>
       </Card>
 
-      {open && <AgentDrawer row={open} district={regionOf(open.region)} onClose={() => setOpen(null)} />}
+      {open && (
+        <AgentDrawer
+          row={open}
+          district={regionOf(open.region)}
+          onClose={() => setOpen(null)}
+          onChanged={reload}
+          onRemoved={() => { setOpen(null); reload(); }}
+        />
+      )}
     </>
   );
 }
@@ -254,15 +273,99 @@ type Detail = {
   stats?: { events: number; lists: number; collected: number; first: string | null; last: string | null };
 };
 
-function AgentDrawer({ row, district, onClose }: { row: UserRow; district: string | null; onClose: () => void }) {
+type EditForm = { name: string; mobile: string; agent_name: string; agent_id: string; sol_id: string };
+const formOf = (r: UserRow): EditForm => ({
+  name: r.name ?? "",
+  mobile: r.mobile ?? "",
+  agent_name: r.agent_name ?? "",
+  agent_id: r.agent_id ?? "",
+  sol_id: r.region ?? "",
+});
+
+function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
+  row: UserRow;
+  district: string | null;
+  onClose: () => void;
+  onChanged: () => void | Promise<void>;
+  onRemoved: () => void;
+}) {
   const [det, setDet] = useState<Detail | null>(null);
+  // Edits are held locally and shown straight away, so the drawer never argues
+  // with itself while the table behind it refetches.
+  const [form, setForm] = useState<EditForm>(() => formOf(row));
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+  const [removing, setRemoving] = useState(false);
+  const [danger, setDanger] = useState(false);
+
+  const clean = formOf(row);
+  const dirty = (Object.keys(clean) as (keyof EditForm)[]).some((k) => form[k].trim() !== clean[k]);
+  const mobileBad = form.mobile.trim().length > 0 &&
+    form.mobile.replace(/\D/g, "").length !== 10;
+
   useEffect(() => {
     setDet(null);
+    setForm(formOf(row));
+    setMsg(null);
+    setDanger(false);
+    setConfirmText("");
     fetch(`/api/user?device=${encodeURIComponent(row.device_ids.join(","))}`).then((r) => r.json()).then(setDet).catch(() => setDet({ events: [] }));
     const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
   }, [row.device_id, onClose]);
+
+  async function save() {
+    if (mobileBad || !dirty) return;
+    setSaving(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          deviceIds: row.device_ids,
+          patch: {
+            name: form.name.trim(),
+            mobile: form.mobile.replace(/\D/g, ""),
+            agent_name: form.agent_name.trim(),
+            agent_id: form.agent_id.trim(),
+            sol_id: form.sol_id.trim(),
+          },
+        }),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        setMsg(`Saved to ${j.updated} phone${j.updated === 1 ? "" : "s"}.`);
+        await onChanged();
+      } else {
+        setMsg(j.error || "Couldn't save.");
+      }
+    } catch {
+      setMsg("Couldn't reach the server.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove() {
+    if (confirmText !== "DELETE") return;
+    setRemoving(true);
+    try {
+      const res = await fetch("/api/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceIds: row.device_ids, confirm: "DELETE" }),
+      });
+      const j = await res.json();
+      if (j.ok) onRemoved();
+      else { setMsg(j.error || "Couldn't remove."); setRemoving(false); }
+    } catch {
+      setMsg("Couldn't reach the server.");
+      setRemoving(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
@@ -270,9 +373,9 @@ function AgentDrawer({ row, district, onClose }: { row: UserRow; district: strin
       <aside className="relative w-full max-w-[440px] bg-canvas h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-sidebar text-white px-5 py-4 flex items-start justify-between">
           <div>
-            <div className="font-extrabold text-lg leading-tight">{row.name || row.agent_name || "Agent"}</div>
+            <div className="font-extrabold text-lg leading-tight">{form.name || form.agent_name || "Agent"}</div>
             <div className="text-white/60 text-xs mt-0.5">
-              {row.mobile ? `+91 ${row.mobile} · ` : ""}{row.region ? `SOL ${row.region}${district ? ` · ${district}` : ""}` : "region unknown"}
+              {form.mobile ? `+91 ${form.mobile} · ` : ""}{form.sol_id ? `SOL ${form.sol_id}${district ? ` · ${district}` : ""}` : "region unknown"}
             </div>
           </div>
           <button onClick={onClose} className="text-white/70 hover:text-white text-xl leading-none">✕</button>
@@ -287,9 +390,41 @@ function AgentDrawer({ row, district, onClose }: { row: UserRow; district: strin
             <MiniStat label="Status" value={row.active ? "active" : "dormant"} />
           </div>
 
+          <div className="card p-4">
+            <div className="lbl mb-2.5">Details</div>
+            <div className="flex flex-col gap-2.5">
+              <Field label="Name" value={form.name}
+                onChange={(v) => setForm({ ...form, name: v })} placeholder="Display name" />
+              <Field label="Mobile" value={form.mobile} prefix="+91" inputMode="numeric"
+                onChange={(v) => setForm({ ...form, mobile: v.replace(/\D/g, "").slice(0, 10) })}
+                placeholder="10 digits"
+                error={mobileBad ? "Needs to be 10 digits." : null} />
+              <Field label="Agent name" value={form.agent_name}
+                onChange={(v) => setForm({ ...form, agent_name: v })} />
+              <Field label="Agent ID" value={form.agent_id} mono
+                onChange={(v) => setForm({ ...form, agent_id: v })} />
+              <Field label="Region (SOL)" value={form.sol_id} mono
+                onChange={(v) => setForm({ ...form, sol_id: v })} />
+            </div>
+            <div className="flex items-center gap-2.5 mt-3.5">
+              <button className="btn" disabled={!dirty || saving || mobileBad} onClick={save}>
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+              {dirty && !saving && (
+                <button className="btn btn-ghost" onClick={() => { setForm(formOf(row)); setMsg(null); }}>
+                  Reset
+                </button>
+              )}
+              {msg && <span className="text-[12px] text-muted">{msg}</span>}
+            </div>
+            <p className="text-[11.5px] text-faint mt-2.5">
+              Applies to {row.devices === 1 ? "this phone" : `all ${row.devices} of this agent's phones`}.
+              The app overwrites these on its next check-in, so an edit here is a
+              correction, not a permanent override.
+            </p>
+          </div>
+
           <div className="card p-4 text-[13px]">
-            <Row k="Agent name" v={row.agent_name || "—"} />
-            <Row k="Agent ID" v={row.agent_id || "—"} mono />
             <Row k="Phone verified" v={row.phone_verified ? "yes" : "no"} />
             <Row k="App version" v={row.app_version || "—"} />
             <Row k="Phones" v={`${row.devices}${row.devices > 1 ? " (merged)" : ""}`} />
@@ -318,9 +453,89 @@ function AgentDrawer({ row, district, onClose }: { row: UserRow; district: strin
               <Empty>No activity recorded.</Empty>
             )}
           </div>
+
+          {/* Removal sits last, behind its own disclosure and a typed
+              confirmation. It cannot be reached by a mis-tap on the way to
+              anything else. */}
+          <div className="card p-4">
+            {!danger ? (
+              <button className="text-[12.5px] font-bold text-red hover:underline"
+                onClick={() => setDanger(true)}>
+                Remove this agent…
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                <div className="lbl">Remove agent</div>
+                <p className="text-[12.5px] text-muted leading-relaxed">
+                  Deletes {row.devices === 1 ? "this install" : `all ${row.devices} installs`},
+                  their activity history, and their sign-in sessions — the agent
+                  is signed out everywhere and their phone number and Agent ID
+                  are freed for reuse.
+                </p>
+                <p className="text-[12.5px] text-muted leading-relaxed">
+                  <b>Payments and subscriptions are kept.</b> Those are accounting
+                  records; if this agent signs up again their entitlement is
+                  still theirs.
+                </p>
+                <p className="text-[12.5px] text-muted">
+                  Their own customer data was never on our servers, so it is
+                  untouched — it lives only on their phone.
+                </p>
+                <input
+                  className="input"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder="Type DELETE to confirm"
+                  aria-label="Type DELETE to confirm"
+                />
+                <div className="flex items-center gap-2.5">
+                  <button
+                    className="btn !bg-red disabled:!bg-line disabled:!text-faint"
+                    disabled={confirmText !== "DELETE" || removing}
+                    onClick={remove}
+                  >
+                    {removing ? "Removing…" : "Remove permanently"}
+                  </button>
+                  <button className="btn btn-ghost"
+                    onClick={() => { setDanger(false); setConfirmText(""); }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
     </div>
+  );
+}
+
+/** One labelled input in the drawer's edit card. */
+function Field({ label, value, onChange, placeholder, mono, prefix, inputMode, error }: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  mono?: boolean;
+  prefix?: string;
+  inputMode?: "numeric" | "text";
+  error?: string | null;
+}) {
+  return (
+    <label className="block">
+      <span className="lbl">{label}</span>
+      <span className="flex items-center gap-2 mt-1">
+        {prefix && <span className="text-[13px] text-muted font-bold">{prefix}</span>}
+        <input
+          className={`input ${mono ? "font-mono" : ""} ${error ? "!border-red" : ""}`}
+          value={value}
+          inputMode={inputMode}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </span>
+      {error && <span className="text-[11.5px] text-red mt-1 block">{error}</span>}
+    </label>
   );
 }
 

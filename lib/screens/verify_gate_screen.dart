@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/app_settings.dart';
 import '../data/credentials.dart';
+import '../services/analytics.dart';
 import '../theme/app_theme.dart';
 import '../widgets/push_button.dart';
 import 'otp_verify_screen.dart';
@@ -63,6 +66,10 @@ class _VerifyGateScreenState extends State<VerifyGateScreen> {
     setState(() => _busy = false);
     if (ok == true) {
       await AppSettings.setMobile(_digits);
+      // Same reason as ChangeMobileScreen: identify() is once-per-launch unless
+      // forced, so the number a returning agent just verified would otherwise
+      // not reach the dashboard until their next cold start.
+      unawaited(Analytics.identify(force: true));
       widget.onVerified();
     }
   }
