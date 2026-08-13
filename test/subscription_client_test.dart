@@ -44,7 +44,12 @@ void main() {
   setUp(() async {
     sent = [];
     reply = Map<String, dynamic>.from(okStatus);
-    SharedPreferences.setMockInitialValues({});
+    // Buying is switched off by default now (pricing is agreed per agent), so
+    // the tests that exercise a purchase have to open the shop first.
+    SharedPreferences.setMockInitialValues({
+      'remote_config_v1': '{"self_serve_billing": true}',
+    });
+    await RemoteConfig.init();
     // A signed-in DOP agent, so purchase() gets past its credentials guard.
     FakeSecureStorage.install({'agent_id': 'AGENT-1', 'agent_pw': 'pw'});
     SupabaseConfig.testUrl = 'https://fake.supabase.test';

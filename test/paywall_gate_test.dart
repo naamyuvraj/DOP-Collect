@@ -176,11 +176,14 @@ void main() {
       SharedPreferences.setMockInitialValues({
         // A cached status with no plans: exactly the state that went blank.
         'sub_status_v1': '{"status":"trial","planCode":"trial","daysLeft":3}',
+        // This group is about the SHOP rendering, so the shop must be open.
+        'remote_config_v1': '{"self_serve_billing": true}',
       });
       SupabaseConfig.testUrl = 'https://fake.supabase.test';
       SupabaseConfig.testAnonKey = 'anon-key-test';
       await tester.runAsync(() async {
         await SessionStore.clear();
+        await RemoteConfig.init();
         await Subscription.init();
         // Settle the entitlement the screen reads on its first frame.
         await Subscription.refresh();

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/remote_config.dart';
 import '../services/subscription.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
@@ -154,31 +155,162 @@ class _PaywallScreenState extends State<PaywallScreen> {
         children: [
           _statusBanner(s),
           const SizedBox(height: 18),
-          Text(_active ? 'Extend your plan' : 'Choose a plan',
-              style: AppTheme.display(18, weight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text('Full access — sync, lists, portal submit and the assistant.',
-              style: AppTheme.body(13, color: AppTheme.inkMuted)),
-          if (!_checkoutReady) ...[
-            const SizedBox(height: 8),
-            Text('Paid plans open soon — checkout is being finalised.',
-                style: AppTheme.body(12,
-                    weight: FontWeight.w700, color: AppTheme.amber)),
+          // No self-serve tier yet: pricing is set per agent from their book
+          // size and how much they use it, so there is nothing here to sell.
+          // Showing plan cards that can't be bought — or a checkout that would
+          // charge the wrong number — is worse than showing none.
+          if (!RemoteConfig.selfServeBilling) ...[
+            _trialPanel(s),
+            const SizedBox(height: 18),
+            _legalFooter(),
+          ] else ...[
+            Text(_active ? 'Extend your plan' : 'Choose a plan',
+                style: AppTheme.display(18, weight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            Text('Full access — sync, lists, portal submit and the assistant.',
+                style: AppTheme.body(13, color: AppTheme.inkMuted)),
+            if (!_checkoutReady) ...[
+              const SizedBox(height: 8),
+              Text('Paid plans open soon — checkout is being finalised.',
+                  style: AppTheme.body(12,
+                      weight: FontWeight.w700, color: AppTheme.amber)),
+            ],
+            const SizedBox(height: 14),
+            if (plans.isEmpty)
+              _plansLoadingOrRetry()
+            else
+              for (final p in plans)
+                _planCard(p, isBest: p.code == best?.code, monthlyPerMo: monthly),
+            const SizedBox(height: 20),
+            _restoreRow(),
+            const SizedBox(height: 18),
+            _legalFooter(),
           ],
-          const SizedBox(height: 14),
-          if (plans.isEmpty)
-            _plansLoadingOrRetry()
-          else
-            for (final p in plans)
-              _planCard(p, isBest: p.code == best?.code, monthlyPerMo: monthly),
-          const SizedBox(height: 20),
-          _restoreRow(),
-          const SizedBox(height: 18),
-          _legalFooter(),
         ],
       ),
     );
   }
+
+  /// What an agent sees while billing is still hand-set: their trial, what it
+  /// covers, and what happens at the end — no prices, because there is no
+  /// published price yet, and nothing to tap that would take money.
+  Widget _trialPanel(SubStatus? s) {
+    final ended = s?.expired ?? false;
+    final days = s?.daysLeft ?? 0;
+    final title = ended
+        ? 'Your free trial has ended'
+        : days > 0
+            ? 'You have $days day${days == 1 ? '' : 's'} of free access'
+            : 'Your free trial is running';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+          decoration: AppTheme.card(fill: ended ? AppTheme.amberSoft : AppTheme.focal),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(ended ? 'TRIAL ENDED' : 'FREE TRIAL',
+                  style: AppTheme.label(AppTheme.ink)),
+              const SizedBox(height: 8),
+              Text(title,
+                  style: AppTheme.display(21, weight: FontWeight.w800, height: 1.2)),
+              const SizedBox(height: 8),
+              Text(
+                ended
+                    ? 'Nothing has been charged. We\'ll agree a price with you '
+                        'based on the size of your book and how much you use '
+                        'the app, then set it up for you.'
+                    : 'Everything is included, and nothing will be charged '
+                        'automatically. Before it ends we\'ll agree a price '
+                        'with you based on your book and how much you use it.',
+                style: AppTheme.body(13.5, color: AppTheme.ink, height: 1.45),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text('What you have', style: AppTheme.display(17, weight: FontWeight.w800)),
+        const SizedBox(height: 10),
+        _perk(Icons.sync_rounded, 'Sync your whole book',
+            'Pull every account from the DOP portal, as often as you like.'),
+        _perk(Icons.receipt_long_rounded, 'Lists and portal submit',
+            'Build ₹20,000 lists and file them without typing them again.'),
+        _perk(Icons.checklist_rounded, 'The collect round',
+            'Daily and monthly collection, receipts, and the cash count.'),
+        _perk(Icons.auto_awesome_rounded, 'The assistant',
+            'Ask about your book in Hindi or English, by voice or typing.'),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          decoration: AppTheme.card(fill: AppTheme.surfaceSoft, radius: 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.support_agent_rounded,
+                  size: 20, color: AppTheme.inkMuted),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  ended
+                      ? 'Talk to us and we\'ll switch your access back on.'
+                      : 'Questions about pricing? Talk to us any time.',
+                  style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        // The only action on this screen. An agent whose access was just
+        // extended from the dashboard needs a way to pick it up without
+        // reinstalling, and it is the honest thing to offer when the screen is
+        // blocking them.
+        Center(
+          child: TextButton.icon(
+            onPressed: _restoring ? null : _restore,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: Text(_restoring ? 'Checking…' : 'Check again'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _perk(IconData icon, String title, String body) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppTheme.accentSoft,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, size: 18, color: AppTheme.black),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: AppTheme.body(14, weight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text(body,
+                      style: AppTheme.body(12.5,
+                          color: AppTheme.inkMuted, height: 1.35)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
 
   /// Shown only when there is genuinely nothing to list.
   ///

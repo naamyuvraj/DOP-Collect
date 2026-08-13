@@ -19,8 +19,14 @@ const MY_TOKEN = "my-live-token";
 
 const handler = await load("pay");
 
-async function seeded(): Promise<Db> {
+/**
+ * A working project. `selfServe` defaults ON so the purchase tests below read
+ * as tests of buying rather than tests of the switch — the switch has its own
+ * group, which opts out.
+ */
+async function seeded({ selfServe = true } = {}): Promise<Db> {
   const db = newDb();
+  if (selfServe) db.tables.app_config.push({ key: "self_serve_billing", value: true });
   const myAccount = crypto.randomUUID();
   const theirAccount = crypto.randomUUID();
   db.tables.accounts.push(
@@ -154,6 +160,54 @@ Deno.test("S7: an order is recorded against the SESSION's agent, not the claim",
 });
 
 // ---------------------------------------------------------------------------
+// Self-serve billing switch — nothing may take money while pricing is per-agent
+// ---------------------------------------------------------------------------
+
+Deno.test("billing closed: an order is refused even by a modified client", async () => {
+  const db = await seeded({ selfServe: false });
+  begin(db, { env: ENV });
+
+  const res = await post(handler, { action: "order", planCode: "m1", token: MY_TOKEN });
+
+  assertEquals(res.status, 403);
+  assertEquals(res.json.error, "billing_not_open");
+  assertEquals(db.tables.orders.length, 0);
+  assertEquals(fetchCalls.length, 0, "Razorpay must never be asked");
+});
+
+Deno.test("billing closed: a verify is refused too", async () => {
+  const db = await withOrder({ selfServe: false });
+  begin(db, { env: ENV });
+  const res = await post(handler, await verifyBody());
+  assertEquals(res.status, 403);
+  assertEquals(res.json.error, "billing_not_open");
+  assertEquals(db.tables.payments.length, 0);
+});
+
+Deno.test("billing closed: status still works — the agent must see their trial", async () => {
+  const db = await seeded({ selfServe: false });
+  begin(db, { env: ENV });
+  const res = await post(handler, { action: "status", token: MY_TOKEN });
+  assertEquals(res.status, 200);
+  assertEquals(res.json.status, "trial");
+});
+
+Deno.test("billing open: buying works again", async () => {
+  const db = await seeded(); // switch on by default in the fixture
+  begin(db, {
+    env: ENV,
+    reply: (url) =>
+      url.includes("razorpay")
+        ? { status: 200, json: { id: "order_OK", amount: 19900, currency: "INR" } }
+        : { status: 200, json: {} },
+  });
+
+  const res = await post(handler, { action: "order", planCode: "m1", token: MY_TOKEN });
+  assertEquals(res.json.ok, true);
+  assertEquals(db.tables.orders.length, 1);
+});
+
+// ---------------------------------------------------------------------------
 // P2 — you may only buy what the price list offers
 // ---------------------------------------------------------------------------
 
@@ -243,8 +297,8 @@ async function sign(secret: string, msg: string): Promise<string> {
   return [...new Uint8Array(s)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function withOrder(): Promise<Db> {
-  const db = await seeded();
+async function withOrder(opts: { selfServe?: boolean } = {}): Promise<Db> {
+  const db = await seeded(opts);
   db.tables.orders.push({ order_id: "order_1", agent_id: MINE, plan_code: "m1", amount: 19900 });
   return db;
 }

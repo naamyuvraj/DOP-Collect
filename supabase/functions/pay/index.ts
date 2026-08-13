@@ -172,6 +172,19 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: "unauthorized" }, 401);
     }
 
+    // --- Self-serve billing switch ------------------------------------------
+    // Pricing is currently agreed per agent from their book size and usage, so
+    // there is no published tier anyone may simply buy. `status` stays open —
+    // an agent still needs to see their trial — but nothing that could take
+    // money is reachable, whatever the client thinks. Flip
+    // app_config.self_serve_billing to true when there is a price to sell.
+    const selfServe =
+      (await sb.from("app_config").select("value").eq("key", "self_serve_billing")
+        .maybeSingle()).data?.value === true;
+    if (!selfServe && (action === "order" || action === "verify")) {
+      return json({ ok: false, error: "billing_not_open" }, 403);
+    }
+
     // Resolve (and lazily trial-grant) the subscription.
     const resolve = async () => {
       let { data: sub } = await sb

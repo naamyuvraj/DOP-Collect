@@ -298,6 +298,10 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
   const [confirmText, setConfirmText] = useState("");
   const [removing, setRemoving] = useState(false);
   const [danger, setDanger] = useState(false);
+  // Which grant button is in flight (0 means "End now"), so only that one
+  // shows a spinner and the rest can't be double-fired.
+  const [granting, setGranting] = useState<number | null>(null);
+  const [grantMsg, setGrantMsg] = useState<string | null>(null);
 
   const clean = formOf(row);
   const dirty = (Object.keys(clean) as (keyof EditForm)[]).some((k) => form[k].trim() !== clean[k]);
@@ -346,6 +350,40 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
       setMsg("Couldn't reach the server.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  /// `days` of 0 ends access now; negative takes time back.
+  async function grant(days: number) {
+    if (!row.agent_id) return;
+    setGranting(days);
+    setGrantMsg(null);
+    try {
+      const res = await fetch("/api/subscriptions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          days === 0
+            ? { agentId: row.agent_id, endNow: true }
+            : { agentId: row.agent_id, addDays: days },
+        ),
+      });
+      const j = await res.json();
+      if (j.ok) {
+        const until = j.periodEnd ? new Date(j.periodEnd) : null;
+        setGrantMsg(
+          days === 0
+            ? "Access ended."
+            : `Access now runs to ${until ? until.toLocaleDateString() : "the new date"}.`,
+        );
+        await onChanged();
+      } else {
+        setGrantMsg(j.error || "Couldn't change access.");
+      }
+    } catch {
+      setGrantMsg("Couldn't reach the server.");
+    } finally {
+      setGranting(null);
     }
   }
 
@@ -451,6 +489,57 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
               </div>
             ) : (
               <Empty>No activity recorded.</Empty>
+            )}
+          </div>
+
+          {/* Access is granted by hand for now — pricing is agreed per agent
+              from their book size and usage, so this is the control that
+              actually decides whether they can work. */}
+          <div className="card p-4">
+            <div className="lbl mb-2">Access</div>
+            {!row.agent_id ? (
+              <p className="text-[12.5px] text-muted">
+                No Agent ID yet — access is keyed to it, so there is nothing to
+                grant until they finish signing in.
+              </p>
+            ) : (
+              <>
+                <div className="flex items-baseline gap-2 mb-1">
+                  <span className="text-[15px] font-extrabold">
+                    {row.sub_status === "active" ? "Active"
+                      : row.sub_status === "trial" ? "On trial"
+                      : row.sub_status === "expired" ? "Ended"
+                      : "No record yet"}
+                  </span>
+                  {row.plan && <Pill>{row.plan}</Pill>}
+                </div>
+                <p className="text-[12px] text-faint mb-3">
+                  Adding days stacks on whatever is left, exactly like a real
+                  purchase — time already given is never burned.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[7, 30, 90].map((d) => (
+                    <button key={d} className="btn btn-ghost"
+                      disabled={granting !== null}
+                      onClick={() => grant(d)}>
+                      {granting === d ? "…" : `+${d} days`}
+                    </button>
+                  ))}
+                  <button className="btn btn-ghost"
+                    disabled={granting !== null}
+                    onClick={() => grant(-30)}>
+                    {granting === -30 ? "…" : "−30 days"}
+                  </button>
+                  <button className="btn btn-ghost !text-red"
+                    disabled={granting !== null}
+                    onClick={() => grant(0)}>
+                    {granting === 0 ? "…" : "End now"}
+                  </button>
+                </div>
+                {grantMsg && (
+                  <p className="text-[12px] text-muted mt-2.5">{grantMsg}</p>
+                )}
+              </>
             )}
           </div>
 

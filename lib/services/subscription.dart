@@ -317,6 +317,14 @@ class Subscription {
   /// native checkout isn't wired yet (patch build).
   static Future<bool> purchase(String planCode) async {
     lastError = null;
+    // Belt to the UI's braces. While pricing is agreed per agent there is no
+    // published price to charge, so no path may reach a checkout — not a stale
+    // screen, not a deep link, not a build that shipped before the flag. The
+    // `pay` function refuses the same thing server-side.
+    if (!RemoteConfig.selfServeBilling) {
+      lastError = 'Plans aren\'t on sale yet — we\'ll set your price with you.';
+      return false;
+    }
     if ((await _agentId()).isEmpty) {
       lastError = 'No agent id — sign in first.';
       return false;

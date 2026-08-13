@@ -97,6 +97,18 @@ class RemoteConfig {
   /// native checkout ship in a release build.
   static bool get paymentsEnabled => _flag('payments_enabled', def: false);
 
+  /// Whether an agent may buy a plan inside the app.
+  ///
+  /// Off (default) while pricing is worked out per agent from their book size
+  /// and usage — there is no self-serve tier to sell yet, so the plan cards and
+  /// the checkout are hidden and the screen shows their trial instead. Access
+  /// is granted per agent from the dashboard in the meantime. Flip this on when
+  /// there is a published price anyone can just pay.
+  ///
+  /// The `pay` function enforces the same flag, so turning it on here is what
+  /// reveals the UI, not what authorises the purchase.
+  static bool get selfServeBilling => _flag('self_serve_billing', def: false);
+
   /// Require WhatsApp OTP phone verification during onboarding. Off (default) =>
   /// the phone step is optional. Flip on once the OTP flow is tested end-to-end.
   static bool get otpRequired => _flag('otp_required', def: false);
