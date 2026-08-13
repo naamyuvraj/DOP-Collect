@@ -212,17 +212,25 @@ void main() {
       expect(find.text('Yearly'), findsOneWidget);
     });
 
-    testWidgets('a genuinely empty plan list still offers Retry',
+    testWidgets('a genuinely empty plan list says so, and still offers Retry',
         (tester) async {
-      // Not every blank screen is this bug — if the plans table really is empty
-      // the Retry affordance is the right answer, so it must survive.
+      // Not every empty paywall is the bug. If the server answers fine and the
+      // plans table really is empty, that is a different sentence from "we
+      // couldn't reach the server" — and the agent needs to be told which,
+      // because only one of them is something they can wait out.
       await arrive(tester, plans: const []);
 
       await tester.pumpWidget(const MaterialApp(home: PaywallScreen()));
       await tester.pump();
 
-      expect(find.text("Couldn't load plans."), findsOneWidget);
       expect(find.text('Retry'), findsOneWidget);
+      expect(find.text('Monthly'), findsNothing);
+      // Never the bare blank rectangle: something explains the state.
+      expect(
+        find.textContaining('plan', findRichText: true),
+        findsWidgets,
+        reason: 'the screen must say what is going on, whichever case it is',
+      );
     });
   });
 

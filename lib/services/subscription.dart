@@ -23,6 +23,16 @@ class Plan {
         (j['price_inr'] as num?) ?? 0,
         (j['duration_days'] as num?)?.toInt() ?? 0,
       );
+
+  /// Same shape as the server's row, so a cached list reloads through
+  /// [Plan.fromJson] unchanged.
+  Map<String, Object?> toJson() => {
+        'code': code,
+        'name': name,
+        'price_inr': priceInr,
+        'duration_days': durationDays,
+      };
+
   bool get isFree => priceInr <= 0;
 }
 
@@ -88,11 +98,29 @@ class Subscription {
   static SubStatus? _current;
   static const _cacheKey = 'sub_status_v1';
 
+  /// The last plan list the server gave us, kept on disk.
+  ///
+  /// The prices are the only thing standing between the paywall and a blank
+  /// screen. They used to be fetched fresh every time and held nowhere, so the
+  /// screen could render ONLY while a live call was succeeding: one flaky
+  /// minute, a 429, a captive portal or a cold start on the train and the agent
+  /// got "Couldn't load plans." above a Retry that re-ran the same failing
+  /// call. A price list barely changes — cache it and show the last known one.
+  static const _plansKey = 'sub_plans_v1';
+
   /// Set by the release build to the real razorpay_flutter implementation.
   static RazorpayOpener? opener;
 
   /// Last failure reason (order / checkout / verify), for surfacing to the user.
   static String? lastError;
+
+  /// Why the last [refresh] didn't land, or null if it did.
+  ///
+  /// Exists so a failure can never again be a blank rectangle. Every incident
+  /// in this flow so far — missing dart-defines, a missing session, a dead
+  /// network — produced the same silent empty screen, which is why each took a
+  /// round trip to diagnose. The UI shows this.
+  static String? lastStatusError;
 
   /// Fired whenever [current] changes. The app root listens so the hard gate
   /// can appear (or clear) the moment the background refresh lands, rather than
@@ -152,8 +180,12 @@ class Subscription {
   /// the next agent to sign in on the same phone.
   static Future<void> init() async {
     final p = await SharedPreferences.getInstance();
+    // Prices first, and independently of the entitlement: the paywall must be
+    // able to render on a cold start with no network, and an agent with no
+    // entitlement cached still needs to see what they can buy.
+    final plans = _readPlans(p);
     final raw = p.getString(_cacheKey);
-    _current = null;
+    _current = plans.isEmpty ? null : SubStatus('unknown', '', 0, plans);
     if (raw != null) {
       try {
         final j = jsonDecode(raw) as Map<String, dynamic>;
@@ -161,12 +193,33 @@ class Subscription {
           j['status'] as String,
           j['planCode'] as String,
           (j['daysLeft'] as num).toInt(),
-          const [],
+          plans,
           periodEnd: DateTime.tryParse((j['periodEnd'] as String?) ?? ''),
         );
-      } catch (_) {/* unreadable cache — stay at "unknown" */}
+      } catch (_) {/* unreadable cache — keep the plans, drop the status */}
     }
     unawaited(refresh());
+  }
+
+  static List<Plan> _readPlans(SharedPreferences p) {
+    final raw = p.getString(_plansKey);
+    if (raw == null) return const [];
+    try {
+      return (jsonDecode(raw) as List)
+          .map((e) => Plan.fromJson((e as Map).cast<String, dynamic>()))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static Future<void> _writePlans(List<Plan> plans) async {
+    if (plans.isEmpty) return; // never cache "none" over a good list
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setString(
+          _plansKey, jsonEncode([for (final x in plans) x.toJson()]));
+    } catch (_) {/* best effort — this is a convenience cache */}
   }
 
   /// Drop this agent's entitlement, in memory and on disk. Called on logout so
@@ -181,12 +234,46 @@ class Subscription {
   }
 
   /// Pull fresh entitlement + plans from the server.
+  ///
+  /// A failure here is never fatal to the screen: [_current] keeps whatever was
+  /// cached (including the plan list), and [lastStatusError] records why, so
+  /// the paywall can say what happened instead of going blank.
   static Future<SubStatus?> refresh() async {
+    if (!SupabaseConfig.configured) {
+      // Almost always a build shipped without --dart-define-from-file=env.json,
+      // which silently disables every cloud feature at once. Name it, so the
+      // next person sees the cause on the screen instead of guessing.
+      lastStatusError = 'This build has no server configuration.';
+      return _current;
+    }
     final j = await _call({'action': 'status'});
-    if (j == null || j['ok'] != true) return _current;
+    if (j == null) {
+      lastStatusError = 'No connection.';
+      return _current;
+    }
+    if (j['ok'] != true) {
+      final code = (j['error'] ?? j['code'] ?? '').toString();
+      lastStatusError = switch (code) {
+        'rate_limited' => 'Too many checks just now. Try again shortly.',
+        'unauthorized' => 'Sign in again to see your plan.',
+        'integrity_required' => 'This copy of the app can\'t be verified.',
+        '' => 'The server couldn\'t answer.',
+        _ => 'The server couldn\'t answer ($code).',
+      };
+      return _current;
+    }
+    lastStatusError = null;
+
     final plans = ((j['plans'] as List?) ?? const [])
         .map((e) => Plan.fromJson((e as Map).cast<String, dynamic>()))
         .toList();
+    // Awaited, not fire-and-forget: a write still in flight when the next
+    // refresh (or a fresh launch) reads the cache is a race, and it is cheap.
+    await _writePlans(plans);
+    // An `ok` response that carries no plans (a hiccup, or someone
+    // deactivating every row mid-edit) must not blank a list we already have.
+    final effectivePlans =
+        plans.isEmpty ? (_current?.plans ?? const <Plan>[]) : plans;
     final status = (j['status'] as String?) ?? 'unknown';
 
     // `unknown` means "nobody is signed in on this device", so the server told
@@ -199,7 +286,7 @@ class Subscription {
         _current?.status ?? 'unknown',
         _current?.planCode ?? '',
         _current?.daysLeft ?? 0,
-        plans,
+        effectivePlans,
         periodEnd: _current?.periodEnd,
       );
       onChanged?.call();
@@ -208,7 +295,7 @@ class Subscription {
 
     final periodEnd = DateTime.tryParse((j['periodEnd'] as String?) ?? '');
     _current = SubStatus(status, (j['planCode'] as String?) ?? '',
-        (j['daysLeft'] as num?)?.toInt() ?? 0, plans,
+        (j['daysLeft'] as num?)?.toInt() ?? 0, effectivePlans,
         periodEnd: periodEnd);
     onChanged?.call();
     final p = await SharedPreferences.getInstance();

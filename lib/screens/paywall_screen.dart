@@ -180,23 +180,50 @@ class _PaywallScreenState extends State<PaywallScreen> {
     );
   }
 
+  /// Shown only when there is genuinely nothing to list.
+  ///
+  /// It must always say WHY. Every blank-paywall incident so far looked
+  /// identical from the outside — a missing build flag, a missing session, a
+  /// dead network all produced the same empty rectangle, and each one cost a
+  /// round trip to identify. The reason comes from [Subscription.lastStatusError]
+  /// and is the difference between "I can fix this" and "the app is broken".
   Widget _plansLoadingOrRetry() {
-    // If the first refresh came back with no plans, offer a retry instead of an
-    // endless spinner.
-    final loaded = _s != null;
-    if (!loaded) {
+    if (_s == null && _restoring) {
       return const Center(
           child: Padding(
               padding: EdgeInsets.all(24), child: CircularProgressIndicator()));
     }
+
+    final why = Subscription.lastStatusError;
+    final headline =
+        why == null ? 'No plans are on sale right now.' : 'Couldn\'t load plans.';
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(children: [
-          Text('Couldn\'t load plans.',
-              style: AppTheme.body(13, color: AppTheme.inkMuted)),
+          Text(headline,
+              textAlign: TextAlign.center,
+              style: AppTheme.body(13.5, weight: FontWeight.w700)),
+          if (why != null) ...[
+            const SizedBox(height: 6),
+            Text(why,
+                textAlign: TextAlign.center,
+                style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            why == null
+                ? 'Nothing to pay for — you can keep using the app.'
+                : 'Your access is not affected while this is showing.',
+            textAlign: TextAlign.center,
+            style: AppTheme.body(11.5, color: AppTheme.inkFaint),
+          ),
           const SizedBox(height: 8),
-          TextButton(onPressed: _restore, child: const Text('Retry')),
+          TextButton(
+            onPressed: _restoring ? null : _restore,
+            child: Text(_restoring ? 'Checking…' : 'Retry'),
+          ),
         ]),
       ),
     );
