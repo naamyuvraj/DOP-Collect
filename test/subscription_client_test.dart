@@ -68,11 +68,62 @@ void main() {
       const Session('sess-token-1', 'acct-1', '9810000001', 'AGENT-1'));
 
   group('the session token gates the call', () {
-    test('no session — nothing is sent at all', () async {
+    test('no session — status still runs, so the paywall can show prices',
+        () async {
+      // Bailing out before the request left the paywall blank behind a Retry
+      // button that could never succeed. Prices are public; entitlement is not.
+      reply = {
+        'ok': true, 'status': 'unknown', 'planCode': '', 'daysLeft': 0,
+        'plans': [
+          {'code': 'm1', 'name': 'Monthly', 'price_inr': 199, 'duration_days': 30},
+        ],
+      };
+
       await Subscription.refresh();
-      expect(sent, isEmpty,
-          reason: 'a call with no token can only ever come back 401');
-      expect(Subscription.current, isNull);
+
+      expect(sent.single['action'], 'status');
+      expect(sent.single.containsKey('token'), isFalse, reason: 'none to send');
+      expect(Subscription.current?.plans.length, 1,
+          reason: 'the paywall needs a plan list to render');
+      expect(Subscription.current?.status, 'unknown');
+      expect(Subscription.blocked, isFalse);
+    });
+
+    test('an unknown answer never overwrites a known plan', () async {
+      await signedIn();
+      await Subscription.refresh();
+      expect(Subscription.current?.status, 'active');
+
+      // The session goes away (kicked by the device limit, say).
+      await SessionStore.clear();
+      reply = {
+        'ok': true, 'status': 'unknown', 'planCode': '', 'daysLeft': 0,
+        'plans': [
+          {'code': 'm1', 'name': 'Monthly', 'price_inr': 199, 'duration_days': 30},
+        ],
+      };
+      await Subscription.refresh();
+
+      expect(Subscription.current?.status, 'active',
+          reason: 'a non-answer must not downgrade a known entitlement');
+      expect(Subscription.current?.plans.length, 1, reason: 'prices refreshed');
+    });
+
+    test('an unknown answer is not written over a cached real one', () async {
+      await signedIn();
+      await Subscription.refresh();
+      final p = await SharedPreferences.getInstance();
+      expect(p.getString('sub_status_v1'), contains('active'));
+
+      await SessionStore.clear();
+      reply = {
+        'ok': true, 'status': 'unknown', 'planCode': '', 'daysLeft': 0,
+        'plans': const [],
+      };
+      await Subscription.refresh();
+
+      expect(p.getString('sub_status_v1'), contains('active'),
+          reason: 'next cold start must not boot into a non-answer');
     });
 
     test('every call carries the token', () async {
@@ -216,12 +267,20 @@ void main() {
       expect(sent.single['action'], 'order');
     });
 
-    test('no session — the purchase cannot even start', () async {
+    test('no session — the order is refused and nothing is charged', () async {
       Subscription.opener =
           (order) async => RazorpayResult(order.orderId, 'p', 's');
-      stubPurchase();
+      // What the server really answers for `order` without a token.
+      Subscription.client = MockClient((req) async {
+        sent.add(jsonDecode(req.body) as Map<String, dynamic>);
+        return http.Response('{"ok":false,"error":"unauthorized"}', 401,
+            headers: {'content-type': 'application/json'});
+      });
+
       expect(await Subscription.purchase('m1'), isFalse);
-      expect(sent, isEmpty);
+      expect(sent.single['action'], 'order');
+      expect(Subscription.lastError, contains('unauthorized'),
+          reason: 'the agent should be told why, not left staring at a sheet');
     });
 
     test('without a DOP login the flow stops before any network call',

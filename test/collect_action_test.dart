@@ -50,6 +50,52 @@ void main() {
       expect(r!.isUndo, isTrue);
       expect(r.name, 'ramesh');
     });
+
+    test('takes a spoken amount, not just digits', () {
+      // The dangerous case: no digits meant no amount, and the card then
+      // offered his daily figure for money he had actually been handed.
+      final r = CollectPhrase.parse('ramesh se paanch sau le liya');
+      expect(r!.name, 'ramesh');
+      expect(r.amount, 500);
+    });
+
+    test('handles the way amounts are really said', () {
+      expect(CollectPhrase.parse('suresh se dhai sau liya')!.amount, 250);
+      expect(CollectPhrase.parse('suresh se dedh hazaar liya')!.amount, 1500);
+      expect(CollectPhrase.parse('suresh ne 1,000 diya')!.amount, 1000);
+    });
+
+    test('"kar do" does not add two to the amount', () {
+      final r = CollectPhrase.parse('ramesh se 500 le liya entry kar do');
+      expect(r!.amount, 500);
+      expect(r.name, 'ramesh');
+    });
+  });
+
+  group('CollectPhrase — Devanagari, which is what the Hindi mic returns', () {
+    test('a full instruction in Hindi script', () {
+      final r = CollectPhrase.parse('रमेश से ५०० ले लिया');
+      expect(r, isNotNull);
+      expect(r!.amount, 500);
+      // The name stays in Devanagari here; matching against the Latin book is
+      // the resolver's job.
+      expect(r.name, 'रमेश');
+    });
+
+    test('a spoken Hindi amount', () {
+      expect(CollectPhrase.parse('सुरेश से पांच सौ लिया')!.amount, 500);
+      expect(CollectPhrase.parse('सुरेश से ढाई सौ लिया')!.amount, 250);
+    });
+
+    test('a Hindi undo', () {
+      final r = CollectPhrase.parse('रमेश का हटा दो');
+      expect(r!.isUndo, isTrue);
+    });
+
+    test('a Hindi question is still a question', () {
+      expect(CollectPhrase.parse('रमेश से कितना लिया'), isNull);
+      expect(CollectPhrase.parse('आज कितना मिला'), isNull);
+    });
   });
 
   group('CollectPhrase — everything that must NOT become an action', () {
@@ -129,6 +175,29 @@ void main() {
       final r =
           await actions.resolve(const CollectRequest(name: 'suresh'), now);
       expect((r as CollectReady).action.amount, 100);
+    });
+
+    test('a Devanagari name finds the Latin account', () async {
+      final r = await actions.resolve(
+          const CollectRequest(name: 'सुरेश', amount: 500), now);
+      expect(r, isA<CollectReady>());
+      expect((r as CollectReady).action.account.accountNumber, '100002');
+    });
+
+    test('a misheard spelling still finds the right customer', () async {
+      final r = await actions.resolve(
+          const CollectRequest(name: 'sureesh yadav', amount: 500), now);
+      expect((r as CollectReady).action.account.accountNumber, '100002');
+    });
+
+    test('the best tier wins — a full name is not made ambiguous by partials',
+        () async {
+      // "Ramesh Kumar" is exact; the other Ramesh only matches on one word and
+      // must not turn a clear instruction into a question.
+      final r = await actions.resolve(
+          const CollectRequest(name: 'रमेश कुमार', amount: 500), now);
+      expect(r, isA<CollectReady>());
+      expect((r as CollectReady).action.account.accountNumber, '100001');
     });
 
     test('undo targets the latest entry, and only within this cycle',

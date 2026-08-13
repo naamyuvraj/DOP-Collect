@@ -1,14 +1,20 @@
+import 'dart:convert';
+
 import 'package:dop_collect/data/account_repository.dart';
 import 'package:dop_collect/data/collection_repository.dart';
 import 'package:dop_collect/data/lot_repository.dart';
+import 'package:dop_collect/data/session.dart';
 import 'package:dop_collect/main.dart';
 import 'package:dop_collect/screens/paywall_screen.dart';
 import 'package:dop_collect/services/remote_config.dart';
 import 'package:dop_collect/services/subscription.dart';
+import 'package:dop_collect/services/supabase_config.dart';
 import 'package:dop_collect/shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// The paywall used to be wired to exactly one button (Settings -> Sync), so an
@@ -133,6 +139,93 @@ void main() {
     expect(Subscription.blocked, isFalse, reason: 'unknown must fail open');
   });
 
+  group('the paywall renders its plans', () {
+    // The regression this group exists for: locking `pay` behind a session made
+    // the client skip the request entirely, so the screen loaded a cached
+    // status with an empty plan list and showed "Couldn't load plans." above a
+    // Retry button that re-ran the same skipped call. Blank, forever.
+    const plansReply = {
+      'ok': true,
+      'status': 'unknown',
+      'planCode': '',
+      'daysLeft': 0,
+      'plans': [
+        {'code': 'm1', 'name': 'Monthly', 'price_inr': 199, 'duration_days': 30},
+        {'code': 'y1', 'name': 'Yearly', 'price_inr': 1499, 'duration_days': 365},
+      ],
+    };
+
+    /// Arrange the state the paywall opens in, with the network already faked.
+    ///
+    /// Runs inside [WidgetTester.runAsync] on purpose. `MockClient` delivers
+    /// its body through a Stream, and a Stream cannot advance inside
+    /// `testWidgets`' fake-async zone unless something pumps — so awaiting the
+    /// refresh in the normal test body deadlocks instead of failing. runAsync
+    /// gives it the real event loop.
+    ///
+    /// The mock is installed FIRST because `Subscription.init()` kicks off an
+    /// unawaited refresh; install it later and that call escapes to the real
+    /// network.
+    Future<void> arrive(
+      WidgetTester tester, {
+      required List<Map<String, Object>> plans,
+    }) async {
+      Subscription.client = MockClient((_) async => http.Response(
+          jsonEncode({...plansReply, 'plans': plans}), 200,
+          headers: {'content-type': 'application/json'}));
+      SharedPreferences.setMockInitialValues({
+        // A cached status with no plans: exactly the state that went blank.
+        'sub_status_v1': '{"status":"trial","planCode":"trial","daysLeft":3}',
+      });
+      SupabaseConfig.testUrl = 'https://fake.supabase.test';
+      SupabaseConfig.testAnonKey = 'anon-key-test';
+      await tester.runAsync(() async {
+        await SessionStore.clear();
+        await Subscription.init();
+        // Settle the entitlement the screen reads on its first frame.
+        await Subscription.refresh();
+      });
+      // The screen refreshes again from initState, back inside the fake zone.
+      // Make that fail immediately so it leaves no Stream or timeout Timer
+      // pending; refresh() then returns the entitlement we just settled.
+      Subscription.client = MockClient((_) async => throw const _Offline());
+    }
+
+    tearDown(() async {
+      Subscription.client = http.Client();
+      SupabaseConfig.testUrl = null;
+      SupabaseConfig.testAnonKey = null;
+      await Subscription.forget();
+    });
+
+    testWidgets('with NO session — prices are public', (tester) async {
+      await arrive(tester, plans: const [
+        {'code': 'm1', 'name': 'Monthly', 'price_inr': 199, 'duration_days': 30},
+        {'code': 'y1', 'name': 'Yearly', 'price_inr': 1499, 'duration_days': 365},
+      ]);
+
+      await tester.pumpWidget(const MaterialApp(home: PaywallScreen()));
+      await tester.pump();
+
+      expect(find.text("Couldn't load plans."), findsNothing);
+      expect(find.text('Monthly'), findsOneWidget);
+      expect(find.text('Yearly'), findsOneWidget);
+    });
+
+    testWidgets('a genuinely empty plan list still offers Retry',
+        (tester) async {
+      // Not every blank screen is this bug — if the plans table really is empty
+      // the Retry affordance is the right answer, so it must survive.
+      await arrive(tester, plans: const []);
+
+      await tester.pumpWidget(const MaterialApp(home: PaywallScreen()));
+      await tester.pump();
+
+      expect(find.text("Couldn't load plans."), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
+    });
+  });
+
   testWidgets('the gate clears the moment a purchase lands', (tester) async {
     await boot(paymentsEnabled: true, status: 'expired');
     await tester.pumpWidget(app());
@@ -153,4 +246,8 @@ void main() {
     expect(find.byType(PaywallScreen), findsNothing);
     expect(find.byType(MainShell), findsOneWidget);
   });
+}
+
+class _Offline implements Exception {
+  const _Offline();
 }

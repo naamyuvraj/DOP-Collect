@@ -1,4 +1,5 @@
 import 'answer.dart';
+import 'speech_text.dart';
 
 /// A matched local intent: the SQL to run, how to render it, and a label.
 class IntentMatch {
@@ -209,7 +210,10 @@ class IntentEngine {
   /// Account-number and name lookups run BEFORE the keyword intents so a
   /// customer called e.g. "Naya" can't be swallowed by the "new accounts" rule.
   static IntentMatch? match(String question) {
-    final q = question.toLowerCase().trim();
+    // Normalised so dictation matches the same rules typing does: no
+    // punctuation to break a two-word key like "is mahine", and Devanagari
+    // digits read as digits.
+    final q = SpeechText.normalize(question);
     final byNumber = _accountLookup(q);
     if (byNumber != null) return byNumber;
     for (final i in _intents) {
@@ -246,12 +250,18 @@ class IntentEngine {
 
   /// Extracts a customer name from common phrasings — or treats a short, plain
   /// run of words as a name outright ("saroj kumar"). Stays fully offline.
-  static IntentMatch? _nameLookup(String q) {
+  ///
+  /// Hindi phrasings are matched too, and the name is transliterated before it
+  /// reaches the SQL: the book stores Latin names, so a dictated "रमेश का
+  /// खाता" would otherwise be stripped to nothing and look like a customer who
+  /// does not exist.
+  static IntentMatch? _nameLookup(String rawQ) {
+    final q = SpeechText.toLatin(rawQ);
     String? name;
     final patterns = <RegExp>[
-      RegExp(r'^(.*?)\s+(?:ka|ke|ki)\s+(?:account|khata|detail|details|info)'),
-      RegExp(r'(?:account|khata|details?|info)\s+(?:of|for)\s+(.+)$'),
-      RegExp(r'^(?:show|find|search|dikhao|dhundo|batao)\s+(.+)$'),
+      RegExp(r'^(.*?)\s+(?:ka|ke|ki)\s+(?:account|khata|khate|detail|details|info)'),
+      RegExp(r'(?:account|khata|khate|details?|info)\s+(?:of|for)\s+(.+)$'),
+      RegExp(r'^(?:show|find|search|dikhao|dhundo|batao|dekho)\s+(.+)$'),
     ];
     for (final re in patterns) {
       final m = re.firstMatch(q);

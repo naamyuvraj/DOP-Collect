@@ -92,9 +92,10 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     const action = String(body.action || "");
-    // Identity from the session token only — never from body.agentId.
+    // Identity from the session token only — never from body.agentId. Null
+    // here means "we don't know who this is", not "reject": see the `status`
+    // branch below, which still has a public half.
     const agentId = await sessionAgent(String(body.token || ""));
-    if (!agentId) return json({ ok: false, error: "unauthorized" }, 401);
 
     // --- Abuse guard: optional Play Integrity + rate limits (per device, per
     // IP, per agent) — same posture as the groq/ingest proxies. Order/verify are
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
     if (intCfg?.value === true && !req.headers.get("x-integrity-token"))
       return json({ ok: false, error: "integrity_required" }, 403);
 
-    const device = (req.headers.get("x-device-id") || agentId).slice(0, 64);
+    const device = (req.headers.get("x-device-id") || agentId || "anon").slice(0, 64);
     const ip = (req.headers.get("x-forwarded-for") || "noip").split(",")[0].trim();
     const bump = async (k: string, s: number): Promise<number> =>
       ((await sb.rpc("bump_rate", { p_device: k, p_window_secs: s })).data as number) ?? 0;
@@ -123,6 +124,26 @@ Deno.serve(async (req) => {
 
     const loadPlans = async () =>
       (await sb.from("plans").select("*").eq("active", true).order("sort")).data || [];
+
+    // --- The public half -----------------------------------------------------
+    // The plan list is a PRICE LIST, not agent data: the paywall has to render
+    // it before anyone is signed in, and it reveals nothing about anybody.
+    // Locking the whole function behind a session made the screen come up empty
+    // with a dead Retry button on any device without one.
+    //
+    // Entitlement is still private, so an unauthenticated caller gets no
+    // status, no expiry, and no way to ask about someone else — `agentId` is
+    // never read from the body, so there is nothing to leak.
+    if (!agentId) {
+      if (action === "status") {
+        return json({
+          ok: true, status: "unknown", planCode: "", periodEnd: null,
+          daysLeft: 0, plans: await loadPlans(),
+        });
+      }
+      // Buying, and confirming a purchase, are always tied to an agent.
+      return json({ ok: false, error: "unauthorized" }, 401);
+    }
 
     // Resolve (and lazily trial-grant) the subscription.
     const resolve = async () => {

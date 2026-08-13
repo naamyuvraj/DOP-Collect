@@ -4,6 +4,7 @@ import '../data/collection_repository.dart';
 import '../models/collection.dart';
 import '../models/rd_account.dart';
 import '../util/format.dart';
+import 'speech_text.dart';
 
 /// Recording a collection by voice — the one thing the assistant could not do,
 /// and the only thing he actually needs it for mid-round.
@@ -95,36 +96,64 @@ class CollectPhrase {
   /// Words that mean money changed hands. Past tense on purpose: "Ramesh se
   /// paanch sau lena hai" is a plan, not a receipt, and must not record
   /// anything.
+  ///
+  /// Both scripts, because the mic has a language toggle and a Hindi dictation
+  /// comes back in Devanagari — "रमेश से ५०० ले लिया" was previously not an
+  /// instruction at all, which made the whole feature invisible to exactly the
+  /// user it was built for.
   static final _tookVerb = RegExp(
-    r'(?<![a-z])(le\s?liya|liya|le\s?li|mila|mil\s?gaya|diya|de\s?diya|'
-    r'diye|jama\s?kiya|collected|received|paid|gave|took)(?![a-z])',
+    r'(?<![a-z])(le\s?liya|liya|le\s?li|liye|mila|mil\s?gaya|mile|diya|'
+    r'de\s?diya|diye|dia|jama\s?kiya|jama\s?kar\s?diya|bhar\s?diya|'
+    r'collected|collect\s?kiya|received|paid|gave|took|de\s?gaya|'
+    r'pakda\s?diya)(?![a-z])'
+    r'|(ले\s?लिया|लिया|ले\s?ली|मिला|मिल\s?गया|दिया|दे\s?दिया|दिये|दिए|'
+    r'जमा\s?किया|भर\s?दिया|वसूल\s?किया)',
     caseSensitive: false,
   );
 
   static final _undoVerb = RegExp(
-    r'(?<![a-z])(undo|hata\s?do|hatao|galat|mistake|cancel|wapas|remove)(?![a-z])',
+    r'(?<![a-z])(undo|hata\s?do|hatao|hata\s?dijiye|galat|galti|mistake|'
+    r'cancel|wapas|vapas|remove|delete|nikal\s?do)(?![a-z])'
+    r'|(हटा\s?दो|हटाओ|ग़लत|गलत|गलती|वापस|रद्द|मिटा\s?दो)',
     caseSensitive: false,
   );
 
-  /// Rupees. Bare digits only — spelled-out numbers ("paanch sau") are left to
-  /// the cloud extractor rather than guessed at, because a wrong amount is
-  /// worse than no amount.
-  static final _amount = RegExp(r'(?:₹|rs\.?|rupees?|rupaye)?\s*(\d{2,7})');
-
   /// Connectors and noise to strip once the verb and amount are out, leaving
   /// the customer's name behind.
-  static const _filler = [
+  ///
+  /// `do` is here as the Hindi filler in "kar do" — and it is also the Hindi
+  /// word for two, which is why the amount is read out of the sentence BEFORE
+  /// any of this is removed.
+  static const _filler = {
     'se', 'ne', 'ko', 'ka', 'ki', 'ke', 'from', 'of', 'for', 'aaj', 'today',
-    'abhi', 'now', 'rupaye', 'rupees', 'rupee', 'rs', 'record', 'karo', 'kar',
-    'do', 'entry', 'add', 'collection', 'collect', 'please', 'ji', 'hai', 'ha',
-    'haan', 'yes', 'wala', 'wale', 'sahab', 'saheb', 'the', 'a', 'an',
-  ];
+    'abhi', 'now', 'record', 'karo', 'kar', 'diya', 'do', 'dijiye',
+    'entry', 'add', 'collection', 'collect', 'please', 'ji', 'hai', 'ha',
+    'haan', 'yes', 'wala', 'wale', 'sahab', 'saheb', 'the', 'a', 'an', 'aur',
+    'and', 'toh', 'to', 'bhi', 'me', 'mein', 'par', 'is', 'us', 'ye', 'wo',
+    'yeh', 'voh', 'account', 'khate', 'khata',
+    'से', 'ने', 'को', 'का', 'की', 'के', 'आज', 'अभी', 'जी', 'और', 'में',
+    'रुपये', 'रुपए', 'खाते', 'खाता',
+  };
+
+  /// Number and currency words, stripped from the name for the same reason the
+  /// digits are: "paanch sau" is the amount, not part of who paid.
+  static final _numberish = RegExp(
+      r'(?<![a-z])(ek|do|teen|tin|char|chaar|panch|paanch|chah|chhe|saat|sat|'
+      r'aath|nau|das|dus|bees|bis|tees|tis|chalis|chaalis|pachas|pachaas|'
+      r'sau|so|hazar|hazaar|hajar|hajaar|lakh|lac|hundred|thousand|'
+      r'one|two|three|four|five|six|seven|eight|nine|ten|twenty|fifty|'
+      r'dedh|derh|dhai|sava|sawa|sadhe|saadhe|sade|paune|pone|'
+      r'rupaye|rupay|rupee|rupees|rs|rupiya)(?![a-z])'
+      r'|(एक|दो|तीन|चार|पांच|पाँच|छह|सात|आठ|नौ|दस|बीस|तीस|चालीस|पचास|'
+      r'सौ|हज़ार|हजार|लाख|डेढ़|ढाई|सवा|साढ़े|पौने)');
 
   /// Returns a request when the sentence reads like an instruction about money
   /// changing hands, else null. A null here is the common case — most input is
   /// still a question.
   static CollectRequest? parse(String question) {
-    final q = question.toLowerCase().trim();
+    // Normalised first: dictation arrives unpunctuated and in either script,
+    // and every pattern below is written against the tidy form.
+    final q = SpeechText.normalize(question);
     if (q.isEmpty) return null;
 
     final undo = _undoVerb.hasMatch(q);
@@ -140,29 +169,39 @@ class CollectPhrase {
     // wrongly missed turns a question into a proposed write, which is the
     // failure worth avoiding.
     if (RegExp(r'(?<![a-z])(kitn[aei]|how much|how many|kya|what|kis[a-z]*|'
-            r'kaun[a-z]*|which|kab|when|batao|dikhao|show|list)(?![a-z])')
+            r'kaun[a-z]*|which|kab|when|batao|dikhao|show|list)(?![a-z])'
+            r'|(कितन[ाेी]|क्या|कौन|कब|किस|बताओ|दिखाओ)')
         .hasMatch(q)) {
       return null;
     }
 
-    final m = _amount.firstMatch(q);
-    final amount = m == null ? null : int.tryParse(m.group(1)!);
+    // Read the amount before anything is stripped — "do sau" has to be seen as
+    // two hundred while both words are still in place.
+    final amount = SpeechText.amountIn(q);
+
+    // He clearly said a quantity we could not turn into a figure. Refusing is
+    // the only honest move: falling back to his daily rule would put a number
+    // on the card that he never said, about money he is holding.
+    if (amount == null && !undo && SpeechText.hasUnparsedNumber(q)) return null;
 
     // Everything that is not the verb, the amount or filler is the name.
-    var rest = q
+    final rest = q
         .replaceAll(_tookVerb, ' ')
         .replaceAll(_undoVerb, ' ')
-        .replaceAll(RegExp(r'[₹0-9,.\-]'), ' ');
+        .replaceAll(_numberish, ' ')
+        .replaceAll(RegExp(r'[0-9]'), ' ');
     final words = rest
         .split(RegExp(r'\s+'))
-        .map((w) => w.replaceAll(RegExp(r'[^a-zऀ-ॿ]'), ''))
         .where((w) => w.isNotEmpty && !_filler.contains(w))
         .toList();
     final name = words.join(' ').trim();
+    // Two characters is not a name — it is what is left when the sentence was
+    // never about a customer.
     if (name.length < 3) return null;
 
     return CollectRequest(
-        name: name, amount: amount == null || amount <= 0 ? null : amount,
+        name: name,
+        amount: amount == null || amount <= 0 ? null : amount,
         isUndo: undo);
   }
 }
@@ -224,18 +263,34 @@ class CollectActions {
     ));
   }
 
-  /// Name matching, tightened past a bare LIKE.
+  /// Find who he meant.
   ///
-  /// A substring search on 480 customers turns "Ram" into a dozen hits, so an
-  /// exact full-name match wins outright when there is one — otherwise every
-  /// Ram Kumar in the book would be unrecordable by voice.
+  /// A SQL `LIKE` is no use on dictated speech: it cannot match "रमेश" against
+  /// a book that stores "Ramesh Kumar", and it fails outright on the spelling
+  /// the recogniser happened to choose. So the whole book is scored with
+  /// [SpeechText.nameScore] and only the best tier is returned.
+  ///
+  /// Returning the best tier — rather than everything that scored at all — is
+  /// what keeps this usable: an exact "Ramesh Kumar" is not made ambiguous by
+  /// the three other Rameshes, while a bare "Ramesh" correctly stays ambiguous
+  /// and becomes a question.
   Future<List<RdAccount>> _search(String name) async {
-    final all = await accounts.search(name);
-    if (all.length <= 1) return all;
-    final exact = all
-        .where((a) => a.customerName.toLowerCase().trim() == name.trim())
-        .toList();
-    return exact.length == 1 ? exact : all;
+    final all = await accounts.all();
+    var best = 0;
+    final scored = <RdAccount>[];
+    for (final a in all) {
+      final score = SpeechText.nameScore(name, a.customerName);
+      if (score == 0) continue;
+      if (score > best) {
+        best = score;
+        scored
+          ..clear()
+          ..add(a);
+      } else if (score == best) {
+        scored.add(a);
+      }
+    }
+    return scored;
   }
 
   /// Perform a confirmed action. Returns the sentence to show him, plus the

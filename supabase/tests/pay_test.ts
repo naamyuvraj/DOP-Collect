@@ -49,13 +49,37 @@ async function seeded(): Promise<Db> {
 // S7 — identity comes from the session
 // ---------------------------------------------------------------------------
 
-Deno.test("S7: status without a token is refused", async () => {
+Deno.test("status without a token returns the PRICE LIST and nothing else", async () => {
+  // The paywall has to render before anyone is signed in. Locking this down
+  // completely made the screen come up blank with a dead Retry button.
   begin(await seeded(), { env: ENV });
   const res = await post(handler, { action: "status", agentId: THEIRS });
-  assertEquals(res.status, 401);
-  assertEquals(res.json.error, "unauthorized");
-  assertEquals(res.json.planCode, undefined, "no plan may leak");
-  assertEquals(res.json.periodEnd, undefined, "no expiry may leak");
+
+  assertEquals(res.status, 200);
+  assertEquals(res.json.ok, true);
+  assertEquals((res.json.plans as unknown[]).length, 2, "prices are public");
+
+  // ...but nothing about any agent, least of all the one that was claimed.
+  assertEquals(res.json.status, "unknown");
+  assertEquals(res.json.planCode, "");
+  assertEquals(res.json.periodEnd, null);
+  assertEquals(res.json.daysLeft, 0);
+});
+
+Deno.test("S7: buying without a token is still refused", async () => {
+  begin(await seeded(), { env: ENV });
+  for (const action of ["order", "verify"]) {
+    const res = await post(handler, { action, planCode: "m1", agentId: THEIRS });
+    assertEquals(res.status, 401, `${action} must require a session`);
+    assertEquals(res.json.error, "unauthorized");
+  }
+});
+
+Deno.test("S7: an unauthenticated caller cannot create an order for anyone", async () => {
+  const db = await seeded();
+  begin(db, { env: ENV });
+  await post(handler, { action: "order", planCode: "y1", agentId: THEIRS });
+  assertEquals(db.tables.orders.length, 0);
 });
 
 Deno.test("S7: a valid token cannot read ANOTHER agent's subscription", async () => {
@@ -75,20 +99,31 @@ Deno.test("S7: a valid token cannot read ANOTHER agent's subscription", async ()
   );
 });
 
-Deno.test("S7: a revoked token is refused", async () => {
+Deno.test("S7: a revoked token buys nothing and reveals no entitlement", async () => {
   const db = await seeded();
   db.tables.device_sessions[0].revoked_at = new Date().toISOString();
   begin(db, { env: ENV });
-  const res = await post(handler, { action: "status", token: MY_TOKEN });
-  assertEquals(res.status, 401);
+
+  const status = await post(handler, { action: "status", token: MY_TOKEN });
+  assertEquals(status.json.status, "unknown", "treated as signed out");
+  assertEquals(status.json.planCode, "");
+
+  const order = await post(handler,
+    { action: "order", planCode: "m1", token: MY_TOKEN });
+  assertEquals(order.status, 401);
 });
 
-Deno.test("S7: a disabled account is refused", async () => {
+Deno.test("S7: a disabled account buys nothing and reveals no entitlement", async () => {
   const db = await seeded();
   db.tables.accounts[0].disabled = true;
   begin(db, { env: ENV });
-  const res = await post(handler, { action: "status", token: MY_TOKEN });
-  assertEquals(res.status, 401);
+
+  const status = await post(handler, { action: "status", token: MY_TOKEN });
+  assertEquals(status.json.status, "unknown");
+
+  const order = await post(handler,
+    { action: "order", planCode: "m1", token: MY_TOKEN });
+  assertEquals(order.status, 401);
 });
 
 Deno.test("S7: my own status still works, and lists the plans", async () => {

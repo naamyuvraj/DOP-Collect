@@ -82,18 +82,20 @@ class Subscription {
 
   static Future<String> _agentId() async => (await Credentials.load()).agentId;
 
-  /// Every `pay` call carries this device's verified session token; the server
-  /// derives the agent id from it and ignores anything the client claims. No
-  /// session (OTP not yet required / not verified) means no call — and the
-  /// getters above fail open, so nobody is ever locked out by a missing token.
   /// Test seam — see [OtpService.client].
   @visibleForTesting
   static http.Client client = http.Client();
 
+  /// Every `pay` call carries this device's verified session token when there
+  /// is one; the server derives the agent id from it and ignores anything the
+  /// client claims.
+  ///
+  /// Without a session the call still goes out: `status` answers with the
+  /// public plan list (and no entitlement), which is what the paywall needs to
+  /// render before anyone has signed in. `order` and `verify` 401, correctly.
   static Future<Map<String, dynamic>?> _call(Map<String, Object?> body) async {
     if (!SupabaseConfig.configured) return null;
     final session = await SessionStore.load();
-    if (session == null) return null;
     try {
       final res = await client
           .post(
@@ -104,7 +106,10 @@ class Subscription {
               'Content-Type': 'application/json',
               'x-device-id': await Analytics.deviceId(),
             },
-            body: jsonEncode({...body, 'token': session.token}),
+            body: jsonEncode({
+              ...body,
+              if (session != null) 'token': session.token,
+            }),
           )
           .timeout(const Duration(seconds: 12));
       return jsonDecode(res.body) as Map<String, dynamic>;
@@ -151,7 +156,21 @@ class Subscription {
     final plans = ((j['plans'] as List?) ?? const [])
         .map((e) => Plan.fromJson((e as Map).cast<String, dynamic>()))
         .toList();
-    _current = SubStatus(j['status'] as String, j['planCode'] as String,
+    final status = (j['status'] as String?) ?? 'unknown';
+
+    // `unknown` means "nobody is signed in on this device", so the server told
+    // us the prices and nothing about any agent. Take the plans — the paywall
+    // needs them to render — but leave the entitlement exactly as it was
+    // instead of overwriting a known plan with a non-answer, and don't cache a
+    // non-answer over a real one.
+    if (status == 'unknown') {
+      _current = SubStatus(_current?.status ?? 'unknown',
+          _current?.planCode ?? '', _current?.daysLeft ?? 0, plans);
+      onChanged?.call();
+      return _current;
+    }
+
+    _current = SubStatus(status, (j['planCode'] as String?) ?? '',
         (j['daysLeft'] as num?)?.toInt() ?? 0, plans);
     onChanged?.call();
     final p = await SharedPreferences.getInstance();

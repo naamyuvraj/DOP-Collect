@@ -149,16 +149,32 @@ class _AssistantScreenState extends State<AssistantScreen> {
       localeId: _micLang, // dictate in the chosen language, not always Hindi
       onResult: (text) => setState(() => _controller.text = text),
       onFinal: (text) {
-        setState(() => _listening = false);
         if (text.trim().isNotEmpty) _ask(text);
       },
+      // Always fires, however the session ended — so the button cannot stay red
+      // after a silence, a denied permission or a recogniser that gave up.
+      onDone: () {
+        if (mounted) setState(() => _listening = false);
+      },
+      onError: _sayProblem,
     );
     if (!mounted) return;
     setState(() => _listening = ok);
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Mic uplabdh nahi hai (permission check karein)')));
-    }
+  }
+
+  /// Tell him what went wrong, out loud as well as on screen — he is holding
+  /// cash and looking at a customer, not at the phone.
+  void _sayProblem(String reason) {
+    if (!mounted) return;
+    setState(() => _listening = false);
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(reason),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      ));
+    if (_speak && !kIsWeb) _voice.speak(reason);
   }
 
   Future<void> _ask(String question) async {
