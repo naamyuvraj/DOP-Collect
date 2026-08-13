@@ -5,31 +5,32 @@ import { admin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
+const loadPlansData = async () => {
+  const sb = admin();
+  const [plans, cfg, subs, mrr] = await Promise.all([
+    sb.from("plans").select("*").order("sort"),
+    sb.from("app_config").select("key,value").in("key", ["payments_enabled", "trial_days"]),
+    sb.from("v_subscriptions").select("*").limit(500),
+    sb.from("v_mrr").select("*"),
+  ]);
+  const config: Record<string, unknown> = {};
+  for (const row of cfg.data || []) config[(row as any).key] = (row as any).value;
+  return {
+    plans: plans.data || [],
+    config: { payments_enabled: config.payments_enabled ?? false, trial_days: config.trial_days ?? 14 },
+    subscribers: subs.data || [],
+    mrr: mrr.data || [],
+    error: plans.error?.message,
+  };
+};
+
 // Cache the (read-only) plans payload for 30s so repeat visits are instant
 // instead of a fresh ~0.5s Supabase round-trip. Every write busts the tag
-// below, so edits still show immediately. Data is not per-user (single admin).
-const readPlans = unstable_cache(
-  async () => {
-    const sb = admin();
-    const [plans, cfg, subs, mrr] = await Promise.all([
-      sb.from("plans").select("*").order("sort"),
-      sb.from("app_config").select("key,value").in("key", ["payments_enabled", "trial_days"]),
-      sb.from("v_subscriptions").select("*").limit(500),
-      sb.from("v_mrr").select("*"),
-    ]);
-    const config: Record<string, unknown> = {};
-    for (const row of cfg.data || []) config[(row as any).key] = (row as any).value;
-    return {
-      plans: plans.data || [],
-      config: { payments_enabled: config.payments_enabled ?? false, trial_days: config.trial_days ?? 14 },
-      subscribers: subs.data || [],
-      mrr: mrr.data || [],
-      error: plans.error?.message,
-    };
-  },
-  ["plans-data"],
-  { revalidate: 30, tags: ["plans"] }
-);
+// below. Data is not per-user (single admin).
+const readPlans = unstable_cache(loadPlansData, ["plans-data"], {
+  revalidate: 30,
+  tags: ["plans"],
+});
 
 // Plans & subscription rollout control.
 // ---------------------------------------------------------------------------
@@ -44,11 +45,19 @@ const readPlans = unstable_cache(
 const guard = () => (isAuthed() ? null : NextResponse.json({ error: "unauthorized" }, { status: 401 }));
 
 // GET -> { plans, config:{payments_enabled,trial_days}, subscribers[], mrr[] }
-export async function GET() {
+//
+// `?fresh=1` skips the 30s cache and reads Supabase directly. Used for the
+// refetch straight after a write: `revalidateTag` marks the entry stale, but the
+// write and the read can land on different serverless instances, so a refetch
+// milliseconds later could still be served the pre-write payload — which showed
+// the operator KPI cards that hadn't moved and made a change that DID land look
+// like it hadn't. A read-your-own-write must not depend on that timing.
+export async function GET(req: NextRequest) {
   const bad = guard();
   if (bad) return bad;
   try {
-    return NextResponse.json(await readPlans());
+    const fresh = req.nextUrl.searchParams.get("fresh") === "1";
+    return NextResponse.json(fresh ? await loadPlansData() : await readPlans());
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { revalidateTag } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { isAuthed } from "@/lib/auth";
 import { admin } from "@/lib/supabase";
 
@@ -92,7 +92,13 @@ export async function PATCH(req: NextRequest) {
   });
   if (trail.error) console.error("subscription adjusted but not logged", agentId, note, trail.error);
 
+  // Plans reads through the tagged cache; /payments is page-level ISR on a 60s
+  // timer, which no tag reaches — so its "Active subs" and revenue cards would
+  // sit on pre-adjustment numbers for up to a minute. Bust both: the Plans page
+  // additionally refetches with ?fresh=1, since tag invalidation and the refetch
+  // can land on different instances.
   revalidateTag("plans");
+  revalidatePath("/payments");
   return NextResponse.json({
     ok: true,
     agentId,

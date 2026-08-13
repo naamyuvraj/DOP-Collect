@@ -51,8 +51,13 @@ export default function Plans() {
   // case, where there is no row to click.
   const [repair, setRepair] = useState({ agentId: "", days: 30 });
 
-  async function load() {
-    const d = (await fetch("/api/plans").then((r) => r.json())) as Data;
+  // `fresh` bypasses the API's 30s cache — pass it after a write, so the KPI
+  // cards reflect the change that just landed instead of the payload from
+  // before it. `no-store` keeps the browser from answering from its own cache.
+  async function load(fresh = false) {
+    const d = (await fetch(fresh ? "/api/plans?fresh=1" : "/api/plans", {
+      cache: "no-store",
+    }).then((r) => r.json())) as Data;
     setCached("plans", d);
     setData(d);
     setRows(d.plans || []);
@@ -133,7 +138,7 @@ export default function Plans() {
     }).then((r) => r.json());
     if (res.error) return say(res.error);
     setAdding(null);
-    await load();
+    await load(true);
     say("Plan added.");
   }
 
@@ -151,7 +156,7 @@ export default function Plans() {
     }).then((r) => r.json());
     setBusy("");
     if (res.error) return say(res.error);
-    await load();
+    await load(true);
     say(`${agentId.trim()}: ${label}.`);
   }
 
@@ -162,7 +167,7 @@ export default function Plans() {
       body: JSON.stringify({ code }),
     }).then((r) => r.json());
     if (res.error) return say(res.error);
-    await load();
+    await load(true);
     say("Plan deleted.");
   }
 
