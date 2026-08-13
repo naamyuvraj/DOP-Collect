@@ -1,5 +1,6 @@
 import 'package:dop_collect/data/account_repository.dart';
 import 'package:dop_collect/data/lot_repository.dart';
+import 'package:dop_collect/models/lot_packing.dart';
 import 'package:dop_collect/models/rd_account.dart';
 import 'package:dop_collect/screens/lists/list_builder_screen.dart';
 import 'package:flutter/material.dart';
@@ -58,7 +59,7 @@ void main() {
     fab.onPressed!();
     await tester.pumpAndSettle();
 
-    // Confirm the "Create this lot?" dialog (marks accounts deposited).
+    // Confirm the "Create this lot?" dialog.
     await tester.tap(find.widgetWithText(FilledButton, 'Create'));
     await tester.pumpAndSettle();
 
@@ -68,8 +69,14 @@ void main() {
     expect(saved.first.totalAmount, 7000);
     expect(saved.first.totalInstallments, 2);
 
-    // Selected accounts are marked deposited.
+    // The saved list itself is the "collected this cycle" record — no sticky
+    // per-account flag is written (one that never reset used to make auto-build
+    // skip these customers in every later month).
     final a2 = await accounts.byAccountNumber('020000000002');
-    expect(a2!.status, CollectionStatus.deposited);
+    expect(a2!.status, CollectionStatus.pending);
+    expect(
+      LotPacking.listedThisCycle(saved, DateTime.now()),
+      containsAll(<String>['020000000001', '020000000002']),
+    );
   });
 }

@@ -4,6 +4,7 @@ import '../calc/po_calc.dart';
 import '../data/account_repository.dart';
 import '../data/app_settings.dart';
 import '../models/rd_account.dart';
+import '../models/summaries.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
 import 'portal/sync_screen.dart';
@@ -336,7 +337,11 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   }
 
   Widget _collectionCard(RdAccount a) {
-    final deposited = a.status == CollectionStatus.deposited;
+    // Collected for this cycle = the portal has moved this account's next due
+    // date past the current month. Derived, not a stored flag: the old
+    // `status == deposited` mark was never reset, so once an account was put on
+    // any list this card claimed "collected" for the rest of its life.
+    final deposited = AccountFilter.monthsBehind(a, DateTime.now()) < 0;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: AppTheme.card(),

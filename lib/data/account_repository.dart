@@ -16,6 +16,14 @@ abstract class AccountRepository {
   /// Set (or clear, with null/empty) one account's own ASLAAS number.
   Future<void> setAslaas(String accountNumber, String? aslaas);
 
+  /// Persist the agent's walking order (`accountNumber -> position`). Written
+  /// as one transaction when he finishes rearranging his round.
+  Future<void> setRouteOrder(Map<String, int> positions);
+
+  /// Set (or clear, with null) how much this customer hands over per visit.
+  /// Null means a monthly payer who gives the whole installment at once.
+  Future<void> setDailyAmount(String accountNumber, int? amount);
+
   /// Bulk-store ASLAAS numbers harvested off the portal
   /// (`accountNumber -> aslaas`). Returns how many rows were written.
   Future<int> applyAslaas(Map<String, String> byAccount);
@@ -94,6 +102,29 @@ class SqfliteAccountRepository implements AccountRepository {
   }
 
   @override
+  Future<void> setRouteOrder(Map<String, int> positions) async {
+    if (positions.isEmpty) return;
+    final db = await _db.database;
+    await db.transaction((txn) async {
+      for (final e in positions.entries) {
+        await txn.update('accounts', {'route_order': e.value},
+            where: 'account_number = ?', whereArgs: [e.key]);
+      }
+    });
+  }
+
+  @override
+  Future<void> setDailyAmount(String accountNumber, int? amount) async {
+    final db = await _db.database;
+    await db.update(
+      'accounts',
+      {'daily_amount': amount == null || amount <= 0 ? null : amount},
+      where: 'account_number = ?',
+      whereArgs: [accountNumber],
+    );
+  }
+
+  @override
   Future<int> applyAslaas(Map<String, String> byAccount) async {
     if (byAccount.isEmpty) return 0;
     final db = await _db.database;
@@ -132,6 +163,11 @@ class SqfliteAccountRepository implements AccountRepository {
           map['status'] = old['status'] ?? map['status'];
           // The list parse carries no ASLAAS, so a sync must never blank it.
           map['aslaas'] = old['aslaas'] ?? map['aslaas'];
+          // Nor his route order or a customer's daily amount — those are the
+          // agent's own field settings and exist nowhere on the portal, so a
+          // sync that dropped them would silently undo his whole round order.
+          map['route_order'] = old['route_order'] ?? map['route_order'];
+          map['daily_amount'] = old['daily_amount'] ?? map['daily_amount'];
           map['opening_date'] = old['opening_date'] ?? map['opening_date'];
           map['total_deposit'] = old['total_deposit'] ?? map['total_deposit'];
           map['pending_installments'] =
@@ -210,28 +246,63 @@ class MemoryAccountRepository implements AccountRepository {
     if (i != -1) _items[i] = _items[i].copyWith(status: status);
   }
 
+  /// copyWith can't null a field out, so clearing one means rebuilding the row.
+  /// Every nullable field is listed here — miss one and clearing an ASLAAS
+  /// would silently wipe the customer's daily amount too.
+  RdAccount _rebuild(
+    RdAccount a, {
+    String? aslaas,
+    int? routeOrder,
+    int? dailyAmount,
+  }) =>
+      RdAccount(
+        accountNumber: a.accountNumber,
+        customerName: a.customerName,
+        denominationAmount: a.denominationAmount,
+        nextDueDate: a.nextDueDate,
+        monthsPaid: a.monthsPaid,
+        serial: a.serial,
+        status: a.status,
+        aslaas: aslaas,
+        routeOrder: routeOrder,
+        dailyAmount: dailyAmount,
+        openingDate: a.openingDate,
+        totalDeposit: a.totalDeposit,
+        pendingInstallments: a.pendingInstallments,
+        defaultInstallments: a.defaultInstallments,
+        lastDepositDate: a.lastDepositDate,
+      );
+
   @override
   Future<void> setAslaas(String accountNumber, String? aslaas) async {
     final i = _items.indexWhere((a) => a.accountNumber == accountNumber);
     if (i == -1) return;
     final v = aslaas?.trim() ?? '';
-    // copyWith can't null a field out, so rebuild when clearing.
-    _items[i] = v.isEmpty
-        ? RdAccount(
-            accountNumber: _items[i].accountNumber,
-            customerName: _items[i].customerName,
-            denominationAmount: _items[i].denominationAmount,
-            nextDueDate: _items[i].nextDueDate,
-            monthsPaid: _items[i].monthsPaid,
-            serial: _items[i].serial,
-            status: _items[i].status,
-            openingDate: _items[i].openingDate,
-            totalDeposit: _items[i].totalDeposit,
-            pendingInstallments: _items[i].pendingInstallments,
-            defaultInstallments: _items[i].defaultInstallments,
-            lastDepositDate: _items[i].lastDepositDate,
-          )
-        : _items[i].copyWith(aslaas: v);
+    final a = _items[i];
+    _items[i] = _rebuild(a,
+        aslaas: v.isEmpty ? null : v,
+        routeOrder: a.routeOrder,
+        dailyAmount: a.dailyAmount);
+  }
+
+  @override
+  Future<void> setRouteOrder(Map<String, int> positions) async {
+    for (final e in positions.entries) {
+      final i = _items.indexWhere((a) => a.accountNumber == e.key);
+      if (i == -1) continue;
+      _items[i] = _items[i].copyWith(routeOrder: e.value);
+    }
+  }
+
+  @override
+  Future<void> setDailyAmount(String accountNumber, int? amount) async {
+    final i = _items.indexWhere((a) => a.accountNumber == accountNumber);
+    if (i == -1) return;
+    final a = _items[i];
+    _items[i] = _rebuild(a,
+        aslaas: a.aslaas,
+        routeOrder: a.routeOrder,
+        dailyAmount: amount == null || amount <= 0 ? null : amount);
   }
 
   @override
@@ -260,6 +331,8 @@ class MemoryAccountRepository implements AccountRepository {
           status: old.status,
           serial: a.serial == 0 ? old.serial : a.serial,
           aslaas: old.aslaas,
+          routeOrder: old.routeOrder,
+          dailyAmount: old.dailyAmount,
           openingDate: old.openingDate,
           totalDeposit: old.totalDeposit,
           pendingInstallments: old.pendingInstallments,

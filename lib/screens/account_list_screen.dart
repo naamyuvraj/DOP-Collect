@@ -15,9 +15,16 @@ import 'portfolio_screen.dart';
 /// Reset); with a [filter] it is a titled bucket list opened from a dashboard
 /// "View" (e.g. Defaulters).
 class AccountListScreen extends StatefulWidget {
-  const AccountListScreen({super.key, required this.repo, this.filter});
+  const AccountListScreen(
+      {super.key, required this.repo, this.filter, this.revision = 0});
   final AccountRepository repo;
   final AccountFilter? filter;
+
+  /// Bumped by the shell whenever the data may have changed (a Sync, or simply
+  /// re-entering the tab). As a tab this screen lives in an IndexedStack and is
+  /// built once, so without this it would keep showing the very first query —
+  /// a Sync run from Home left it stuck on "No accounts yet".
+  final int revision;
 
   @override
   State<AccountListScreen> createState() => _AccountListScreenState();
@@ -38,6 +45,12 @@ class _AccountListScreenState extends State<AccountListScreen> {
   void initState() {
     super.initState();
     _reload();
+  }
+
+  @override
+  void didUpdateWidget(covariant AccountListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.revision != widget.revision) setState(_reload);
   }
 
   @override

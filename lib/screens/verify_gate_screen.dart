@@ -82,11 +82,11 @@ class _VerifyGateScreenState extends State<VerifyGateScreen> {
                   width: 56,
                   height: 56,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF25D366).withValues(alpha: 0.12),
+                    color: AppTheme.accentSoft,
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Icon(Icons.verified_user_outlined,
-                      color: Color(0xFF25D366), size: 28),
+                      color: AppTheme.black, size: 28),
                 ),
                 const SizedBox(height: 20),
                 Text('Verify your phone',
@@ -94,7 +94,7 @@ class _VerifyGateScreenState extends State<VerifyGateScreen> {
                 const SizedBox(height: 8),
                 Text(
                   widget.reason ??
-                      'To keep your account secure, confirm your WhatsApp number '
+                      'To keep your account secure, confirm your phone number '
                           'once. It links to your Agent ID and works on up to 2 '
                           'phones.',
                   style:
@@ -146,7 +146,7 @@ class _VerifyGateScreenState extends State<VerifyGateScreen> {
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               style: AppTheme.body(15, weight: FontWeight.w600),
               decoration: InputDecoration(
-                labelText: 'WhatsApp mobile number',
+                labelText: 'Mobile number',
                 labelStyle: AppTheme.body(13, color: AppTheme.inkMuted),
                 counterText: '',
                 border: InputBorder.none,

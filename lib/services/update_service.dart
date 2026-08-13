@@ -24,13 +24,15 @@ class UpdateService {
   // check, but we only ever want one download in flight at a time.
   static Future<bool>? _inflight;
 
-  /// True once a patch has been downloaded and will apply on the next cold
-  /// start. Cheap — does not hit the network.
+  /// True only when a NEW patch has been downloaded and is waiting for a restart
+  /// to take effect. We use `restartRequired` (not `readNextPatch() != null`),
+  /// because Shorebird's "next patch" is ALSO the currently-applied patch — so
+  /// the old check stayed true forever and the banner never cleared.
   Future<bool> isPatchStaged() async {
     final u = _updater;
     if (u == null) return false;
     try {
-      return (await u.readNextPatch()) != null;
+      return (await u.checkForUpdate()) == UpdateStatus.restartRequired;
     } catch (_) {
       return false;
     }
@@ -53,11 +55,14 @@ class UpdateService {
     final u = _updater;
     if (u == null) return false;
     try {
-      final status = await u.checkForUpdate();
+      var status = await u.checkForUpdate();
       if (status == UpdateStatus.outdated) {
         await u.update(); // downloads + stages for the next launch
+        status = await u.checkForUpdate();
       }
-      return (await u.readNextPatch()) != null;
+      // Only "restartRequired" means a NEW patch is downloaded and waiting.
+      // upToDate (running the latest) must NOT show the banner.
+      return status == UpdateStatus.restartRequired;
     } catch (_) {
       return false;
     }

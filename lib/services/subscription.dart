@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/credentials.dart';
+import '../data/session.dart';
 import 'analytics.dart';
 import 'remote_config.dart';
 import 'supabase_config.dart';
@@ -66,6 +68,11 @@ class Subscription {
   /// Last failure reason (order / checkout / verify), for surfacing to the user.
   static String? lastError;
 
+  /// Fired whenever [current] changes. The app root listens so the hard gate
+  /// can appear (or clear) the moment the background refresh lands, rather than
+  /// waiting for the next cold start.
+  static void Function()? onChanged;
+
   static SubStatus? get current => _current;
 
   /// True only when payments are switched on AND we KNOW the plan expired.
@@ -75,10 +82,20 @@ class Subscription {
 
   static Future<String> _agentId() async => (await Credentials.load()).agentId;
 
+  /// Every `pay` call carries this device's verified session token; the server
+  /// derives the agent id from it and ignores anything the client claims. No
+  /// session (OTP not yet required / not verified) means no call — and the
+  /// getters above fail open, so nobody is ever locked out by a missing token.
+  /// Test seam — see [OtpService.client].
+  @visibleForTesting
+  static http.Client client = http.Client();
+
   static Future<Map<String, dynamic>?> _call(Map<String, Object?> body) async {
     if (!SupabaseConfig.configured) return null;
+    final session = await SessionStore.load();
+    if (session == null) return null;
     try {
-      final res = await http
+      final res = await client
           .post(
             Uri.parse('${SupabaseConfig.url}/functions/v1/pay'),
             headers: {
@@ -87,7 +104,7 @@ class Subscription {
               'Content-Type': 'application/json',
               'x-device-id': await Analytics.deviceId(),
             },
-            body: jsonEncode(body),
+            body: jsonEncode({...body, 'token': session.token}),
           )
           .timeout(const Duration(seconds: 12));
       return jsonDecode(res.body) as Map<String, dynamic>;
@@ -97,30 +114,46 @@ class Subscription {
   }
 
   /// Load the cached status instantly (for the gate at startup).
+  ///
+  /// Authoritative: no cache (or an unreadable one) means "we don't know", NOT
+  /// "keep whatever was in memory". Entitlement is per-agent and this is a
+  /// static, so leaving a stale value here would carry one agent's plan into
+  /// the next agent to sign in on the same phone.
   static Future<void> init() async {
     final p = await SharedPreferences.getInstance();
     final raw = p.getString(_cacheKey);
+    _current = null;
     if (raw != null) {
       try {
         final j = jsonDecode(raw) as Map<String, dynamic>;
         _current = SubStatus(j['status'] as String, j['planCode'] as String,
             (j['daysLeft'] as num).toInt(), const []);
-      } catch (_) {/* ignore */}
+      } catch (_) {/* unreadable cache — stay at "unknown" */}
     }
     unawaited(refresh());
   }
 
+  /// Drop this agent's entitlement, in memory and on disk. Called on logout so
+  /// the next agent on this phone starts from "unknown" and re-fetches their
+  /// own, rather than inheriting the last one's.
+  static Future<void> forget() async {
+    _current = null;
+    onChanged?.call();
+    try {
+      await (await SharedPreferences.getInstance()).remove(_cacheKey);
+    } catch (_) {/* best effort — memory is already cleared */}
+  }
+
   /// Pull fresh entitlement + plans from the server.
   static Future<SubStatus?> refresh() async {
-    final agent = await _agentId();
-    if (agent.isEmpty) return null;
-    final j = await _call({'action': 'status', 'agentId': agent});
+    final j = await _call({'action': 'status'});
     if (j == null || j['ok'] != true) return _current;
     final plans = ((j['plans'] as List?) ?? const [])
         .map((e) => Plan.fromJson((e as Map).cast<String, dynamic>()))
         .toList();
     _current = SubStatus(j['status'] as String, j['planCode'] as String,
         (j['daysLeft'] as num?)?.toInt() ?? 0, plans);
+    onChanged?.call();
     final p = await SharedPreferences.getInstance();
     await p.setString(
         _cacheKey,
@@ -137,12 +170,11 @@ class Subscription {
   /// native checkout isn't wired yet (patch build).
   static Future<bool> purchase(String planCode) async {
     lastError = null;
-    final agent = await _agentId();
-    if (agent.isEmpty) {
+    if ((await _agentId()).isEmpty) {
       lastError = 'No agent id — sign in first.';
       return false;
     }
-    final o = await _call({'action': 'order', 'agentId': agent, 'planCode': planCode});
+    final o = await _call({'action': 'order', 'planCode': planCode});
     if (o == null || o['ok'] != true) {
       lastError = 'Order failed: ${o?['error'] ?? o?['detail'] ?? 'no response from server'}';
       return false;
@@ -154,7 +186,7 @@ class Subscription {
     final res = await open(order); // sets lastError on a sheet error
     if (res == null) return false; // cancelled or sheet error
     final v = await _call({
-      'action': 'verify', 'agentId': agent, 'planCode': planCode,
+      'action': 'verify', 'planCode': planCode,
       'orderId': res.orderId, 'paymentId': res.paymentId, 'signature': res.signature,
     });
     final ok = v != null && v['ok'] == true;

@@ -8,6 +8,7 @@ import '../util/format.dart';
 import 'answer.dart';
 import 'assistant_config.dart';
 import 'calc_prompt.dart';
+import 'collect_action.dart';
 import 'general_prompt.dart';
 import 'groq_client.dart';
 import 'lang.dart';
@@ -15,21 +16,34 @@ import 'intent_engine.dart';
 import 'schema_prompt.dart';
 import 'sql_guard.dart';
 
-/// Orchestrates the 3-tier answer flow:
+/// Orchestrates the answer flow:
+///   0. A spoken INSTRUCTION ("Ramesh se 500 le liya") — proposes an action.
 ///   1. Local intent engine (offline, instant, free) — handles the ~80% common.
 ///   2. Groq text-to-SQL (schema only leaves device) — the long tail.
 ///   3. Graceful "not understood / offline" fallback.
 class AssistantService {
-  AssistantService(this._db, {GroqClient? groq})
-      : _groq = groq ?? GroqClient();
+  AssistantService(this._db, {GroqClient? groq, CollectActions? actions})
+      : _groq = groq ?? GroqClient(),
+        _actions = actions;
   final AppDatabase _db;
   final GroqClient _groq;
+
+  /// Present only when the screen handed us the repositories. Without it the
+  /// assistant is exactly what it was before: read-only.
+  final CollectActions? _actions;
+
+  /// The last few things HE said, oldest first. Only his own words are kept —
+  /// never an answer's rows — so following up costs no new privacy: those
+  /// questions were already sent when he asked them.
+  final List<String> _recent = [];
+  static const _recentTurns = 4;
 
   /// Public entry: resolves the answer, then stamps it with the language the
   /// user asked in so the reply text and voice match (Hindi in -> Hindi out).
   Future<AssistantAnswer> ask(String question) async {
     final lang = langOf(question);
     final answer = await _resolve(question.trim(), lang);
+    _remember(question.trim());
     // Privacy: log only how it was answered — never the question text.
     unawaited(Analytics.track('assistant_query', {
       'source': answer.source,
@@ -40,8 +54,35 @@ class AssistantService {
     return answer.withLang(lang);
   }
 
+  void _remember(String question) {
+    if (question.isEmpty) return;
+    _recent.add(question);
+    while (_recent.length > _recentTurns) {
+      _recent.removeAt(0);
+    }
+  }
+
+  /// The question, prefixed with what he asked just before it so a follow-up
+  /// ("aur uska next due?") has something to attach to.
+  String _withContext(String question) {
+    if (_recent.isEmpty) return question;
+    final b = StringBuffer('Earlier questions in this conversation, oldest '
+        'first (context only — answer the LAST line):\n');
+    for (final q in _recent) {
+      b.writeln('- $q');
+    }
+    b.write('\n$question');
+    return b.toString();
+  }
+
   Future<AssistantAnswer> _resolve(String trimmed, String lang) async {
     if (trimmed.isEmpty) return AssistantAnswer.notUnderstood(lang: lang);
+
+    // Tier 0a — an INSTRUCTION, not a question. Checked before anything else
+    // and resolved entirely on-device: "Ramesh se 500 le liya" must work at a
+    // doorstep with no signal, which is the only place it will ever be said.
+    final action = await _actionAnswer(trimmed);
+    if (action != null) return action;
 
     // Tier 0 — an interest CALCULATION never touches the account database.
     // Routed locally (not by asking the model first) because text-to-SQL will
@@ -76,7 +117,7 @@ class AssistantService {
       try {
         final content = await _groq.completeJson(
           system: SchemaPrompt.system,
-          user: SchemaPrompt.user(trimmed),
+          user: SchemaPrompt.user(_withContext(trimmed)),
         );
         final obj = jsonDecode(content) as Map<String, dynamic>;
         final sql = (obj['sql'] as String?)?.trim() ?? '';
@@ -100,6 +141,75 @@ class AssistantService {
 
     // Tier 3 — no local match and no cloud keys.
     return AssistantAnswer.notUnderstood(lang: lang);
+  }
+
+  // --- Action routing ------------------------------------------------------
+
+  /// A proposal card when the sentence is an instruction about money changing
+  /// hands and it resolves to exactly one real customer; a disambiguation list
+  /// when several match; null in every other case, so an ordinary question
+  /// carries on down the normal path untouched.
+  Future<AssistantAnswer?> _actionAnswer(String question) async {
+    final actions = _actions;
+    if (actions == null) return null;
+    final request = CollectPhrase.parse(question);
+    if (request == null) return null;
+
+    final resolved = await actions.resolve(request, DateTime.now());
+    switch (resolved) {
+      case CollectReady(:final action):
+        return AssistantAnswer.propose(action);
+      case CollectAmbiguous(:final matches):
+        // Several people of that name. Show them rather than guess — money
+        // against the wrong account is the worst outcome this can produce.
+        return AssistantAnswer(
+          label: 'Which one?',
+          kind: AnswerKind.list,
+          rows: [
+            for (final a in matches)
+              {
+                'account_number': a.accountNumber,
+                'customer_name': a.customerName,
+                'denomination_amount': a.denominationAmount,
+                'next_due': a.dueDateIso,
+              }
+          ],
+          source: 'local',
+        );
+      case CollectNoMatch():
+        return null;
+    }
+  }
+
+  /// Perform a proposal he confirmed.
+  Future<AssistantAnswer> confirm(CollectAction action) async {
+    final actions = _actions;
+    if (actions == null) {
+      return AssistantAnswer.text('Not available here.', source: 'local');
+    }
+    final outcome = await actions.perform(action, DateTime.now());
+    unawaited(Analytics.track('assistant_action', {
+      'kind': action.kind.name,
+      'ok': true,
+    }));
+    return AssistantAnswer(
+      label: 'Done',
+      kind: AnswerKind.none,
+      rows: const [],
+      source: 'local',
+      message: outcome.message,
+      undoEntryId: outcome.entryId,
+    );
+  }
+
+  /// Take back a write this conversation made.
+  Future<AssistantAnswer> undo(int entryId) async {
+    final actions = _actions;
+    if (actions == null) {
+      return AssistantAnswer.text('Not available here.', source: 'local');
+    }
+    await actions.undo(entryId);
+    return AssistantAnswer.text('Entry removed.', source: 'local');
   }
 
   // --- Calculation routing -------------------------------------------------
@@ -201,7 +311,7 @@ class AssistantService {
     try {
       final text = await _groq.completeText(
         system: GeneralPrompt.system,
-        user: GeneralPrompt.user(question),
+        user: GeneralPrompt.user(_withContext(question)),
       );
       final t = text.trim();
       return t.isEmpty

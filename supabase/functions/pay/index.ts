@@ -10,6 +10,14 @@
 // Entitlement is keyed by the DOP agent_id. Everything is a no-op unless
 // app_config.payments_enabled = true (the app also gates on it).
 //
+// AUTH: every action requires a live device session token (issued by the `otp`
+// function) and derives the agent id FROM that session. A client-supplied agent
+// id is never trusted — it used to be, which let anyone read any agent's plan
+// and expiry just by guessing an id that is printed on receipts.
+//   => `otp_required` must be ON before `payments_enabled` is turned on,
+//      otherwise no device has a session and every call here 401s (the app
+//      fails open, so nobody is blocked — the paywall simply won't function).
+//
 // Secrets: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET.
 // Deploy:  supabase functions deploy pay --project-ref ojorpmtptryldizogtkz
 // ---------------------------------------------------------------------------
@@ -36,6 +44,11 @@ async function hmacHex(key: string, msg: string): Promise<string> {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+async function sha256(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** Constant-time string compare (don't leak the signature via timing). */
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -55,11 +68,33 @@ Deno.serve(async (req) => {
   const keyId = Deno.env.get("RAZORPAY_KEY_ID") || "";
   const keySecret = Deno.env.get("RAZORPAY_KEY_SECRET") || "";
 
+  /**
+   * The DOP agent id this session belongs to, or null when the token is
+   * missing, unknown, revoked or the account is disabled. Identity comes from
+   * here and nowhere else — a client-supplied agent id is only a claim, and
+   * agent ids are printed on receipts.
+   */
+  const sessionAgent = async (token: string): Promise<string | null> => {
+    if (!token) return null;
+    const { data: s } = await sb
+      .from("device_sessions")
+      .select("account_id, revoked_at")
+      .eq("token_hash", await sha256(token))
+      .maybeSingle();
+    if (!s || s.revoked_at) return null;
+    const { data: acct } = await sb
+      .from("accounts").select("agent_id, disabled").eq("id", s.account_id).maybeSingle();
+    if (!acct || acct.disabled) return null;
+    const id = String(acct.agent_id ?? "").trim();
+    return id || null;
+  };
+
   try {
     const body = await req.json();
     const action = String(body.action || "");
-    const agentId = String(body.agentId || "").trim();
-    if (!agentId) return json({ ok: false, error: "no_agent" }, 400);
+    // Identity from the session token only — never from body.agentId.
+    const agentId = await sessionAgent(String(body.token || ""));
+    if (!agentId) return json({ ok: false, error: "unauthorized" }, 401);
 
     // --- Abuse guard: optional Play Integrity + rate limits (per device, per
     // IP, per agent) — same posture as the groq/ingest proxies. Order/verify are
@@ -141,7 +176,18 @@ Deno.serve(async (req) => {
         currency: "INR", provider: "razorpay", ref: paymentId, order_id: orderId,
         status: "success", plan: plan.code,
       });
-      if (pay.error) return { ok: true, already: true, periodEnd: await endOf() } as const;
+      // ONLY a unique-ref collision means "the webhook already handled this" —
+      // treat that as done and don't extend twice. Any other insert failure
+      // (missing column, RLS, connection) left the subscription un-extended, so
+      // it must surface as an error: reporting a paid agent "ok" while their
+      // expiry never moved is the one outcome this flow must never produce.
+      if (pay.error) {
+        if (pay.error.code !== "23505") {
+          console.error("payments insert failed", orderId, paymentId, pay.error);
+          return { ok: false, error: "record_failed" } as const;
+        }
+        return { ok: true, already: true, periodEnd: await endOf() } as const;
+      }
       const cur = await endOf();
       const base = Math.max(Date.now(), cur ? new Date(cur).getTime() : 0);
       const newEnd = new Date(base + Number(plan.duration_days) * 86400_000).toISOString();

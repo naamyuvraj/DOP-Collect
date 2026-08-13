@@ -2,7 +2,7 @@
 // ---------------------------------------------------------------------------
 // WhatsApp OTP proxy + identity/session authority. The app carries NO MSG91 auth
 // key — it lives here as a secret. This function:
-//   * send / resend a 6-digit OTP over WhatsApp (MSG91 template message)
+//   * send / resend a 4-digit OTP over WhatsApp (MSG91 template message)
 //   * verify it (we generate + store + check the code — MSG91 only DELIVERS the
 //     WhatsApp template; it does not verify WhatsApp OTPs, unlike SMS)
 //   * binds one phone <-> one DOP agent id (1:1)
@@ -61,6 +61,16 @@ function timingSafeEqual(a: string, b: string): boolean {
 /** Salted hash of a code so a leak of otp_codes can't be brute-forced offline. */
 const codeHash = (salt: string, phone: string, otp: string) =>
   sha256(`${salt}:${phone}:${otp}`);
+
+/**
+ * How many digits an OTP has. FIXED, deliberately not read from app_config:
+ * the app's verify screen sizes its input boxes with a matching constant and
+ * auto-submits on the last digit, so raising this server-side alone would send
+ * every user a code they physically could not finish typing — a config change
+ * with no deploy and no way for the user to recover. Change it here and in
+ * `OtpVerifyScreen.codeLength` together, then ship.
+ */
+const OTP_DIGITS = 4;
 /** Cryptographically-random numeric OTP (rejection sampling => no modulo bias). */
 function genOtp(len = 6): string {
   let out = "";
@@ -151,7 +161,6 @@ Deno.serve(async (req) => {
   const maxDevicePerHour = L.maxDevicePerHour ?? 10; // per DEVICE / hour
   const ttl = L.ttl ?? 600;                 // code lifetime, seconds
   const maxAttempts = L.maxAttempts ?? 5;   // wrong tries before burn
-  const otpDigits = Math.min(8, Math.max(4, Number(L.digits ?? 4))); // 4–8, default 4
   const { data: mdRow } = await sb
     .from("app_config").select("value").eq("key", "max_devices").maybeSingle();
   const maxDevices = Number(mdRow?.value ?? 2) || 2;
@@ -160,6 +169,24 @@ Deno.serve(async (req) => {
     const { data } = await sb.rpc("bump_rate", { p_device: key, p_window_secs: secs });
     return (data as number) ?? 0;
   };
+  /**
+   * True only when `token` is a LIVE device session belonging to `accountId`.
+   *
+   * This is what stands between "I control this new phone" and "I am the owner
+   * of this account". Without it, `changePhone` accepted an agent id as proof
+   * of identity — and agent ids are printed on receipts, so anyone could point
+   * a stranger's account at their own number and lock the real agent out.
+   */
+  const sessionOwns = async (token: string, accountId: string): Promise<boolean> => {
+    if (!token) return false;
+    const { data } = await sb
+      .from("device_sessions")
+      .select("account_id, revoked_at")
+      .eq("token_hash", await sha256(token))
+      .maybeSingle();
+    return !!data && !data.revoked_at && data.account_id === accountId;
+  };
+
   const logReq = (deviceId: string, phoneHash: string, action: string, status: string, reqId?: string) =>
     sb.from("otp_requests")
       .insert({ device_id: deviceId, phone_hash: phoneHash, action, status, req_id: reqId ?? null })
@@ -222,7 +249,7 @@ Deno.serve(async (req) => {
 
       // Generate + store (SALTED hash only — a leak of otp_codes can't be
       // brute-forced offline), then deliver over WhatsApp.
-      const otp = genOtp(otpDigits);
+      const otp = genOtp(OTP_DIGITS);
       const salt = randomToken(16);
       await sb.from("otp_codes").upsert({
         phone_hash: phoneHash,
@@ -274,27 +301,54 @@ Deno.serve(async (req) => {
       // Correct — consume the code so it can't be replayed.
       await sb.from("otp_codes").delete().eq("phone_hash", phoneHash);
 
-      // --- 1:1 bind phone <-> agent id -----------------------------------
+      // --- 1:1 bind phone <-> agent id (with optional phone change) -------
+      // Normal verify keeps the pair immutable. When the app sends
+      // changePhone=true (the "update mobile number" flow), the SAME agent may
+      // move to a new number — but only on TWO proofs, not one: the OTP just
+      // verified above shows they control the new number, and a live device
+      // session for the existing account shows they are the current owner. An
+      // agent id alone is not a secret and must never be enough. Still refuses
+      // a number that belongs to a DIFFERENT agent.
+      const changePhone = body.changePhone === true;
       const { data: byPhone } = await sb
         .from("accounts").select("id, agent_id, disabled").eq("phone_hash", phoneHash).maybeSingle();
       if (byPhone?.disabled) return json({ ok: false, code: "account_disabled" }, 403);
+      if (agentId && byPhone?.agent_id && byPhone.agent_id !== agentId)
+        return json({ ok: false, code: "already_linked", detail: "phone" }, 409);
+
+      let accountId: string | undefined = byPhone?.id;
       if (agentId) {
         const { data: byAgent } = await sb
           .from("accounts").select("id, phone_hash").eq("agent_id", agentId).maybeSingle();
-        if (byAgent && byAgent.phone_hash !== phoneHash)
-          return json({ ok: false, code: "already_linked", detail: "agent" }, 409);
-        if (byPhone && byPhone.agent_id && byPhone.agent_id !== agentId)
-          return json({ ok: false, code: "already_linked", detail: "phone" }, 409);
-      }
-
-      let accountId = byPhone?.id as string | undefined;
-      if (!accountId) {
+        if (byAgent && byAgent.phone_hash !== phoneHash) {
+          if (!changePhone)
+            return json({ ok: false, code: "already_linked", detail: "agent" }, 409);
+          // Prove ownership of the binding being moved. A caller who only knows
+          // the agent id gets the same answer as a stranger.
+          if (!(await sessionOwns(String(body.token || ""), String(byAgent.id)))) {
+            logReq(deviceId, phoneHash, "verify", "reauth_required");
+            return json({ ok: false, code: "reauth_required" }, 403);
+          }
+          // Phone change: free any orphan row on the new number, then move this
+          // agent's binding to it. Device sessions stay (account id unchanged).
+          if (byPhone) await sb.from("accounts").delete().eq("id", byPhone.id);
+          await sb.from("accounts").update({ phone_hash: phoneHash }).eq("id", byAgent.id);
+          accountId = byAgent.id;
+        } else if (byAgent) {
+          accountId = byAgent.id; // re-verifying the same pair
+        } else if (byPhone) {
+          if (!byPhone.agent_id)
+            await sb.from("accounts").update({ agent_id: agentId }).eq("id", byPhone.id);
+          accountId = byPhone.id;
+        } else {
+          const { data: ins } = await sb.from("accounts")
+            .insert({ phone_hash: phoneHash, agent_id: agentId }).select("id").single();
+          accountId = ins!.id;
+        }
+      } else if (!accountId) {
         const { data: ins } = await sb.from("accounts")
-          .insert({ phone_hash: phoneHash, agent_id: agentId || null })
-          .select("id").single();
+          .insert({ phone_hash: phoneHash }).select("id").single();
         accountId = ins!.id;
-      } else if (agentId && !byPhone!.agent_id) {
-        await sb.from("accounts").update({ agent_id: agentId }).eq("id", accountId);
       }
 
       // --- device session + 2-device enforcement -------------------------

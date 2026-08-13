@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/developer_card.dart';
 
 /// In-app Privacy Policy & Safety summary. Plain-language, and the canonical
 /// statement of the app's data practices (also linked from the Play listing).
@@ -36,12 +37,19 @@ class PrivacyScreen extends StatelessWidget {
                 'sent to the AI service to work out the answer.',
             'Turn on "Offline-only AI" in Settings to stop all cloud use.',
           ], tone: AppTheme.focal, dot: AppTheme.amber),
-          _section('Anonymous usage analytics', [
-            'We collect anonymous app-usage events (e.g. "sync completed", '
-                '"calculator used") to improve the app.',
-            'These carry no customer data and no personal identifiers — just a '
-                'random device id.',
-            'Turn off "Usage analytics" in Settings to opt out.',
+          _section('What we do collect', [
+            'About you: your name, your Agent ID, your post-office region (SOL) '
+                'and your mobile number. This is what runs your account and '
+                'keeps it to your two phones.',
+            'About your usage: a random device id, the app version, and event '
+                'names like "sync completed" or "calculator used".',
+            'Never your customers. No name, account number, amount or due date '
+                'ever leaves your phone — and neither do the questions you ask '
+                'the assistant.',
+            'Turn off "Usage analytics" in Settings and all of the above stops '
+                'being sent. Phone verification still records your number as a '
+                'one-way code (we cannot read it back) so the two-phone limit '
+                'can work.',
           ], tone: AppTheme.surfaceSoft, dot: AppTheme.inkMuted),
           _section('Security', [
             'All network traffic uses HTTPS.',
@@ -61,9 +69,8 @@ class PrivacyScreen extends StatelessWidget {
             'endorsed by the Department of Posts.',
             style: AppTheme.body(11.5, color: AppTheme.inkFaint, height: 1.5),
           ),
-          const SizedBox(height: 12),
-          Text('Questions? Contact the developer via the About section.',
-              style: AppTheme.body(12, color: AppTheme.inkMuted)),
+          const SizedBox(height: 18),
+          const DeveloperCard(),
         ],
       ),
     );

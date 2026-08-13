@@ -41,7 +41,73 @@ class IntentEngine {
   static const _listCols =
       'account_number, customer_name, denomination_amount, next_due, months_paid, bucket';
 
+  /// Money he has ALREADY TAKEN. Kept apart from the "pending/baaki" words
+  /// below because the two questions sound almost identical in Hinglish and
+  /// mean opposite things — one reads the ledger, the other reads the book.
+  static const _took = [
+    'collect', 'collected', 'collection', 'kalekshan', 'wasool', 'vasool',
+    'mila', 'mile', 'aaya', 'aya', 'liya', 'recovered',
+    'कलेक्शन', 'वसूल', 'मिला', 'लिया', 'आया', 'जमा किया',
+  ];
+  static const _today = ['aaj', 'today', 'आज', 'abhi tak aaj'];
+  static const _thisMonth = [
+    'is mahine', 'this month', 'mahine', 'month', 'महीने', 'इस महीने', 'maheene',
+  ];
+  static const _owed = [
+    'pending', 'baki', 'baaki', 'due', 'बाकी', 'पेंडिंग', 'बकाया', 'owe',
+  ];
+  static const _who = ['kaun', 'kis', 'kisne', 'who', 'naam', 'name', 'कौन', 'किस', 'किसने'];
+
   static final List<_Intent> _intents = <_Intent>[
+    // --- The field ledger (v_collections) ------------------------------------
+    // These come FIRST. "is mahine kitna collect hua" is about money in hand;
+    // the pending rules further down match nearly the same words and would
+    // otherwise answer it with what is still owed — the opposite figure.
+    _Intent(
+      (q) => _has(q, _took) && _has(q, _today) && _has(q, _who) && !_has(q, _owed),
+      'SELECT customer_name, account_number, amount, collected_time '
+      'FROM v_collections WHERE is_today=1 ORDER BY collected_at DESC LIMIT 200',
+      AnswerKind.list,
+      "Today's collections",
+    ),
+    _Intent(
+      (q) => _has(q, _took) && _has(q, _today) && !_has(q, _owed),
+      'SELECT SUM(amount) AS total FROM v_collections WHERE is_today=1',
+      AnswerKind.sum,
+      'Collected today',
+    ),
+    _Intent(
+      (q) => _has(q, _took) && _has(q, _thisMonth) && !_has(q, _owed),
+      'SELECT SUM(amount) AS total FROM v_collections WHERE is_this_cycle=1',
+      AnswerKind.sum,
+      'Collected this month',
+    ),
+    _Intent(
+      (q) =>
+          _has(q, ['bag', 'jeb', 'cash', 'nakad', 'बैग', 'नकद']) &&
+          !_has(q, _owed),
+      'SELECT SUM(amount) AS total FROM v_collections WHERE is_today=1',
+      AnswerKind.sum,
+      'In your bag today',
+    ),
+    // --- Lists (v_lots) ------------------------------------------------------
+    _Intent(
+      (q) =>
+          _has(q, ['list', 'lot', 'लिस्ट']) &&
+          _has(q, ['submit', 'nahi hui', 'pending', 'baaki', 'बाकी', 'जमा नहीं']),
+      'SELECT id, mode, item_count, total_amount, created_on '
+      'FROM v_lots WHERE is_submitted=0 ORDER BY created_on DESC LIMIT 200',
+      AnswerKind.list,
+      'Lists not yet submitted',
+    ),
+    _Intent(
+      (q) =>
+          _has(q, ['kitni', 'how many', 'kitne', 'कितनी']) &&
+          _has(q, ['list', 'lot', 'लिस्ट']),
+      'SELECT COUNT(*) AS n FROM v_lots WHERE is_this_cycle=1',
+      AnswerKind.count,
+      'Lists this month',
+    ),
     // --- Counts (check before list synonyms so "kitne defaulter" counts) ---
     _Intent(
       (q) =>

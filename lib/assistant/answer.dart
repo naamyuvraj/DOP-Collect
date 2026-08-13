@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../util/format.dart';
+import 'collect_action.dart';
 
 /// `detail` renders one customer's full profile card (all v_accounts columns
 /// must be selected so an [RdAccount] can be rebuilt from the row).
@@ -18,12 +19,23 @@ class AssistantAnswer {
     this.error,
     this.message,
     this.lang = 'en',
+    this.action,
+    this.undoEntryId,
   });
   final String label;
   final AnswerKind kind;
   final List<Map<String, Object?>> rows;
   final String source;
   final String? error;
+
+  /// A change the assistant is PROPOSING — rendered as a card with Confirm and
+  /// Cancel. Nothing has happened yet; nothing happens without a tap.
+  final CollectAction? action;
+
+  /// A ledger row this answer wrote, so the chat can keep an undo alive for as
+  /// long as the message is on screen — rather than the 1.4 seconds a snackbar
+  /// lasts, which is no use to someone mid-conversation.
+  final int? undoEntryId;
 
   /// 'hi' or 'en' — the language the user asked in, so canned lines + voice
   /// match. Free-text (message) answers already come back in the right language
@@ -41,6 +53,20 @@ class AssistantAnswer {
         error: error,
         message: message,
         lang: lang,
+        action: action,
+        undoEntryId: undoEntryId,
+      );
+
+  /// An action awaiting his tap. The title doubles as the spoken line and as
+  /// what the restored transcript shows later — by then the card is stale, so
+  /// the sentence is all that should survive.
+  factory AssistantAnswer.propose(CollectAction action) => AssistantAnswer(
+        label: action.isUndo ? 'Undo' : 'Record collection',
+        kind: AnswerKind.none,
+        rows: const [],
+        source: 'local',
+        message: action.title,
+        action: action,
       );
 
   /// Free-text reply for general (non-account) questions — DOP schemes,

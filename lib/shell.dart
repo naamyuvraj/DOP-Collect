@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 
 import 'data/account_repository.dart';
 import 'data/app_settings.dart';
+import 'data/collection_repository.dart';
 import 'data/lot_repository.dart';
 import 'screens/account_list_screen.dart';
+import 'screens/collect/collect_screen.dart';
 import 'screens/assistant_screen.dart';
-import 'screens/calculator_screen.dart';
 import 'screens/home_dashboard.dart';
 import 'screens/lists/saved_lists_screen.dart';
 import 'screens/settings_screen.dart';
@@ -17,9 +18,14 @@ import 'widgets/product_tour.dart';
 
 /// Bottom-nav container with a floating pill nav over a soft mint canvas.
 class MainShell extends StatefulWidget {
-  const MainShell({super.key, required this.repo, required this.lots});
+  const MainShell(
+      {super.key,
+      required this.repo,
+      required this.lots,
+      required this.collections});
   final AccountRepository repo;
   final LotRepository lots;
+  final CollectionRepository collections;
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -29,13 +35,22 @@ class _MainShellState extends State<MainShell> {
   int _index = 0;
   int _dataVersion = 0;
 
-  void _refreshData() => setState(() => _dataVersion++);
+  /// Re-query trigger for the Collect tab. It is kept alive by the IndexedStack
+  /// below, so it only re-reads the DB when this changes — on a Sync, and on
+  /// every entry into the tab (a Sync can be started from Home, a list or an
+  /// account detail page, none of which go through [_refreshData]).
+  int _accountsRevision = 0;
+
+  void _refreshData() => setState(() {
+        _dataVersion++;
+        _accountsRevision++;
+      });
 
   static const _items = [
     (Icons.home_rounded, 'Home'),
     (Icons.account_balance_wallet_rounded, 'Accounts'),
+    (Icons.checklist_rounded, 'Collect'),
     (Icons.receipt_long_rounded, 'Lists'),
-    (Icons.calculate_rounded, 'Calc'),
     (Icons.settings_rounded, 'Settings'),
   ];
 
@@ -111,15 +126,26 @@ class _MainShellState extends State<MainShell> {
         key: _navKeys[2],
         circle: true,
         before: () => _goTab(2),
+        title: 'Collect from your round',
+        body: 'Your round for this month. Swipe a customer to the right the '
+            'moment they pay you — the toggle at the top decides whether that '
+            'takes their daily amount or the full month. Swipe left to undo, '
+            'or tap the row to type any other amount. The yellow card keeps a '
+            'running total of the cash in your bag.',
+      ),
+      TourStep(
+        key: _navKeys[3],
+        circle: true,
+        before: () => _goTab(3),
         title: 'Lists — build them',
         body: 'At month-end, auto-build your ₹20,000 lists (most valuable '
             'customers first) or make one by hand. The "New" button is bottom-'
             'left.',
       ),
       TourStep(
-        key: _navKeys[2],
+        key: _navKeys[3],
         circle: true,
-        before: () => _goTab(2),
+        before: () => _goTab(3),
         title: 'Lists — make them on the portal',
         body: '"Make all on portal" logs in once and creates every list in one '
             'go — it ticks the accounts and pays each as one installment, then '
@@ -127,22 +153,13 @@ class _MainShellState extends State<MainShell> {
             'deposits (an account added twice) are keyed for the rebate.',
       ),
       TourStep(
-        key: _navKeys[2],
+        key: _navKeys[3],
         circle: true,
-        before: () => _goTab(2),
+        before: () => _goTab(3),
         title: 'Lists — Downloads tab',
         body: 'Once a list is made on the portal it moves to Downloads. Tap '
             'Preview to see the PDF, pinch to zoom, then Download to save it or '
             'Share it on WhatsApp — the real receipt for the post office.',
-      ),
-      TourStep(
-        key: _navKeys[3],
-        circle: true,
-        before: () => _goTab(3),
-        title: 'Interest calculator',
-        body: 'Work out maturity for any post-office scheme — RD, TD, MIS, '
-            'SCSS, NSC, KVP, PPF, Sukanya and more, with the current rates '
-            'built in.',
       ),
       TourStep(
         key: _navKeys[4],
@@ -150,7 +167,8 @@ class _MainShellState extends State<MainShell> {
         before: () => _goTab(4),
         title: 'Sync & settings',
         body: 'Sync Collection pulls all your accounts from the portal in '
-            'about a minute. Your profile and ASLAAS number live here too.',
+            'about a minute. Your profile, your daily-collection amount and '
+            'the interest calculator live here too.',
       ),
       TourStep(
         key: _aiKey,
@@ -170,16 +188,28 @@ class _MainShellState extends State<MainShell> {
       HomeDashboard(
           key: ValueKey('home-$_dataVersion'),
           repo: widget.repo,
-          onOpenLists: () => setState(() => _index = 2)),
+          onSynced: _refreshData,
+          onOpenLists: () => setState(() => _index = 3)),
+      // The account book: every RD account, searchable and sortable. Distinct
+      // from Collect — this is for looking someone up, that is for the round.
       AccountListScreen(
-          key: ValueKey('accounts-$_dataVersion'), repo: widget.repo),
+          key: ValueKey('accounts-$_dataVersion'),
+          repo: widget.repo,
+          revision: _accountsRevision),
+      CollectScreen(
+          key: ValueKey('collect-$_dataVersion'),
+          accounts: widget.repo,
+          collections: widget.collections,
+          lots: widget.lots,
+          revision: _accountsRevision),
       // One "Lists" tab: saved lists + an Auto-build entry (which pushes the
       // batch builder). Groups and Lists used to be two tabs for one concept.
       SavedListsScreen(
           key: ValueKey('lists-$_dataVersion'),
           accounts: widget.repo,
           lots: widget.lots),
-      const CalculatorScreen(),
+      // Calculator moved into Settings rather than taking a sixth tab — it's a
+      // reference tool used occasionally, not a daily surface like Collect.
       SettingsScreen(
           repo: widget.repo, onSynced: _refreshData, onTour: runTour),
     ];
@@ -212,7 +242,8 @@ class _MainShellState extends State<MainShell> {
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             fullscreenDialog: true,
-            builder: (_) => AssistantScreen(repo: widget.repo),
+            builder: (_) => AssistantScreen(
+                repo: widget.repo, collections: widget.collections),
           ),
         );
       },
@@ -283,11 +314,23 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
-  static const _tabNames = ['home', 'accounts', 'lists', 'calculator', 'settings'];
+  static const _tabNames = [
+    'home',
+    'accounts',
+    'collect',
+    'lists',
+    'settings'
+  ];
 
   void _navTo(int i) {
     if (_index == i) return;
-    setState(() => _index = i);
+    setState(() {
+      _index = i;
+      // Entering Accounts or Collect always re-reads the store, so neither can
+      // show a stale (or empty) list after a Sync — or a collection recorded
+      // elsewhere — happened somewhere else.
+      if (i == 1 || i == 2) _accountsRevision++;
+    });
     unawaited(Analytics.track('screen_view', {'tab': _tabNames[i]}));
   }
 

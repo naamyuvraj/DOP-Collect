@@ -6,8 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../assistant/answer.dart';
 import '../assistant/assistant_service.dart';
+import '../assistant/collect_action.dart';
 import '../assistant/voice_service.dart';
 import '../data/account_repository.dart';
+import '../data/collection_repository.dart';
 import '../data/database.dart';
 import '../models/rd_account.dart';
 import '../theme/app_theme.dart';
@@ -31,17 +33,28 @@ class _Msg {
 /// English or Hindi; answers come from the offline intent engine first, then
 /// the Groq free-tier text-to-SQL fallback. No customer data leaves the device.
 class AssistantScreen extends StatefulWidget {
-  const AssistantScreen({super.key, this.repo});
+  const AssistantScreen({super.key, this.repo, this.collections});
 
   /// When provided, answer rows become tappable and open the account.
   final AccountRepository? repo;
+
+  /// When provided too, the assistant can RECORD a collection — always as a
+  /// card he confirms, never on its own. Without it the screen is read-only,
+  /// which is what the web preview gets.
+  final CollectionRepository? collections;
 
   @override
   State<AssistantScreen> createState() => _AssistantScreenState();
 }
 
 class _AssistantScreenState extends State<AssistantScreen> {
-  late final AssistantService _svc = AssistantService(AppDatabase.instance);
+  late final AssistantService _svc = AssistantService(
+    AppDatabase.instance,
+    actions: (widget.repo != null && widget.collections != null)
+        ? CollectActions(
+            accounts: widget.repo!, collections: widget.collections!)
+        : null,
+  );
   final _voice = VoiceService();
   final _controller = TextEditingController();
   final _scroll = ScrollController();
@@ -105,11 +118,12 @@ class _AssistantScreenState extends State<AssistantScreen> {
   }
 
   static const _chips = <String>[
+    'Aaj kitna collect hua',
+    'Aaj kisse paisa liya',
     'Aaj ke defaulters',
     'Is mahine pending',
-    'Second half dues',
+    'Kaunsi list submit nahi hui',
     'Kitne total accounts',
-    'Pending collection',
     'About to freeze',
   ];
 
@@ -182,6 +196,46 @@ class _AssistantScreenState extends State<AssistantScreen> {
     if (_speak && !kIsWeb) _voice.speak(answer.speakText());
   }
 
+  /// Swap a message for its outcome, if it is still the one that was tapped.
+  ///
+  /// Clearing the chat mid-await would otherwise leave the index pointing past
+  /// the end of the list — a crash on the screen that just took his money.
+  void _replace(int index, AssistantAnswer was, AssistantAnswer now) {
+    if (index >= _messages.length || _messages[index].answer != was) return;
+    setState(() => _messages[index] = _Msg.reply(now));
+    _saveHistory();
+  }
+
+  /// He tapped Confirm on a proposed action. The proposal is replaced by the
+  /// result, so the card can never be tapped twice and write the money twice.
+  Future<void> _confirm(int index, AssistantAnswer proposal) async {
+    final action = proposal.action;
+    if (_busy || action == null) return;
+    setState(() => _busy = true);
+    final result = await _svc.confirm(action);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    _replace(index, proposal, result);
+    if (_speak && !kIsWeb) _voice.speak(result.speakText());
+  }
+
+  /// He tapped No — the proposal becomes a plain line of transcript.
+  void _cancel(int index, AssistantAnswer proposal) => _replace(
+        index,
+        proposal,
+        AssistantAnswer.text('Cancelled — nothing recorded.', source: 'local'),
+      );
+
+  /// Take back a write, from the message that made it.
+  Future<void> _undo(int index, AssistantAnswer done, int entryId) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final result = await _svc.undo(entryId);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    _replace(index, done, result);
+  }
+
   /// Open one account from an answer row — makes lists/details actionable
   /// instead of dead ends.
   void _openAccount(String? accountNumber) {
@@ -220,7 +274,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                         itemCount: _messages.length + (_busy ? 1 : 0),
                         itemBuilder: (_, i) {
                           if (i == _messages.length) return _thinking();
-                          return _bubble(_messages[i]);
+                          return _bubble(_messages[i], i);
                         },
                       ),
               ),
@@ -298,9 +352,10 @@ class _AssistantScreenState extends State<AssistantScreen> {
           const SizedBox(height: 4),
           Center(
             child: Text(
-              'Jaise "aaj ke defaulters" ya "Ramesh ka account"',
+              'Jaise "aaj kitna collect hua" ya "Ramesh ka account".\n'
+              'Paisa mile to bol dein — "Ramesh se 500 le liya".',
               textAlign: TextAlign.center,
-              style: AppTheme.body(13, color: AppTheme.inkMuted),
+              style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
             ),
           ),
           const SizedBox(height: 22),
@@ -326,7 +381,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
             .toList(),
       );
 
-  Widget _bubble(_Msg m) {
+  Widget _bubble(_Msg m, int index) {
     if (m.isUser) {
       return Align(
         alignment: Alignment.centerRight,
@@ -351,11 +406,12 @@ class _AssistantScreenState extends State<AssistantScreen> {
     }
     return Align(
       alignment: Alignment.centerLeft,
-      child: _answerCard(m.answer!),
+      child: _answerCard(m.answer!, index),
     );
   }
 
-  Widget _answerCard(AssistantAnswer a) {
+  Widget _answerCard(AssistantAnswer a, int index) {
+    final action = a.action;
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 5),
       constraints:
@@ -371,9 +427,92 @@ class _AssistantScreenState extends State<AssistantScreen> {
           if (a.isError)
             Text(a.error!,
                 style: AppTheme.body(13.5, color: AppTheme.inkMuted, height: 1.35))
-          else
+          else if (action != null)
+            _actionBody(action, a, index)
+          else ...[
             _answerBody(a),
+            if (a.undoEntryId case final id?) _undoRow(index, a, id),
+          ],
         ],
+      ),
+    );
+  }
+
+  /// A proposed write, and the two taps that resolve it.
+  ///
+  /// The money and the customer are stated in full before either button, so
+  /// confirming is a decision rather than a reflex — this is the only place in
+  /// the app where a machine picked who gets credited.
+  Widget _actionBody(CollectAction action, AssistantAnswer proposal, int index) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(action.title,
+            style: AppTheme.body(15, weight: FontWeight.w700, height: 1.3)),
+        const SizedBox(height: 4),
+        Text(action.detail,
+            style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () => _confirm(index, proposal),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  height: 46,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: action.isUndo ? AppTheme.red : AppTheme.green,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(action.isUndo ? 'Undo it' : 'Yes, record it',
+                      style: AppTheme.body(14.5,
+                          weight: FontWeight.w800, color: Colors.white)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _cancel(index, proposal),
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                height: 46,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceSoft,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.line),
+                ),
+                child: Text('No',
+                    style: AppTheme.body(14.5, weight: FontWeight.w700)),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// An undo that stays put. A snackbar is gone in 1.4 seconds; a conversation
+  /// he scrolls back through should still be able to take the entry away.
+  Widget _undoRow(int index, AssistantAnswer done, int entryId) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: GestureDetector(
+        onTap: () => _undo(index, done, entryId),
+        behavior: HitTestBehavior.opaque,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.undo_rounded, size: 17, color: AppTheme.red),
+            const SizedBox(width: 6),
+            Text('Undo this entry',
+                style: AppTheme.body(13,
+                    weight: FontWeight.w700, color: AppTheme.red)),
+          ],
+        ),
       ),
     );
   }
@@ -505,14 +644,33 @@ class _AssistantScreenState extends State<AssistantScreen> {
         ],
       );
 
+  /// One row of a list answer.
+  ///
+  /// The same tile now serves three views, so it reads whichever columns are
+  /// actually present instead of assuming an account row — a collection row
+  /// has an `amount` and a time but no denomination, and a list row has no
+  /// customer at all. Falling back on a missing column used to render every
+  /// collection as "₹0".
   Widget _resultTile(Map<String, Object?> r) {
-    final name = (r['customer_name'] as String?) ?? '—';
     final acc = (r['account_number'] as String?) ?? '';
     final den = (r['denomination_amount'] as num?)?.toInt() ?? 0;
+    final amount = (r['amount'] as num?)?.toInt();
+    final at = (r['collected_time'] as String?) ?? '';
     final due = (r['next_due'] as String?) ?? '';
     final bucket = (r['bucket'] as String?) ?? '';
+
+    // A saved list, which has an id and a mode where a customer would be.
+    if (r['item_count'] != null) return _lotTile(r);
+
+    final name = (r['customer_name'] as String?) ?? '—';
     final (bg, fg) = _bucketColors(bucket);
     final tappable = widget.repo != null && acc.isNotEmpty;
+    // Money taken beats money owed: when a row carries both, it came from the
+    // ledger and the figure that matters is what he actually collected.
+    final headline = amount ?? den;
+    final subtitle = amount != null
+        ? '#$acc${at.isEmpty ? '' : ' · $at'}'
+        : '#$acc · ${inr(den)}${due.isEmpty ? '' : ' · due $due'}';
     return GestureDetector(
       onTap: tappable ? () => _openAccount(acc) : null,
       child: Container(
@@ -530,13 +688,19 @@ class _AssistantScreenState extends State<AssistantScreen> {
                       overflow: TextOverflow.ellipsis,
                       style: AppTheme.body(14.5, weight: FontWeight.w700)),
                   const SizedBox(height: 2),
-                  Text('#$acc · ${inr(den)}${due.isEmpty ? '' : ' · due $due'}',
+                  Text(subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
                 ],
               ),
             ),
+            if (amount != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Text(inr(headline),
+                    style: AppTheme.body(14, weight: FontWeight.w800)),
+              ),
             if (bucket.isNotEmpty)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -553,6 +717,54 @@ class _AssistantScreenState extends State<AssistantScreen> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// A saved list. No customer, so it leads with the money and says plainly
+  /// whether it has actually reached the portal — a draft and a submitted list
+  /// look identical otherwise, and only one of them is a receipt.
+  Widget _lotTile(Map<String, Object?> r) {
+    final total = (r['total_amount'] as num?)?.toInt() ?? 0;
+    final count = (r['item_count'] as num?)?.toInt() ?? 0;
+    final mode = (r['mode'] as String?) ?? '';
+    final ref = (r['reference_number'] as String?) ?? '';
+    final on = (r['created_on'] as String?) ?? '';
+    final submitted = ref.isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: AppTheme.panel(AppTheme.surfaceSoft, radius: 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${inr(total)} · $count accounts',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTheme.body(14.5, weight: FontWeight.w700)),
+                const SizedBox(height: 2),
+                Text('$mode${on.isEmpty ? '' : ' · $on'}'
+                    '${submitted ? ' · $ref' : ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: AppTheme.panel(
+                submitted ? AppTheme.greenSoft : AppTheme.amberSoft,
+                radius: 8),
+            child: Text(submitted ? 'submitted' : 'draft',
+                style: AppTheme.body(10.5,
+                    weight: FontWeight.w700,
+                    color: submitted ? AppTheme.green : AppTheme.amber)),
+          ),
+        ],
       ),
     );
   }

@@ -7,7 +7,6 @@ import '../../services/analytics.dart';
 import '../../data/lot_repository.dart';
 import '../../models/lot.dart';
 import '../../models/lot_packing.dart';
-import '../../models/rd_account.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/glass_pill.dart';
@@ -50,7 +49,16 @@ class _BatchListScreenState extends State<BatchListScreen> {
 
   Future<void> _load() async {
     final all = await widget.accounts.all();
-    final lots = LotPacking.build(all, DateTime.now(), cap: BatchListScreen.cap);
+    // Don't re-pack anyone who is already on a list built this cycle. Derived
+    // from the saved lists themselves, so it clears when the month turns over.
+    final saved = await widget.lots.all();
+    final now = DateTime.now();
+    // Portal book only — the field ledger is deliberately not consulted here.
+    // This is a starting point he edits by hand before saving, not a statement
+    // about which cash is in his bag.
+    final lots = LotPacking.build(all, now,
+        cap: BatchListScreen.cap,
+        alreadyListed: LotPacking.listedThisCycle(saved, now));
     if (!mounted) return;
     setState(() => _lots = lots);
   }
@@ -97,14 +105,12 @@ class _BatchListScreenState extends State<BatchListScreen> {
     final lots = _lots;
     if (lots == null || lots.isEmpty) return;
     setState(() => _saving = true);
+    // Saving is all it takes: a saved list is what stops these accounts being
+    // packed again this cycle (LotPacking.listedThisCycle reads it back). No
+    // per-account flag is set — one that never reset is what used to make
+    // auto-build shrink month after month.
     for (final lot in lots) {
       await widget.lots.save(lot);
-      // Mark each list's accounts collected — same as the manual builder and
-      // "Create all", so a saved list isn't rebuilt into a duplicate next time.
-      for (final it in lot.items) {
-        await widget.accounts
-            .setStatus(it.accountNumber, CollectionStatus.deposited);
-      }
     }
     unawaited(Analytics.track('list_generated', {
       'lists': lots.length,

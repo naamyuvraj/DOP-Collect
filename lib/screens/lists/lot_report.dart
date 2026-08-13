@@ -53,24 +53,66 @@ String lotReportText(Lot lot, {String aslaas = ''}) {
 String _cr(num v) => '${NumberFormat('#,##,##0.00').format(v)} Cr.';
 String _amt(num v) => NumberFormat('#,##,##0.00').format(v);
 
-/// One list's report as a page. A SUBMITTED list (real portal reference) is
-/// rendered in the portal's own "Recurring Deposit Installment Report" layout,
-/// with the agent's real data — a faithful copy of their own transaction.
-/// A not-yet-submitted list is a clearly-marked DRAFT working copy.
+const _red = PdfColor.fromInt(0xFFC1272D); // India Post red
+const _grey = PdfColor.fromInt(0xFFE3E3E3); // header band
+const _zebra = PdfColor.fromInt(0xFFF2F2F2); // alternate row shading
+
+/// The portal's own column set, in its order. Nothing else is printed — no Sr
+/// no, no local list column, no agent-name block. Labels are left to wrap the
+/// way the portal's do.
+const _headers = <String>[
+  'E-Banking Ref No',
+  'RD Account Number',
+  'Account Name',
+  'RD Denomination',
+  'RD Total Deposit Amount',
+  'No of Installments',
+  'Rebate',
+  'Default fee',
+  'Bank Name',
+  'Cheque Number',
+  'SB Account No',
+  'ASLAAS Number',
+  'Status',
+  'Last Created Date & Time',
+];
+
+/// Column widths in the portal report's own proportions. Without these the
+/// table sizes itself to its content and the long columns (the date stamp, the
+/// amounts) starve the rest — that is what makes it read as congested.
+/// Each figure is the width in points a column needs so its VALUES never break
+/// mid-word at 6.5pt (headers may still wrap over two or three lines, as they
+/// do on the portal). They sum to just under the A4 content width.
+const _widths = <int, pw.TableColumnWidth>{
+  0: pw.FlexColumnWidth(40), // E-Banking Ref No (wraps, as on the portal)
+  1: pw.FlexColumnWidth(44), // RD Account Number (wraps)
+  2: pw.FlexColumnWidth(48), // Account Name (wraps at the space)
+  3: pw.FlexColumnWidth(54), // RD Denomination — "2,000.00 Cr." on one line
+  4: pw.FlexColumnWidth(50), // RD Total Deposit Amount — "10,000.00 Cr."
+  5: pw.FlexColumnWidth(30), // No of Installments
+  6: pw.FlexColumnWidth(33), // Rebate
+  7: pw.FlexColumnWidth(32), // Default fee
+  8: pw.FlexColumnWidth(29), // Bank Name
+  9: pw.FlexColumnWidth(34), // Cheque Number
+  10: pw.FlexColumnWidth(35), // SB Account No
+  11: pw.FlexColumnWidth(36), // ASLAAS Number
+  12: pw.FlexColumnWidth(36), // Status — "Success" on one line
+  13: pw.FlexColumnWidth(48), // Last Created Date & Time — date / time
+};
+
+/// One list as a page, in the DOP portal's "Recurring Deposit Installment
+/// Report" layout — the same columns, spacing and banding, whether or not the
+/// list has been submitted yet. The only thing that separates the two is the
+/// truth in the fields: an unsubmitted list carries the local `L…` reference
+/// and a "Pending" status, never a portal reference or "Success".
 pw.MultiPage _lotPage(
   Lot lot, {
-  required String agentName,
   required String agentId,
   required String aslaas,
-}) =>
-    lot.referenceNumber != null
-        ? _officialPage(lot, agentId: agentId, aslaas: aslaas)
-        : _draftPage(lot, agentName: agentName, agentId: agentId, aslaas: aslaas);
-
-/// Matches the DOP portal's Reports PDF for a submitted list.
-pw.MultiPage _officialPage(Lot lot,
-    {required String agentId, required String aslaas}) {
-  final ref = lot.referenceNumber!;
+}) {
+  final submitted = lot.referenceNumber != null;
+  final ref = lot.referenceNumber ?? lotReference(lot);
+  final status = submitted ? 'Success' : 'Pending';
   final when = lot.submittedAt ?? lot.createdAt;
   final dmy = DateFormat('dd-MM-yyyy').format(when);
   final stamp = DateFormat('dd-MM-yyyy hh:mm:ss a').format(when);
@@ -79,22 +121,6 @@ pw.MultiPage _officialPage(Lot lot,
   final cleanAgent =
       agentId.replaceFirst(RegExp(r'^DOP[.\s]*', caseSensitive: false), '');
 
-  const headers = <String>[
-    'E-Banking\nRef No',
-    'RD Account\nNumber',
-    'Account\nName',
-    'RD\nDenomination',
-    'RD Total\nDeposit Amount',
-    'No of\nInstallments',
-    'Rebate',
-    'Default\nfee',
-    'Bank Name',
-    'Cheque\nNumber',
-    'SB Account\nNo',
-    'ASLAAS\nNumber',
-    'Status',
-    'Last Created\nDate & Time',
-  ];
   final data = [
     for (final it in lot.items)
       [
@@ -110,7 +136,7 @@ pw.MultiPage _officialPage(Lot lot,
         it.chequeNumber ?? '',
         it.bankAccountNumber ?? '',
         aslaasOf(it, aslaas),
-        'Success',
+        status,
         stamp,
       ],
   ];
@@ -128,9 +154,6 @@ pw.MultiPage _officialPage(Lot lot,
         ]),
       );
 
-  const red = PdfColor.fromInt(0xFFC1272D); // India Post red
-  const grey = PdfColor.fromInt(0xFFE3E3E3); // header band
-  const zebra = PdfColor.fromInt(0xFFF2F2F2); // alternate row shading
   return pw.MultiPage(
     pageFormat: PdfPageFormat.a4,
     margin: const pw.EdgeInsets.all(22),
@@ -140,14 +163,14 @@ pw.MultiPage _officialPage(Lot lot,
       pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
         pw.Text('Govt. of India',
             style: const pw.TextStyle(
-                fontSize: 13, fontWeight: pw.FontWeight.bold, color: red)),
+                fontSize: 13, fontWeight: pw.FontWeight.bold, color: _red)),
         pw.SizedBox(height: 1),
         pw.Text('Ministry of Communications',
-            style: const pw.TextStyle(fontSize: 10, color: red)),
+            style: const pw.TextStyle(fontSize: 10, color: _red)),
         pw.SizedBox(height: 1),
         pw.Text('Department of Posts',
             style: const pw.TextStyle(
-                fontSize: 15, fontWeight: pw.FontWeight.bold, color: red)),
+                fontSize: 15, fontWeight: pw.FontWeight.bold, color: _red)),
       ]),
       pw.SizedBox(height: 34),
       pw.Center(
@@ -162,7 +185,7 @@ pw.MultiPage _officialPage(Lot lot,
           crit('Agent Id:', cleanAgent.isEmpty ? '-' : cleanAgent),
           crit('From Date:', '$dmy   To Date: $dmy'),
           crit('List Reference No:', ref),
-          crit('Status:', 'Success'),
+          crit('Status:', status),
           crit('Cheque No.:', ''),
           crit('Type Of Report:', 'SR'),
         ]),
@@ -180,135 +203,59 @@ pw.MultiPage _officialPage(Lot lot,
       ),
       pw.SizedBox(height: 14),
       pw.TableHelper.fromTextArray(
-        headers: headers,
+        headers: _headers,
         data: data,
         border: null, // no gridlines — grey header + zebra rows only
+        columnWidths: _widths,
         headerStyle:
-            const pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
-        cellStyle: const pw.TextStyle(fontSize: 6),
-        headerDecoration: const pw.BoxDecoration(color: grey),
-        oddRowDecoration: const pw.BoxDecoration(color: zebra),
+            const pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold),
+        cellStyle: const pw.TextStyle(fontSize: 6.5),
+        headerDecoration: const pw.BoxDecoration(color: _grey),
+        oddRowDecoration: const pw.BoxDecoration(color: _zebra),
         cellAlignment: pw.Alignment.centerLeft,
         headerAlignment: pw.Alignment.centerLeft,
-        cellPadding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 5),
+        // The portal's rows breathe — roughly a blank line above and below.
+        cellPadding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        headerPadding:
+            const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 7),
       ),
       pw.SizedBox(height: 16),
-      pw.TableHelper.fromTextArray(
-        headers: const ['E-Banking Ref No', 'Total Deposit Amount'],
-        data: [
-          [ref, _amt(lot.totalAmount)]
-        ],
-        border: null,
-        headerStyle:
-            const pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
-        cellStyle: const pw.TextStyle(fontSize: 8),
-        headerDecoration: const pw.BoxDecoration(color: grey),
-        cellAlignment: pw.Alignment.centerLeft,
-        headerAlignment: pw.Alignment.centerLeft,
-        cellPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-      ),
-    ],
-  );
-}
-
-/// A not-yet-submitted list — clearly a DRAFT working copy, never an official
-/// receipt (no Govt-of-India header, no "Success").
-pw.MultiPage _draftPage(Lot lot,
-    {required String agentName,
-    required String agentId,
-    required String aslaas}) {
-  final ref = lotReference(lot);
-  final date = DateFormat('dd-MMM-yyyy').format(lot.createdAt);
-  const headers = <String>[
-    'Sr\nno',
-    'List No.\n(local)',
-    'Rd Account\nNumber',
-    'Account\nName',
-    'RD\nDenomination',
-    'RD Total\nDeposit Amount',
-    'No of\nInstallment',
-    // Per account — this is the sheet he keys from, so each row carries its own.
-    'ASLAAS\nNumber',
-    'Status',
-  ];
-  final data = [
-    for (var i = 0; i < lot.items.length; i++)
-      [
-        '${i + 1}',
-        ref,
-        lot.items[i].accountNumber,
-        lot.items[i].customerName,
-        _cr(lot.items[i].denomination),
-        _cr(lot.items[i].amount),
-        '${lot.items[i].installments}',
-        aslaasOf(lot.items[i], aslaas),
-        'PENDING',
-      ],
-  ];
-  pw.Widget kv(String l, String v) =>
-      pw.Text('$l: $v', style: const pw.TextStyle(fontSize: 8));
-  return pw.MultiPage(
-    pageFormat: PdfPageFormat.a4,
-    margin: const pw.EdgeInsets.all(24),
-    build: (ctx) => [
+      // Footer summary — narrower than the main table, as on the portal.
       pw.Container(
-        width: double.infinity,
-        padding: const pw.EdgeInsets.all(6),
-        decoration: pw.BoxDecoration(
-            border: pw.Border.all(width: 0.8),
-            color: const PdfColor.fromInt(0xFFF3F0D6)),
-        child: pw.Text(
-          'DRAFT - prepared in DOP Collect. Not an official receipt. The '
-          'E-Banking reference and certified schedule are issued by the DOP '
-          'portal on submission.',
-          style: const pw.TextStyle(fontSize: 8),
-          textAlign: pw.TextAlign.center,
+        width: 400,
+        child: pw.TableHelper.fromTextArray(
+          headers: const ['E-Banking Ref No', 'Total Deposit Amount'],
+          data: [
+            [ref, _amt(lot.totalAmount)]
+          ],
+          border: null,
+          columnWidths: const {
+            0: pw.FlexColumnWidth(44),
+            1: pw.FlexColumnWidth(56),
+          },
+          headerStyle:
+              const pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+          cellStyle: const pw.TextStyle(fontSize: 8),
+          headerDecoration: const pw.BoxDecoration(color: _grey),
+          cellAlignment: pw.Alignment.centerLeft,
+          headerAlignment: pw.Alignment.centerLeft,
+          cellPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 7),
         ),
       ),
-      pw.SizedBox(height: 10),
-      pw.Center(
-        child: pw.Column(children: [
-          pw.Text('RD INSTALLMENT LIST (agent working copy)',
-              style: const pw.TextStyle(
-                  fontSize: 13, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 8),
-          kv('Agent Name', agentName.isEmpty ? '-' : agentName),
-          kv('Agent Id', agentId.isEmpty ? '-' : agentId),
-          kv('Date', date),
-          kv('List No. (local)', ref),
-          kv('Status', 'Draft - not yet submitted'),
-          kv('Total Amount', _amt(lot.totalAmount)),
-        ]),
-      ),
-      pw.SizedBox(height: 12),
-      pw.TableHelper.fromTextArray(
-        headers: headers,
-        data: data,
-        border: pw.TableBorder.all(width: 0.5),
-        headerStyle:
-            const pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
-        cellStyle: const pw.TextStyle(fontSize: 7),
-        cellAlignment: pw.Alignment.centerLeft,
-        headerAlignment: pw.Alignment.center,
-        cellPadding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 3),
-      ),
-      pw.SizedBox(height: 10),
-      pw.Text('List No. (local): $ref   Total: ${_amt(lot.totalAmount)}',
-          style: const pw.TextStyle(
-              fontSize: 8, fontWeight: pw.FontWeight.bold)),
     ],
   );
 }
 
+/// [agentName] is accepted so existing callers keep working, but it is not
+/// printed — the portal's report identifies the agent by id only.
 Future<Uint8List> buildLotReportPdf(
   Lot lot, {
-  required String agentName,
+  String agentName = '',
   required String agentId,
   required String aslaas,
 }) async {
   final doc = pw.Document();
-  doc.addPage(
-      _lotPage(lot, agentName: agentName, agentId: agentId, aslaas: aslaas));
+  doc.addPage(_lotPage(lot, agentId: agentId, aslaas: aslaas));
   return doc.save();
 }
 
@@ -316,14 +263,13 @@ Future<Uint8List> buildLotReportPdf(
 /// or a whole day's batch, so they print/submit together at the counter.
 Future<Uint8List> buildBundlePdf(
   List<Lot> lots, {
-  required String agentName,
+  String agentName = '',
   required String agentId,
   required String aslaas,
 }) async {
   final doc = pw.Document();
   for (final lot in lots) {
-    doc.addPage(
-        _lotPage(lot, agentName: agentName, agentId: agentId, aslaas: aslaas));
+    doc.addPage(_lotPage(lot, agentId: agentId, aslaas: aslaas));
   }
   return doc.save();
 }

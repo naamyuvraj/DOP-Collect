@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:printing/printing.dart';
 
 import '../../data/account_repository.dart';
 import '../../data/app_settings.dart';
@@ -13,6 +14,7 @@ import '../../services/remote_config.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/push_button.dart';
+import '../paywall_screen.dart';
 import '../portal/sync_screen.dart';
 import 'lot_preview_screen.dart';
 import 'lot_report.dart';
@@ -207,6 +209,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
   /// before Pay All — you review and tap "Pay All Saved Installments" on the
   /// portal yourself, and it captures the reference back onto the list.
   Future<void> _prepareOnPortal() async {
+    if (!await gatePremium(context) || !mounted) return;
     final accounts = _lot.items.map((e) => e.accountNumber).toSet();
     final ok = await showDialog<bool>(
       context: context,
@@ -275,6 +278,17 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
     });
   }
 
+  /// Share the list's PDF straight from here, without going through Preview
+  /// first. Same action as the card on the Lists tab, named by the real
+  /// E-Banking reference once submitted.
+  Future<void> _share() async {
+    unawaited(Analytics.track('list_share', {'submitted': _lot.isSubmitted}));
+    final ref = _lot.referenceNumber ?? lotReference(_lot);
+    final bytes = await buildLotReportPdf(_lot,
+        agentName: _agentName, agentId: _agentId, aslaas: _aslaas);
+    await Printing.sharePdf(bytes: bytes, filename: '$ref.pdf');
+  }
+
   /// See the list's PDF first (full-screen, pinch-to-zoom) and download/share it
   /// from there. Named by the real E-Banking reference once submitted.
   Future<void> _preview() async {
@@ -325,6 +339,10 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
       appBar: AppBar(
         title: const Text('List'),
         actions: [
+          IconButton(
+              tooltip: 'Share list',
+              icon: const Icon(Icons.ios_share_rounded),
+              onPressed: _share),
           IconButton(
               tooltip: 'Copy list',
               icon: const Icon(Icons.copy_outlined),

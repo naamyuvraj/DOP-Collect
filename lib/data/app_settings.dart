@@ -1,5 +1,13 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/daily_rule.dart';
+
+/// How the day stands on the collect sheet.
+///
+/// [closedUncounted] exists so the sheet can never show a "Counted ✓" for a day
+/// he closed without counting a single note.
+enum DayCloseState { open, closedUncounted, reconciled }
+
 /// Small key-value settings kept on the device (agent's ASLAAS number, etc.).
 class AppSettings {
   static const _kAslaas = 'aslaas_number';
@@ -31,6 +39,100 @@ class AppSettings {
   static Future<void> setMobile(String v) async =>
       (await SharedPreferences.getInstance())
           .setString(_kMobile, v.replaceAll(RegExp(r'\D'), ''));
+
+  // Daily collection rule for the whole book. The default (installment ÷ 30)
+  // suits most agents, but this is his business — he can change the number of
+  // visits he counts on, or put every account on one flat amount, and either
+  // way a single customer can still be overridden from the collect sheet.
+  static const _kDailyFlat = 'daily_rule_flat';
+  static const _kDailyDays = 'daily_rule_days';
+  static const _kDailyAmount = 'daily_rule_amount';
+
+  static Future<DailyRule> dailyRule() async {
+    final p = await SharedPreferences.getInstance();
+    return DailyRule(
+      mode: (p.getBool(_kDailyFlat) ?? false)
+          ? DailyMode.flat
+          : DailyMode.perMonth,
+      days: p.getInt(_kDailyDays) ?? DailyRule.defaultDays,
+      flatAmount: p.getInt(_kDailyAmount) ?? 0,
+    );
+  }
+
+  static Future<void> setDailyRule(DailyRule r) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kDailyFlat, r.mode == DailyMode.flat);
+    await p.setInt(_kDailyDays, r.days);
+    await p.setInt(_kDailyAmount, r.flatAmount);
+  }
+
+  // Day close: the last day he counted his cash against the ledger, and the
+  // figure he counted. Kept in prefs rather than the DB — it's a one-line
+  // "have I done this today?" marker, and the collections themselves are
+  // already the record of what happened.
+  static const _kDayClosed = 'day_closed_on';
+  static const _kDayCounted = 'day_closed_counted';
+  static const _kDayTotal = 'day_closed_total';
+
+  /// What the ledger held when the day was closed. The sheet compares this
+  /// against today's running total, so collecting again after a count re-arms
+  /// the button — a tick that says "counted" while the bag has since grown is
+  /// worse than no tick at all.
+  static Future<int> dayClosedTotal() async =>
+      (await SharedPreferences.getInstance()).getInt(_kDayTotal) ?? -1;
+
+  /// `yyyy-MM-dd` of the last closed day, or '' if he has never closed one.
+  static Future<String> dayClosedOn() async =>
+      (await SharedPreferences.getInstance()).getString(_kDayClosed) ?? '';
+
+  /// The figure he actually counted, or **-1 when the day was closed without
+  /// counting**. The sentinel matters: closing without a count is allowed (he
+  /// may just want the day marked), but it must never be reported back as a
+  /// reconciliation he never performed.
+  static Future<int> dayClosedCounted() async =>
+      (await SharedPreferences.getInstance()).getInt(_kDayCounted) ?? -1;
+
+  static Future<void> setDayClosed(DateTime day,
+      {required int? counted, required int recorded}) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kDayClosed, _dayKey(day));
+    await p.setInt(_kDayCounted, counted ?? -1);
+    await p.setInt(_kDayTotal, recorded);
+  }
+
+  static String _dayKey(DateTime day) =>
+      '${day.year.toString().padLeft(4, '0')}-'
+      '${day.month.toString().padLeft(2, '0')}-'
+      '${day.day.toString().padLeft(2, '0')}';
+
+  /// True when [day] has been closed — whether or not the cash was counted.
+  static Future<bool> isDayClosed(DateTime day) async {
+    final on = await dayClosedOn();
+    return on.isNotEmpty && on == _dayKey(day);
+  }
+
+  /// Where [day] stands against a ledger currently totalling [recorded].
+  ///
+  /// Three states, not two, because "closed" and "counted" are different
+  /// claims. A day closed without a count is closed; only a day closed WITH a
+  /// figure that still matches the ledger is reconciled — and collecting again
+  /// afterwards drops it back to open, since the bag has grown since the count.
+  static Future<DayCloseState> dayCloseState(DateTime day, int recorded) async {
+    if (!await isDayClosed(day)) return DayCloseState.open;
+    if (await dayClosedTotal() != recorded) return DayCloseState.open;
+    return await dayClosedCounted() < 0
+        ? DayCloseState.closedUncounted
+        : DayCloseState.reconciled;
+  }
+
+  /// Which amount one swipe on the collect sheet takes. He flips this once for
+  /// the round he is walking, so it belongs on the device, not in screen state
+  /// that resets every launch.
+  static const _kCollectDaily = 'collect_daily_mode';
+  static Future<bool> collectDailyMode() async =>
+      (await SharedPreferences.getInstance()).getBool(_kCollectDaily) ?? true;
+  static Future<void> setCollectDailyMode(bool v) async =>
+      (await SharedPreferences.getInstance()).setBool(_kCollectDaily, v);
 
   static const _kOnboarded = 'onboarded';
   static Future<bool> onboarded() async =>

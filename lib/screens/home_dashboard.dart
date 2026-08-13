@@ -14,18 +14,25 @@ import '../widgets/glass_panel.dart';
 import '../widgets/summary_card.dart';
 import '../widgets/update_banner.dart';
 import 'account_list_screen.dart';
+import 'onboarding_login.dart';
+import 'paywall_screen.dart';
 import 'portal/sync_screen.dart';
 import 'profile_view.dart';
 
 /// Home dashboard in the soft-UI style: a yellow hero (total value) over a
 /// mint canvas, then clean white floating summary cards.
 class HomeDashboard extends StatefulWidget {
-  const HomeDashboard({super.key, required this.repo, this.onOpenLists});
+  const HomeDashboard(
+      {super.key, required this.repo, this.onOpenLists, this.onSynced});
   final AccountRepository repo;
 
   /// Jump to the Lists tab (auto-list builder) — wired by the shell so the
   /// "Make today's list" CTA lands on the right screen.
   final VoidCallback? onOpenLists;
+
+  /// A Sync finished here. The shell refreshes the other tabs — the first-run
+  /// CTA lives on this screen, so most syncs start from here.
+  final VoidCallback? onSynced;
 
   @override
   State<HomeDashboard> createState() => _HomeDashboardState();
@@ -89,10 +96,15 @@ class _HomeDashboardState extends State<HomeDashboard> {
   }
 
   Future<void> _openSync() async {
+    if (!await ensureDopLogin(context) || !mounted) return;
+    if (!await gatePremium(context) || !mounted) return;
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => SyncScreen(repo: widget.repo)),
     );
-    if (ok == true) _reload();
+    if (ok == true) {
+      _reload();
+      widget.onSynced?.call();
+    }
   }
 
   @override

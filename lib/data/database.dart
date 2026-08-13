@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -16,6 +17,11 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 ///       is always safe to drop + recreate.
 ///   v5: added `lots.reference_number` + `lots.submitted_at` (real portal
 ///       reference captured on submission; null for every existing list).
+///   v6: added `accounts.aslaas` (per-account, replacing one agency-wide value).
+///   v7: added the `collections` ledger + `accounts.route_order`/`daily_amount`.
+///   v8: added `lots.item_count`/`total_amount` (backfilled) and the
+///       `v_collections` / `v_lots` read-only views, so the assistant can see
+///       the collect ledger and the lists — not just the account book.
 class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
@@ -142,11 +148,13 @@ class AppDatabase {
       // the plaintext DB as-is (migration failed / not yet done) so the app
       // never fails to start and no data is lost.
       password: encrypted ? key : null,
-      version: 6,
+      version: 8,
       onCreate: (db, version) async {
         await _createAccounts(db);
         await _createLots(db);
+        await _createCollections(db);
         await _createAssistantView(db);
+        await _createLedgerViews(db);
       },
       onUpgrade: (db, oldV, newV) async {
         if (oldV < 2) await _createLots(db);
@@ -154,6 +162,16 @@ class AppDatabase {
         if (oldV < 4) await _createAssistantView(db);
         if (oldV < 5) await _addLotSubmissionColumns(db);
         if (oldV < 6) await _addAslaasColumn(db);
+        if (oldV < 7) {
+          await _createCollections(db);
+          await _addCollectionColumns(db);
+        }
+        if (oldV < 8) {
+          // A v1 device jumping straight to v8 already got the columns from
+          // _createLots above; only pre-existing lots tables need the backfill.
+          if (oldV >= 2) await _addLotTotals(db);
+          await _createLedgerViews(db);
+        }
       },
       // Force key validation NOW so a bad/lost key fails here (recoverable
       // above) instead of later, mid-screen, as a crash.
@@ -220,7 +238,9 @@ class AppDatabase {
         total_deposit         INTEGER,
         pending_installments  INTEGER,
         default_installments  INTEGER,
-        last_deposit_date     TEXT
+        last_deposit_date     TEXT,
+        route_order           INTEGER,
+        daily_amount          INTEGER
       )
     ''');
     await db.execute(
@@ -235,6 +255,55 @@ class AppDatabase {
       'default_installments INTEGER',
       'last_deposit_date TEXT',
     ]) {
+      await db.execute('ALTER TABLE accounts ADD COLUMN $col');
+    }
+  }
+
+  /// v7: the field collection ledger — one row per handover of cash, never a
+  /// per-account "collected" flag.
+  ///
+  /// Append-only on purpose. A flag has to be reset by someone, and the one
+  /// this app used to keep (`accounts.status`) never was, so auto-build went
+  /// quiet a month later. Everything the UI shows — collected this cycle, how
+  /// much is left, what's in the bag today — is a SUM over these rows for a
+  /// cycle, so it expires by itself when the cycle turns over. Undo deletes the
+  /// row.
+  ///
+  /// One row covers both ways an agent gets paid: a monthly customer is a
+  /// single `denomination`-sized row, a daily customer is ~30 small ones.
+  /// `installments` is stamped at collection time (an advance payer hands over
+  /// 2–3 months at once) and read back when the list is built.
+  Future<void> _createCollections(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS collections (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_number TEXT    NOT NULL,
+        amount         INTEGER NOT NULL,
+        installments   INTEGER NOT NULL DEFAULT 1,
+        collected_at   TEXT    NOT NULL,
+        cycle_ym       TEXT    NOT NULL,
+        note           TEXT
+      )
+    ''');
+    // Every read is "this cycle" or "this customer's history" — index both.
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_collections_cycle '
+        'ON collections(cycle_ym)');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_collections_account '
+        'ON collections(account_number, cycle_ym)');
+  }
+
+  /// v7: two per-customer preferences that belong to the agent, not the portal.
+  ///
+  ///   route_order  — the order he actually walks his round. NULL until he
+  ///                  arranges it; the list falls back to due date.
+  ///   daily_amount — what this customer hands over per visit. NULL means a
+  ///                  monthly payer (one lump sum); a value means a daily one.
+  ///
+  /// Both must survive a Sync — the portal knows nothing about them — so they
+  /// are preserved in `SqfliteAccountRepository.replaceAll` alongside status
+  /// and ASLAAS.
+  Future<void> _addCollectionColumns(Database db) async {
+    for (final col in const ['route_order INTEGER', 'daily_amount INTEGER']) {
       await db.execute('ALTER TABLE accounts ADD COLUMN $col');
     }
   }
@@ -307,6 +376,61 @@ class AppDatabase {
     ''');
   }
 
+  /// v8: the other two thirds of the app, made queryable.
+  ///
+  /// `v_accounts` describes the book as the portal sees it. Everything the
+  /// agent actually *did* — the cash he took today, the lists he built — lived
+  /// in `collections` and `lots`, which the assistant's SQL guard forbids it
+  /// from naming. So "aaj kitna collect hua" was not answered badly; it was
+  /// unanswerable. These two views close that gap.
+  ///
+  /// Both carry no data of their own, so they are always safe to drop and
+  /// recreate on upgrade.
+  Future<void> _createLedgerViews(Database db) async {
+    await db.execute('DROP VIEW IF EXISTS v_collections');
+    await db.execute('''
+      CREATE VIEW v_collections AS
+      SELECT
+        c.id,
+        c.account_number,
+        a.customer_name,
+        c.amount,
+        c.installments,
+        c.collected_at,
+        date(c.collected_at)                               AS collected_on,
+        strftime('%H:%M', c.collected_at)                  AS collected_time,
+        c.cycle_ym,
+        CASE WHEN date(c.collected_at) = date('now','localtime')
+             THEN 1 ELSE 0 END                             AS is_today,
+        CASE WHEN c.cycle_ym = strftime('%Y-%m','now','localtime')
+             THEN 1 ELSE 0 END                             AS is_this_cycle,
+        a.denomination_amount,
+        c.note
+      FROM collections c
+      LEFT JOIN accounts a ON a.account_number = c.account_number
+    ''');
+
+    await db.execute('DROP VIEW IF EXISTS v_lots');
+    await db.execute('''
+      CREATE VIEW v_lots AS
+      SELECT
+        l.id,
+        l.mode,
+        l.item_count,
+        l.total_amount,
+        l.reference_number,
+        date(l.created_at)                                 AS created_on,
+        strftime('%Y-%m', l.created_at)                    AS created_ym,
+        l.submitted_at,
+        CASE WHEN l.reference_number IS NOT NULL
+             THEN 1 ELSE 0 END                             AS is_submitted,
+        CASE WHEN strftime('%Y-%m', l.created_at)
+                  = strftime('%Y-%m','now','localtime')
+             THEN 1 ELSE 0 END                             AS is_this_cycle
+      FROM lots l
+    ''');
+  }
+
   Future<void> _createLots(Database db) async {
     await db.execute('''
       CREATE TABLE lots (
@@ -315,9 +439,41 @@ class AppDatabase {
         mode              TEXT NOT NULL,
         items_json        TEXT NOT NULL,
         reference_number  TEXT,
-        submitted_at      TEXT
+        submitted_at      TEXT,
+        item_count        INTEGER NOT NULL DEFAULT 0,
+        total_amount      INTEGER NOT NULL DEFAULT 0
       )
     ''');
+  }
+
+  /// v8: size and value alongside the JSON blob, so `v_lots` can be a plain
+  /// view. Existing rows are backfilled by parsing their items in Dart — no
+  /// dependency on the JSON1 extension being present in this SQLCipher build.
+  Future<void> _addLotTotals(Database db) async {
+    for (final col in const [
+      'item_count INTEGER NOT NULL DEFAULT 0',
+      'total_amount INTEGER NOT NULL DEFAULT 0',
+    ]) {
+      await db.execute('ALTER TABLE lots ADD COLUMN $col');
+    }
+    final rows = await db.query('lots', columns: ['id', 'items_json']);
+    final batch = db.batch();
+    for (final r in rows) {
+      var count = 0;
+      var total = 0;
+      try {
+        for (final e in jsonDecode(r['items_json'] as String) as List) {
+          final item = e as Map<String, Object?>;
+          count++;
+          total += ((item['d'] as num).toInt()) * ((item['i'] as num).toInt());
+        }
+      } catch (_) {
+        continue; // unreadable blob — leave it at 0 rather than fail the upgrade
+      }
+      batch.update('lots', {'item_count': count, 'total_amount': total},
+          where: 'id = ?', whereArgs: [r['id']]);
+    }
+    await batch.commit(noResult: true);
   }
 
   /// v5: the real portal reference (C…/DC…/NDC…) + submit time, captured once a

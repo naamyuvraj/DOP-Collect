@@ -29,6 +29,18 @@ class RdAccount {
   /// settings. Null until harvested from the portal or typed in.
   final String? aslaas;
 
+  // --- Agent's own field-collection settings (never from the portal) ---
+
+  /// Position in the round the agent actually walks. Null until he arranges his
+  /// route; the sheet then falls back to due date.
+  final int? routeOrder;
+
+  /// This customer's own per-visit amount, when the agent has set one. Null —
+  /// the normal case — means the book-wide rule applies (the installment over
+  /// the month; see [DailyRule]). It exists so one customer who pays ₹50 a day
+  /// on a ₹1,000 RD doesn't force him to change the rule for everyone.
+  final int? dailyAmount;
+
   // --- Detail fields (Deep Sync; null until fetched) ---
   final DateTime? openingDate;
   final int? totalDeposit; // exact, from detail page
@@ -45,6 +57,8 @@ class RdAccount {
     this.serial = 0,
     this.status = CollectionStatus.pending,
     this.aslaas,
+    this.routeOrder,
+    this.dailyAmount,
     this.openingDate,
     this.totalDeposit,
     this.pendingInstallments,
@@ -136,10 +150,16 @@ class RdAccount {
       ? '—'
       : DateFormat('dd-MMM-yyyy').format(effectiveLastDeposit!);
 
+  /// True when this customer has a per-visit amount of their own, overriding
+  /// the book-wide rule. See [DailyRule].
+  bool get hasOwnDailyAmount => dailyAmount != null && dailyAmount! > 0;
+
   RdAccount copyWith({
     CollectionStatus? status,
     int? serial,
     String? aslaas,
+    int? routeOrder,
+    int? dailyAmount,
     DateTime? openingDate,
     int? totalDeposit,
     int? pendingInstallments,
@@ -155,6 +175,8 @@ class RdAccount {
         serial: serial ?? this.serial,
         status: status ?? this.status,
         aslaas: aslaas ?? this.aslaas,
+        routeOrder: routeOrder ?? this.routeOrder,
+        dailyAmount: dailyAmount ?? this.dailyAmount,
         openingDate: openingDate ?? this.openingDate,
         totalDeposit: totalDeposit ?? this.totalDeposit,
         pendingInstallments: pendingInstallments ?? this.pendingInstallments,
@@ -171,6 +193,8 @@ class RdAccount {
         'serial': serial,
         'status': status.name,
         'aslaas': aslaas,
+        'route_order': routeOrder,
+        'daily_amount': dailyAmount,
         'opening_date': openingDate?.toIso8601String(),
         'total_deposit': totalDeposit,
         'pending_installments': pendingInstallments,
@@ -188,6 +212,8 @@ class RdAccount {
         status:
             CollectionStatus.values.byName(m['status'] as String? ?? 'pending'),
         aslaas: _text(m['aslaas']),
+        routeOrder: (m['route_order'] as num?)?.toInt(),
+        dailyAmount: (m['daily_amount'] as num?)?.toInt(),
         openingDate: _dt(m['opening_date']),
         totalDeposit: (m['total_deposit'] as num?)?.toInt(),
         pendingInstallments: (m['pending_installments'] as num?)?.toInt(),

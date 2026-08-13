@@ -9,14 +9,21 @@ import '../data/app_settings.dart';
 import '../data/credentials.dart';
 import 'supabase_config.dart';
 
-/// Anonymous, privacy-safe product analytics -> Supabase (via the REST API with
-/// the anon key). Fire-and-forget: every call swallows errors and no-ops when
-/// Supabase isn't configured or the user has opted out.
+/// Product + account telemetry -> Supabase (via the `ingest` edge function).
+/// Fire-and-forget: every call swallows errors and no-ops when Supabase isn't
+/// configured or the user has opted out.
 ///
-/// What is sent: a random per-install device id, event names, and small numeric
-/// props (counts / amounts / scheme codes). What is NEVER sent: customer names,
-/// account numbers, the agent's login, or the questions typed into the
-/// assistant.
+/// NOT anonymous, and the privacy screen says so — [identify] deliberately
+/// sends the agent's own identity (display name, mobile, agent name, DOP agent
+/// id and SOL branch code) so the dashboard can support a named agent and roll
+/// usage up per region. Keep `PrivacyScreen`'s "What we do collect" section in
+/// step with this method: if a field is added here, it is disclosed there.
+///
+/// What is NEVER sent, and must stay that way: customer names, account numbers,
+/// amounts, due dates, the agent's portal PASSWORD, or the questions typed into
+/// the assistant. Event props are limited to counts and scheme codes.
+///
+/// The opt-out covers everything in this class — including [identify].
 class Analytics {
   static String? _deviceId;
   static bool _identified = false;

@@ -19,8 +19,9 @@ class ProfileView extends StatefulWidget {
 }
 
 class _ProfileViewState extends State<ProfileView> {
-  String _name = '', _agent = '', _userId = '', _aslaas = '', _photo = '';
+  String _name = '', _agent = '', _userId = '', _photo = '';
   Uint8List? _photoBytes; // decoded once (P4)
+  bool _loading = true;
 
   @override
   void initState() {
@@ -31,17 +32,16 @@ class _ProfileViewState extends State<ProfileView> {
   Future<void> _load() async {
     final name = await AppSettings.displayName();
     final agent = await AppSettings.agentName();
-    final aslaas = await AppSettings.aslaas();
     final photo = await AppSettings.profilePhoto();
     final creds = await Credentials.load();
     if (!mounted) return;
     setState(() {
       _name = name;
       _agent = agent;
-      _aslaas = aslaas;
       _photo = photo;
       _photoBytes = photo.isEmpty ? null : base64Decode(photo);
       _userId = creds.agentId;
+      _loading = false;
     });
   }
 
@@ -71,7 +71,8 @@ class _ProfileViewState extends State<ProfileView> {
 
   Future<void> _edit() async {
     await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => OnboardingLogin(onDone: () => Navigator.of(context).pop()),
+      builder: (_) =>
+          OnboardingLogin(editMode: true, onDone: () => Navigator.of(context).pop()),
     ));
     _load();
   }
@@ -80,7 +81,9 @@ class _ProfileViewState extends State<ProfileView> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
-      body: ListView(
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
         children: [
           Center(
@@ -114,7 +117,6 @@ class _ProfileViewState extends State<ProfileView> {
             ),
           const SizedBox(height: 24),
           _row('User ID', _userId.isEmpty ? '—' : _mask(_userId)),
-          _row('ASLAAS Number', _aslaas.isEmpty ? '—' : _aslaas),
           _row('Photo', _photo.isEmpty ? 'Not set' : 'Tap avatar to view'),
           const SizedBox(height: 26),
           PushButton(

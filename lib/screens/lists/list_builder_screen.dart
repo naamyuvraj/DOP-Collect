@@ -182,10 +182,9 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
     ));
     unawaited(Analytics.track('lot_created',
         {'accounts': items.length, 'amount': _total, 'mode': _mode}));
-    // Mark the collected accounts Deposited for this cycle.
-    for (final n in _selected.keys) {
-      await widget.accounts.setStatus(n, CollectionStatus.deposited);
-    }
+    // Saving the list is what marks these accounts collected for this cycle —
+    // auto-build reads the saved lists back (LotPacking.listedThisCycle) rather
+    // than a per-account flag, so the mark expires when the month does.
     if (!mounted) return;
     Navigator.of(context).pop(true);
     ScaffoldMessenger.of(context).showSnackBar(

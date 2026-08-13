@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../data/account_repository.dart';
@@ -29,6 +30,7 @@ class SyncScreen extends StatefulWidget {
     this.detailAccount,
     this.detailSerial,
     this.deepSync = false,
+    this.aslaasSync = false,
     this.submitLot,
     this.batchLots,
     this.lotStore,
@@ -66,9 +68,14 @@ class SyncScreen extends StatefulWidget {
   /// last-deposit dates + totals for every account still missing them.
   final bool deepSync;
 
+  /// ASLAAS sync: after login, read the portal's "ASLAAS Number Report" and
+  /// save each account's ASLAAS number locally (so it's never typed by hand).
+  final bool aslaasSync;
+
   bool get isPrepare => prepareAccounts != null;
   bool get isDetail => detailAccount != null;
   bool get isDeep => deepSync;
+  bool get isAslaas => aslaasSync;
 
   // Desktop Chrome UA — makes the Finacle portal render its full desktop pages.
   static const _desktopUa =
@@ -364,6 +371,8 @@ class _SyncScreenState extends State<SyncScreen> {
         _prepare();
       } else if (widget.isDeep) {
         _deepSync();
+      } else if (widget.isAslaas) {
+        _aslaasSync();
       } else {
         _sync();
       }
@@ -501,6 +510,37 @@ class _SyncScreenState extends State<SyncScreen> {
     await _fillDetails();
     unawaited(Analytics.track('deep_sync'));
     if (mounted) Navigator.of(context).pop(true);
+  }
+
+  /// ASLAAS sync: read the portal's "ASLAAS Number Report" and save each
+  /// account's ASLAAS number locally, so it's never entered by hand.
+  Future<void> _aslaasSync() async {
+    setState(() {
+      _busy = true;
+      _progress = 'Opening ASLAAS report…';
+    });
+    var diag = '';
+    try {
+      final map = await _engine.fetchAslaasReport(
+        onProgress: (page, total, found) => setState(() =>
+            _progress = 'ASLAAS report · page $page of $total · $found found'),
+        onDiag: (r) => diag = r,
+      );
+      if (map.isEmpty) {
+        _snack('No ASLAAS numbers read${diag.isEmpty ? '' : ' · $diag'}.');
+        return;
+      }
+      final written = await widget.repo.applyAslaas(map);
+      unawaited(Analytics.track(
+          'aslaas_sync', {'read': map.length, 'written': written}));
+      if (!mounted) return;
+      _snack('Saved ASLAAS numbers for $written accounts.');
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      _snack('ASLAAS sync failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// After the fast list sync, fill in the exact per-account figures (real
@@ -871,10 +911,12 @@ class _SyncScreenState extends State<SyncScreen> {
       await AppSettings.setLastSyncNow();
       unawaited(Analytics.track('sync_done', {
         'accounts': result.accounts.length,
-        // Total ₹ deposited across the whole book (assets under management), so
-        // the admin dashboard can show the collection value, not just the count.
+        // The "Monthly Book" — total ₹ of monthly RD installments across the
+        // whole book (sum of denominations), matching the app's home hero. NOT
+        // cumulative deposited (denomination × months paid), which is ~20-30×
+        // larger and not what "book value" means here.
         'total_amount':
-            result.accounts.fold<int>(0, (s, a) => s + a.depositedAmount),
+            result.accounts.fold<int>(0, (s, a) => s + a.denominationAmount),
       }));
       if (!mounted) return;
       _snack(result.error ??
@@ -933,6 +975,20 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
+  /// Debug: copy the current WebView page's full HTML to the clipboard, so the
+  /// exact portal DOM can be shared to fix navigation (e.g. the ASLAAS report
+  /// link). Navigate the WebView to the page you want, then tap this.
+  Future<void> _copyHtml() async {
+    try {
+      final html = _decode(await _controller
+          .runJavaScriptReturningResult('document.documentElement.outerHTML'));
+      await Clipboard.setData(ClipboardData(text: html));
+      _snack('Page HTML copied (${html.length} chars) — paste it to share.');
+    } catch (e) {
+      _snack('Copy failed: $e');
+    }
+  }
+
   void _snack(String m) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
@@ -952,8 +1008,14 @@ class _SyncScreenState extends State<SyncScreen> {
                         ? 'Prepare List'
                         : widget.isDeep
                             ? 'Deep Sync'
-                            : 'Sync'),
+                            : widget.isAslaas
+                                ? 'ASLAAS Numbers'
+                                : 'Sync'),
         actions: [
+          IconButton(
+              tooltip: 'Copy page HTML (debug)',
+              icon: const Icon(Icons.code_rounded),
+              onPressed: _copyHtml),
           IconButton(
               tooltip: 'Auto-fill captcha',
               icon: const Icon(Icons.auto_fix_high_outlined),
@@ -1040,7 +1102,9 @@ class _SyncScreenState extends State<SyncScreen> {
                     ? _prepare
                     : widget.isDeep
                         ? _deepSync
-                        : _sync),
+                        : widget.isAslaas
+                            ? _aslaasSync
+                            : _sync),
         icon: Icon(
             widget.isBatch
                 ? Icons.cloud_upload_rounded
@@ -1048,7 +1112,9 @@ class _SyncScreenState extends State<SyncScreen> {
                     ? Icons.playlist_add_check
                     : widget.isDeep
                         ? Icons.cloud_download_rounded
-                        : Icons.sync,
+                        : widget.isAslaas
+                            ? Icons.badge_outlined
+                            : Icons.sync,
             size: 18),
         label: Text(widget.isBatch
             ? 'Submit all'
@@ -1056,7 +1122,9 @@ class _SyncScreenState extends State<SyncScreen> {
                 ? 'Prepare'
                 : widget.isDeep
                     ? 'Deep Sync'
-                    : 'Sync'),
+                    : widget.isAslaas
+                        ? 'Get ASLAAS'
+                        : 'Sync'),
       ),
     );
   }

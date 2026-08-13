@@ -7,6 +7,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../models/rd_account.dart';
 import 'agent_detail_parser.dart';
 import 'agent_list_parser.dart';
+import 'aslaas_report_parser.dart';
 import 'saved_installments_parser.dart';
 
 /// Result of an auto-sync attempt.
@@ -102,26 +103,11 @@ class PortalSyncEngine {
   Future<List<RdAccount>> parseCurrentPage() async =>
       AgentListParser.parsePage(await currentPageHtml());
 
-  /// ONE cheap in-page probe for the page's state — returns a short token
-  /// ('list' | 'expired' | 'blocked' | 'other') instead of serialising the
-  /// whole DOM across the JS bridge on every check. Uses visible text only, so
-  /// it's tiny and fast even on the heavy legacy portal pages. This is the hot
-  /// path during a sync (called per page + on every table-wait poll).
-  static const _pageStateJs = r'''
-    (function(){
-      var t = (document.body && document.body.innerText) || '';
-      if (/Session\s+is\s+Expired|Session\s+Expired/i.test(t)) return 'expired';
-      if (/close this window/i.test(t) && /new browser window/i.test(t)) return 'blocked';
-      if ((/account\s*no|account\s*name/i.test(t)) &&
-          (/Page\s+\d+\s+of\s+\d+/i.test(t))) return 'list';
-      return 'other';
-    })();
-  ''';
-
-  Future<String> _pageState() async =>
-      _unwrap(await controller.runJavaScriptReturningResult(_pageStateJs));
-
-  Future<bool> _isSessionExpired() async => (await _pageState()) == 'expired';
+  Future<bool> _isSessionExpired() async {
+    final html = await currentPageHtml();
+    return html.contains('Session is Expired') ||
+        html.contains('Session Expired');
+  }
 
   /// Detects Finacle's stale-transaction-token guard page — "Please close this
   /// window and try accessing the application in a new browser window." — shown
@@ -129,10 +115,17 @@ class PortalSyncEngine {
   /// a browser Back/Forward). Deep Sync avoids triggering it, but we still probe
   /// for it so a poisoned session surfaces as a clear error instead of silently
   /// ending after one account.
-  Future<bool> _isBlockedPage() async => (await _pageState()) == 'blocked';
+  Future<bool> _isBlockedPage() async {
+    final html = (await currentPageHtml()).toLowerCase();
+    return html.contains('close this window') &&
+        html.contains('new browser window');
+  }
 
   /// Is the account list currently rendered? (has the table + "Page X of N").
-  Future<bool> _onListPage() async => (await _pageState()) == 'list';
+  Future<bool> _onListPage() async {
+    final html = await currentPageHtml();
+    return _hasAccountTable(html);
+  }
 
   /// Public probe so the screen can auto-start once login lands on the list.
   Future<bool> isOnListPage() => _onListPage();
@@ -145,6 +138,12 @@ class PortalSyncEngine {
         "(function(){return (document.querySelector('#Accounts, a[name=\"HREF_Accounts\"], input[name*=\"GOTO_NEXT\"]')) ? 'true' : 'false';})();";
     return _unwrap(await controller.runJavaScriptReturningResult(js))
         .contains('true');
+  }
+
+  static bool _hasAccountTable(String html) {
+    final lower = html.toLowerCase();
+    return (lower.contains('account no') || lower.contains('account name')) &&
+        RegExp(r'Page\s+\d+\s+of\s+\d+', caseSensitive: false).hasMatch(html);
   }
 
   static int totalPages(String html) {
@@ -432,6 +431,106 @@ class PortalSyncEngine {
     }
     await _backToList(timeout);
     return map;
+  }
+
+  /// Bulk-read each account's ASLAAS number from the portal's "ASLAAS Number
+  /// Report" (Accounts sidebar → ASLAAS Number Report → Search). Walks every
+  /// report page and returns `accountNumber -> ASLAAS` (skipping "APPLIED" /
+  /// blank). Best-effort with on-screen diagnostics; uses normal navigation so
+  /// it can't poison the session.
+  Future<Map<String, String>> fetchAslaasReport({
+    void Function(int page, int total, int found)? onProgress,
+    void Function(String reason)? onDiag,
+    bool Function()? shouldStop,
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    Future<bool> onReport() async =>
+        (await currentPageHtml()).toLowerCase().contains('aslaas number');
+
+    // Exact sidebar link (stable id/name from the portal DOM).
+    const reportLink =
+        'a[id="ASLAAS Number Report"], a[name="HREF_ASLAAS Number Report"]';
+
+    // 1. Navigate to the report unless we're already on it.
+    if (!await onReport()) {
+      _pageLoad = Completer<void>();
+      var clicked = await _clickSelector(reportLink);
+      if (!clicked) {
+        // Sidebar not shown yet — open the Accounts menu first, then the link.
+        _pageLoad = Completer<void>();
+        final openedMenu = await _clickSelector(
+            '#Accounts, a[name="HREF_Accounts"], #Accounts a');
+        if (openedMenu) {
+          await _awaitLoad(const Duration(seconds: 8));
+          await _settle();
+        } else {
+          _pageLoad = null;
+        }
+        _pageLoad = Completer<void>();
+        clicked = await _clickSelector(reportLink);
+      }
+      if (!clicked) {
+        _pageLoad = null;
+        onDiag?.call('could not find the "ASLAAS Number Report" link');
+        return const {};
+      }
+      await _awaitLoad(timeout);
+      await _settle();
+    }
+
+    // 2. Click Search (blank filters => all accounts).
+    _pageLoad = Completer<void>();
+    final searched = _unwrap(await controller.runJavaScriptReturningResult('''
+      (function(){
+        var b=document.querySelector('#SEARCH_ASLAAS_NUMBER')
+          || document.querySelector('input[name="Action.SEARCH_ASLAAS_NUMBER"]')
+          || document.querySelector('input[value="Search" i]')
+          || document.querySelector('input[name*="SEARCH" i]');
+        if(!b || b.disabled) return 'false';
+        b.click(); return 'true';
+      })();
+    '''));
+    if (searched.contains('true')) {
+      await _awaitLoad(timeout);
+      await _settle();
+    } else {
+      _pageLoad = null; // results may already be on screen
+    }
+
+    // 3. Walk the report pages.
+    final out = <String, String>{};
+    var html = await currentPageHtml();
+    if (!RegExp('aslaas number', caseSensitive: false).hasMatch(html)) {
+      onDiag?.call('ASLAAS report did not open (${html.length} chars)');
+      return const {};
+    }
+    final total = totalPages(html);
+    for (var page = 1; page <= total; page++) {
+      if (shouldStop?.call() ?? false) break;
+      out.addAll(AslaasReportParser.parse(html));
+      onProgress?.call(page, total, out.length);
+      if (page >= total) break;
+
+      _pageLoad = Completer<void>();
+      final next =
+          _unwrap(await controller.runJavaScriptReturningResult(_nextJs));
+      if (!next.contains('true')) {
+        _pageLoad = null;
+        break; // no next control found — stop cleanly
+      }
+      await _awaitLoad(timeout);
+      await _settle();
+      // Wait for the report table to re-render before parsing the next page.
+      final deadline = DateTime.now().add(const Duration(seconds: 15));
+      while (DateTime.now().isBefore(deadline)) {
+        html = await currentPageHtml();
+        if (RegExp('aslaas number', caseSensitive: false).hasMatch(html)) break;
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+      html = await currentPageHtml();
+    }
+    if (out.isEmpty) onDiag?.call('report opened but no ASLAAS rows parsed');
+    return out;
   }
 
   /// Fill exact detail for accounts in [needed], capped at [maxPerRun] so a
@@ -1151,22 +1250,18 @@ class PortalSyncEngine {
     await c.future.timeout(timeout, onTimeout: () => _pageLoad = null);
   }
 
-  /// Poll until the account table is present (handles late-rendering DOM). Uses
-  /// the cheap [_pageState] probe, so each poll is a tiny JS call, not a full
-  /// DOM serialisation — tighter polling stays cheap.
+  /// Poll until the account table is present (handles late-rendering DOM).
   Future<bool> _waitForTable(Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      if ((await _pageState()) == 'list') return true;
-      await Future<void>.delayed(const Duration(milliseconds: 150));
+      if (_hasAccountTable(await currentPageHtml())) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
     }
     return false;
   }
 
-  // Small buffer after onPageFinished for the portal's own scripts to wire up.
-  // The table-wait poll is the real readiness gate, so this stays short.
   Future<void> _settle() =>
-      Future<void>.delayed(const Duration(milliseconds: 150));
+      Future<void>.delayed(const Duration(milliseconds: 350));
 
   static const _nextJs = r'''
     (function() {

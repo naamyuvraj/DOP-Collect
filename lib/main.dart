@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'assistant/assistant_config.dart';
 import 'screens/force_update_screen.dart';
+import 'screens/paywall_screen.dart';
 import 'services/razorpay_checkout.dart';
 import 'services/remote_config.dart';
 import 'services/subscription.dart';
@@ -12,6 +13,7 @@ import 'data/account_repository.dart';
 import 'data/app_settings.dart';
 import 'data/rd_rates_store.dart';
 import 'data/database.dart';
+import 'data/collection_repository.dart';
 import 'data/lot_repository.dart';
 import 'data/sample_data.dart';
 import 'models/summaries.dart';
@@ -34,6 +36,9 @@ Future<void> main() async {
       : SqfliteAccountRepository(AppDatabase.instance);
   final LotRepository lots =
       web ? MemoryLotRepository() : SqfliteLotRepository(AppDatabase.instance);
+  final CollectionRepository collections = web
+      ? MemoryCollectionRepository()
+      : SqfliteCollectionRepository(AppDatabase.instance);
 
   // Seed demo customers ONLY in the web UI preview. On the real device a fresh
   // install starts empty and honest — a 58-year-old must never open the app to
@@ -82,7 +87,11 @@ Future<void> main() async {
       !(await SessionStore.exists);
 
   runApp(DopCollectApp(
-      repo: repo, lots: lots, onboarded: onboarded, needsVerify: needsVerify));
+      repo: repo,
+      lots: lots,
+      collections: collections,
+      onboarded: onboarded,
+      needsVerify: needsVerify));
 
   // 2-device enforcement: if OTP is on and this device's session was revoked
   // remotely (kicked by the 2-device limit, or disabled by an admin), drop to
@@ -111,11 +120,13 @@ class DopCollectApp extends StatefulWidget {
     super.key,
     required this.repo,
     required this.lots,
+    required this.collections,
     required this.onboarded,
     this.needsVerify = false,
   });
   final AccountRepository repo;
   final LotRepository lots;
+  final CollectionRepository collections;
   final bool onboarded;
   final bool needsVerify;
 
@@ -147,6 +158,11 @@ class _DopCollectAppState extends State<DopCollectApp> {
     DopCollectApp.setNeedsVerify = (v) {
       if (mounted) setState(() => _needsVerify = v);
     };
+    // Entitlement can change under us (background refresh, or a purchase that
+    // just completed), so rebuild rather than leave a stale gate on screen.
+    Subscription.onChanged = () {
+      if (mounted) setState(() {});
+    };
   }
 
   /// Full sign-out from the verify gate: wipe credentials + session, drop to
@@ -154,6 +170,7 @@ class _DopCollectAppState extends State<DopCollectApp> {
   Future<void> _fullLogout() async {
     await Credentials.clear();
     await OtpService.logout();
+    await Subscription.forget();
     await AppSettings.setOnboarded(false);
     if (mounted) {
       setState(() {
@@ -197,10 +214,20 @@ class _DopCollectAppState extends State<DopCollectApp> {
                       },
                       onLogout: _fullLogout,
                     )
-                  : MainShell(
-                      key: const ValueKey('shell'),
-                      repo: widget.repo,
-                      lots: widget.lots),
+                  // Access has ended. Gating the premium ACTIONS one by one
+                  // leaves the rest of a paid app free, and every new screen is
+                  // another place to forget — so the gate sits here, once,
+                  // where nothing can route around it. Inert until payments are
+                  // switched on, and fail-open: an unknown or unreachable
+                  // status never blocks (see Subscription.blocked).
+                  : Subscription.blocked
+                      ? const PaywallScreen(
+                          key: ValueKey('paywall-gate'), hardGate: true)
+                      : MainShell(
+                          key: const ValueKey('shell'),
+                          repo: widget.repo,
+                          lots: widget.lots,
+                          collections: widget.collections),
     );
   }
 }

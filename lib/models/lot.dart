@@ -125,6 +125,12 @@ class Lot {
         'items_json': jsonEncode(items.map((e) => e.toJson()).toList()),
         'reference_number': referenceNumber,
         'submitted_at': submittedAt?.toIso8601String(),
+        // Denormalised so `v_lots` can report size and value in plain SQL. The
+        // items live in a JSON blob, and relying on SQLite's JSON1 extension
+        // being compiled into every SQLCipher build is not a bet worth taking
+        // for a view the assistant depends on.
+        'item_count': count,
+        'total_amount': totalAmount,
       };
 
   factory Lot.fromMap(Map<String, Object?> m) => Lot(

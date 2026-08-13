@@ -7,7 +7,7 @@ import '../services/otp_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/push_button.dart';
 
-/// WhatsApp OTP verification. Sends a code on open, lets the agent enter it in
+/// Phone OTP verification (code delivered over WhatsApp). Sends a code on open, lets the agent enter it in
 /// segmented boxes, verifies (binding phone <-> agentId), and pops `true` on
 /// success. Reusable for first-time onboarding and re-verification.
 class OtpVerifyScreen extends StatefulWidget {
@@ -16,12 +16,17 @@ class OtpVerifyScreen extends StatefulWidget {
     required this.phone,
     required this.agentId,
     this.codeLength = 4,
+    this.changePhone = false,
   });
 
   /// 10-digit mobile number (India). Country code is added server-side.
   final String phone;
   final String agentId;
   final int codeLength;
+
+  /// True when verifying a NEW number for the "update mobile" flow — lets the
+  /// server rebind this agent to the new number.
+  final bool changePhone;
 
   @override
   State<OtpVerifyScreen> createState() => _OtpVerifyScreenState();
@@ -81,7 +86,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
       _ctrl.clear();
       _startCooldown(r.cooldown);
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('A new code is on its way on WhatsApp.')));
+          const SnackBar(content: Text('A new code is on its way.')));
       FocusScope.of(context).requestFocus(_focus);
     } else {
       setState(() => _error = r.message);
@@ -113,7 +118,8 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
       _verifying = true;
       _error = null;
     });
-    final r = await OtpService.verify(widget.phone, code, agentId: widget.agentId);
+    final r = await OtpService.verify(widget.phone, code,
+        agentId: widget.agentId, changePhone: widget.changePhone);
     if (!mounted) return;
     if (r.ok) {
       Navigator.of(context).pop(true);
@@ -147,11 +153,11 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                 width: 60,
                 height: 60,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF25D366).withValues(alpha: 0.12),
+                  color: AppTheme.accentSoft,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Icon(Icons.chat_rounded,
-                    color: Color(0xFF25D366), size: 30),
+                child: const Icon(Icons.sms_outlined,
+                    color: AppTheme.black, size: 30),
               ),
               const SizedBox(height: 20),
               Text('Verify your phone',
@@ -162,7 +168,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                   style:
                       AppTheme.body(14.5, color: AppTheme.inkMuted, height: 1.45),
                   children: [
-                    const TextSpan(text: 'We sent a code on WhatsApp to '),
+                    const TextSpan(text: 'We sent a code to '),
                     TextSpan(
                         text: _masked,
                         style: AppTheme.body(14.5,

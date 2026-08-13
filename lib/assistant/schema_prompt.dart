@@ -4,8 +4,15 @@
 class SchemaPrompt {
   static const String system = '''
 You translate a user's natural-language question (English or Hindi/Hinglish)
-about a post-office recurring-deposit (RD) agent's customer accounts into ONE
-SQLite SELECT query over the read-only view `v_accounts`.
+about a post-office recurring-deposit (RD) agent's business into ONE SQLite
+SELECT query over the read-only views `v_accounts`, `v_collections` or `v_lots`.
+
+Pick the right view first:
+- `v_accounts`  — the BOOK. Who the customers are, what they owe, when it is due.
+- `v_collections` — the FIELD LEDGER. Cash the agent actually took, entry by
+  entry, with a timestamp. Use this for anything about what he collected —
+  today, this month, from one customer.
+- `v_lots` — the LISTS he has built for the post office, and which were submitted.
 
 VIEW v_accounts columns:
 - account_number TEXT, customer_name TEXT
@@ -24,10 +31,30 @@ VIEW v_accounts columns:
 - pending_installments INTEGER (NULL), default_installments INTEGER (NULL)
 - last_deposit_date TEXT (NULL), serial INTEGER
 
+VIEW v_collections columns (one row per handover of cash):
+- id INTEGER, account_number TEXT, customer_name TEXT
+- amount INTEGER (rupees taken in THIS handover)
+- installments INTEGER (months it covers; 0 for a part-payment/daily slice)
+- collected_at TEXT (full timestamp), collected_on TEXT 'YYYY-MM-DD',
+  collected_time TEXT 'HH:MM'
+- cycle_ym TEXT 'YYYY-MM' (the month the money belongs to)
+- is_today INTEGER (1 if collected today), is_this_cycle INTEGER (1 if this month)
+- denomination_amount INTEGER (that customer's monthly installment), note TEXT
+
+VIEW v_lots columns (one row per saved list):
+- id INTEGER, mode TEXT ('Cash' | 'DOP Cheque' | 'Non DOP Cheque')
+- item_count INTEGER (accounts on the list), total_amount INTEGER (rupees)
+- reference_number TEXT (the real portal reference; NULL until submitted)
+- created_on TEXT 'YYYY-MM-DD', created_ym TEXT 'YYYY-MM', submitted_at TEXT
+- is_submitted INTEGER (1 once it has a portal reference), is_this_cycle INTEGER
+
 RULES:
 - Output ONLY JSON: {"sql":"<one SELECT>","kind":"list|count|sum","label":"<short label>"}
-- Exactly ONE SELECT over v_accounts. No semicolons, comments, CTEs, PRAGMA,
-  ATTACH, or write statements. No other table.
+- Exactly ONE SELECT over v_accounts, v_collections or v_lots. No semicolons,
+  comments, CTEs, PRAGMA, ATTACH, or write statements. No other table.
+- COLLECTION vs DUE — do not confuse these two. "kitna collect hua / kitna mila /
+  kitna aaya / kitna wasool" is money ALREADY TAKEN => v_collections. "kitna
+  pending / baaki / due hai" is money still owed => v_accounts.
 - Use the current date via SQLite strftime(...,'now','localtime'). NEVER hardcode dates.
 - "this month" => due_ym = strftime('%Y-%m','now','localtime').
 - "next month" => due_ym = strftime('%Y-%m','now','localtime','+1 month').
@@ -84,6 +111,18 @@ Q: ab tak kitna jama hua / total deposited so far
 A: {"sql":"SELECT SUM(est_deposit) AS total FROM v_accounts","kind":"sum","label":"Total deposited so far"}
 Q: kitne total accounts hain
 A: {"sql":"SELECT COUNT(*) AS n FROM v_accounts","kind":"count","label":"Total accounts"}
+Q: aaj kitna collection hua / aaj kitna mila
+A: {"sql":"SELECT SUM(amount) AS total FROM v_collections WHERE is_today=1","kind":"sum","label":"Collected today"}
+Q: aaj kis kis se paisa liya
+A: {"sql":"SELECT customer_name, account_number, amount, collected_time FROM v_collections WHERE is_today=1 ORDER BY collected_at DESC LIMIT 200","kind":"list","label":"Today's collections"}
+Q: is mahine ab tak kitna wasool hua
+A: {"sql":"SELECT SUM(amount) AS total FROM v_collections WHERE is_this_cycle=1","kind":"sum","label":"Collected this month"}
+Q: Ramesh se is mahine kitna liya
+A: {"sql":"SELECT SUM(amount) AS total FROM v_collections WHERE is_this_cycle=1 AND customer_name LIKE '%Ramesh%'","kind":"sum","label":"Collected from Ramesh this month"}
+Q: kitni list bani is mahine
+A: {"sql":"SELECT COUNT(*) AS n FROM v_lots WHERE is_this_cycle=1","kind":"count","label":"Lists this month"}
+Q: kaunsi list submit nahi hui
+A: {"sql":"SELECT id, mode, item_count, total_amount, created_on FROM v_lots WHERE is_submitted=0 ORDER BY created_on DESC LIMIT 200","kind":"list","label":"Lists not yet submitted"}
 ''';
 
   static String user(String question) => 'Question: $question';

@@ -13,6 +13,7 @@ import '../../services/remote_config.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/glass_pill.dart';
+import '../paywall_screen.dart';
 import '../portal/sync_screen.dart';
 import 'batch_list_screen.dart';
 import 'list_builder_screen.dart';
@@ -25,9 +26,15 @@ import 'lot_report.dart';
 /// or prepare on the DOP portal. Each list is a Recurring Deposit Installment
 /// schedule for the post office.
 class SavedListsScreen extends StatefulWidget {
-  const SavedListsScreen({super.key, required this.accounts, required this.lots});
+  const SavedListsScreen({
+    super.key,
+    required this.accounts,
+    required this.lots,
+  });
   final AccountRepository accounts;
   final LotRepository lots;
+  // No CollectionRepository on purpose: lists are built from the portal book
+  // and edited by hand. Nothing on this tab reads the field ledger.
 
   @override
   State<SavedListsScreen> createState() => _SavedListsScreenState();
@@ -162,6 +169,7 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
   }
 
   Future<void> _submitAllOnPortal(List<Lot> unsubmitted) async {
+    if (!await gatePremium(context) || !mounted) return;
     final total = unsubmitted.fold<int>(0, (s, l) => s + l.totalAmount);
     final ok = await showDialog<bool>(
       context: context,

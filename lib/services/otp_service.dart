@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 
 import '../data/session.dart';
@@ -28,10 +29,16 @@ class OtpService {
   /// reads it once to explain why the agent was signed out.
   static bool signedOutRemotely = false;
 
+  /// Test seam: every request goes through this client, so a test can assert
+  /// exactly what reaches the wire — notably that a `changePhone` verify really
+  /// does carry the session token the server now demands.
+  @visibleForTesting
+  static http.Client client = http.Client();
+
   static Future<Map<String, dynamic>?> _call(Map<String, Object?> body) async {
     if (!SupabaseConfig.configured) return null;
     try {
-      final res = await http
+      final res = await client
           .post(
             Uri.parse('${SupabaseConfig.url}/functions/v1/otp'),
             headers: {
@@ -69,12 +76,19 @@ class OtpService {
 
   /// Verify [otp] for [phone], binding to [agentId]. On success the session
   /// token is stored in the Keystore and returned.
+  ///
+  /// A [changePhone] verify additionally carries THIS device's existing session
+  /// token: the OTP proves the agent controls the new number, and the token
+  /// proves they already own the account being moved. The server refuses the
+  /// rebind without both, so knowing an agent id can't take an account over.
   static Future<OtpResult> verify(
     String phone,
     String otp, {
     required String agentId,
+    bool changePhone = false,
   }) async {
     final device = await Analytics.deviceId();
+    final existing = changePhone ? await SessionStore.load() : null;
     final j = await _call({
       'action': 'verify',
       'phone': phone,
@@ -82,6 +96,8 @@ class OtpService {
       'agentId': agentId,
       'deviceId': device,
       'appVersion': SupabaseConfig.buildVersion,
+      if (changePhone) 'changePhone': true,
+      if (existing != null) 'token': existing.token,
     });
     if (j == null) {
       return const OtpResult(false,
@@ -152,6 +168,9 @@ class OtpService {
             : 'This phone is already linked to a different Agent ID.';
       case 'account_disabled':
         return 'This account has been disabled. Please contact support.';
+      case 'reauth_required':
+        return 'For your security, change your number from a phone that is '
+            'already signed in to this account.';
       case 'bad_phone':
         return 'That doesn\'t look like a valid mobile number.';
       default:
