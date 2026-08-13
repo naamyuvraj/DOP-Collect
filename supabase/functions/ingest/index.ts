@@ -26,6 +26,10 @@ const json = (o: unknown, status = 200) =>
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+async function sha256(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 const clip = (v: unknown, n: number) =>
   typeof v === "string" ? v.slice(0, n) : v;
 
@@ -39,7 +43,7 @@ Deno.serve(async (req) => {
   );
 
   try {
-    const { kind, row } = await req.json();
+    const { kind, row, token: bodyToken } = await req.json();
     if (!row || typeof row !== "object") return json({ ok: false }, 400);
 
     const device =
@@ -74,11 +78,39 @@ Deno.serve(async (req) => {
         app_version: clip(row.app_version, 32),
       });
     } else if (kind === "device") {
+      const id = clip(row.id, 64);
+      if (!id) return json({ ok: false, error: "id required" }, 400);
+
+      // --- Ownership -------------------------------------------------------
+      // The device id is a random uuid the app makes up, so it proves nothing:
+      // anyone holding the anon key could name someone else's id and rewrite
+      // their name, mobile and agent id. That row is what the admin panel reads
+      // an agent's identity from, so a forged write is not just noise.
+      //
+      // Once an install verifies its phone, the `otp` function stamps
+      // `account_id` on this row — that is the point it stops being anonymous
+      // telemetry and starts being an identity. From then on, only a live
+      // session for the SAME account may write it. Rows with no account_id yet
+      // (a fresh install reporting app_open, an agent still onboarding) stay
+      // open, so nothing about first-run changes.
+      const { data: existing } = await sb
+        .from("devices").select("account_id").eq("id", id).maybeSingle();
+      const claimed = (existing as { account_id?: string | null } | null)?.account_id;
+      if (claimed) {
+        const token = String(bodyToken ?? "");
+        const { data: sess } = token
+          ? await sb.from("device_sessions").select("account_id, revoked_at")
+              .eq("token_hash", await sha256(token)).maybeSingle()
+          : { data: null };
+        const ok = sess && !sess.revoked_at && sess.account_id === claimed;
+        if (!ok) return json({ ok: false, error: "not_your_device" }, 403);
+      }
+
       // agent_id / sol_id (post-office branch) power per-agent + per-region
       // analytics. Only set them when the app actually sends them, so an older
       // build that omits them can't null out a value already on the row.
       const deviceRow: Record<string, unknown> = {
-        id: clip(row.id, 64),
+        id,
         agent_name: clip(row.agent_name, 80),
         app_version: clip(row.app_version, 32),
         platform: clip(row.platform, 16) || "android",

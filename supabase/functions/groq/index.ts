@@ -30,20 +30,49 @@ async function sha256(s: string): Promise<string> {
     .join("");
 }
 
+/**
+ * The only models this proxy will ever call, cheapest-capable first.
+ *
+ * `models` arrives in the request body, so without this an anon-key holder
+ * could name any model Groq offers — including one that costs many times what
+ * the app actually needs — and bill it to these keys. The client may still
+ * express a PREFERENCE (it orders them by task), but only from this set;
+ * anything else is dropped rather than rejected, so an app build that learns a
+ * new model id degrades to the default instead of breaking.
+ */
+const ALLOWED_MODELS = new Set([
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+]);
+const DEFAULT_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+
+/** Ceilings on one call, so a single request can't be made arbitrarily costly. */
+const MAX_OUTPUT_TOKENS = 1024; // the app's largest real ask is 700
+const MAX_SYSTEM_CHARS = 12000; // the schema prompt is the biggest, ~4k
+const MAX_USER_CHARS = 4000;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
   try {
+    const body = await req.json();
     const {
-      system,
-      user,
       jsonMode = false,
       temperature = 0,
-      maxTokens = 512,
       models,
       token,
-    } = await req.json();
+    } = body;
+
+    // Clamp the cost levers. Every one of these is client-supplied, and each is
+    // a way to turn one request into a large bill.
+    const system = String(body.system ?? "").slice(0, MAX_SYSTEM_CHARS);
+    const user = String(body.user ?? "").slice(0, MAX_USER_CHARS);
+    const maxTokens = Math.min(
+      MAX_OUTPUT_TOKENS,
+      Math.max(1, Number(body.maxTokens) || 512),
+    );
+    if (!system || !user) return json({ error: "empty prompt" }, 400);
 
     const sb = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -57,6 +86,32 @@ Deno.serve(async (req) => {
       .from("app_config").select("value").eq("key", "require_integrity").maybeSingle();
     if (intCfg?.value === true && !req.headers.get("x-integrity-token"))
       return json({ error: "integrity_required" }, 403);
+
+    // --- Who is calling? ----------------------------------------------------
+    // Resolved once and reused by both gates below.
+    const session = token
+      ? (await sb.from("device_sessions").select("account_id, revoked_at")
+          .eq("token_hash", await sha256(String(token))).maybeSingle()).data
+      : null;
+    const liveSession = session && !session.revoked_at ? session : null;
+
+    // --- Genuine-caller gate -------------------------------------------------
+    // This is the expensive endpoint: the anon key ships inside the APK, so
+    // anyone who pulls it out gets an LLM relay billed to these keys, and the
+    // per-device caps don't bind because `x-device-id` is whatever the caller
+    // says it is. The only thing here that can't be minted for free is a device
+    // session — it costs a real WhatsApp OTP on a real number to obtain, is
+    // rate-limited, and is revocable.
+    //
+    // Tied to `otp_required` rather than switched on unconditionally: when that
+    // flag is on, every legitimate install already holds a session, so demanding
+    // one costs real users nothing. If OTP is ever turned off, nobody has one
+    // and this correctly falls back to the rate limits alone rather than taking
+    // the assistant down with it.
+    const { data: otpCfg } = await sb
+      .from("app_config").select("value").eq("key", "otp_required").maybeSingle();
+    if (otpCfg?.value === true && !liveSession)
+      return json({ error: "verification_required" }, 401);
 
     // --- Entitlement (dormant until app_config.payments_enabled is on) ------
     // The app's paywall is a CLIENT gate. It fails open on purpose — locking a
@@ -74,13 +129,10 @@ Deno.serve(async (req) => {
     // payments_enabled, or no device has a session for any of this to read.
     const { data: payCfg } = await sb
       .from("app_config").select("value").eq("key", "payments_enabled").maybeSingle();
-    if (payCfg?.value === true && token) {
-      const { data: sess } = await sb
-        .from("device_sessions").select("account_id, revoked_at")
-        .eq("token_hash", await sha256(String(token))).maybeSingle();
-      if (sess && !sess.revoked_at) {
+    if (payCfg?.value === true && liveSession) {
+      {
         const { data: acct } = await sb
-          .from("accounts").select("agent_id, disabled").eq("id", sess.account_id)
+          .from("accounts").select("agent_id, disabled").eq("id", liveSession.account_id)
           .maybeSingle();
         const agentId = acct?.disabled ? "" : String(acct?.agent_id ?? "").trim();
         if (agentId) {
@@ -136,9 +188,10 @@ Deno.serve(async (req) => {
     const keys: string[] = (rows || []).map((r: { key: string }) => r.key);
     if (!keys.length) return json({ error: "no active keys" }, 503);
 
-    const modelList: string[] = Array.isArray(models) && models.length
-      ? models
-      : ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+    // Honour the client's ordering, but only across models we allow.
+    const asked: string[] = Array.isArray(models) ? models.map(String) : [];
+    const permitted = asked.filter((m) => ALLOWED_MODELS.has(m));
+    const modelList: string[] = permitted.length ? permitted : DEFAULT_MODELS;
 
     const errors: string[] = [];
     for (const model of modelList) {

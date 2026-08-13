@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/agent_id.dart';
 import '../data/app_settings.dart';
 import '../data/credentials.dart';
+import '../data/session.dart';
 import 'supabase_config.dart';
 
 /// Product + account telemetry -> Supabase (via the `ingest` edge function).
@@ -96,9 +97,18 @@ class Analytics {
   // --- Internals -------------------------------------------------------------
 
   /// Post one telemetry row through the rate-limited `ingest` edge function
-  /// (the anon key can no longer INSERT directly). Fire-and-forget.
+  /// (the anon key can no longer INSERT directly), carrying this device's
+  /// session token when it has one. Fire-and-forget.
+  ///
+  /// The token is what proves the `devices` row being written is ours. Once an
+  /// install verifies its phone, the server stamps the row with an account and
+  /// refuses writes that can't prove they belong to it — otherwise anyone
+  /// holding the anon key could rewrite a real agent's name, mobile and agent
+  /// id, which is exactly what the admin panel reads. Before verification there
+  /// is no token and no claim to protect, so first-run telemetry is unaffected.
   static Future<void> _ingest(String kind, Map<String, Object?> row) async {
     try {
+      final session = await SessionStore.load();
       await http
           .post(
             Uri.parse('${SupabaseConfig.url}/functions/v1/ingest'),
@@ -108,7 +118,11 @@ class Analytics {
               'Content-Type': 'application/json',
               'x-device-id': await _did(),
             },
-            body: jsonEncode({'kind': kind, 'row': row}),
+            body: jsonEncode({
+              'kind': kind,
+              'row': row,
+              if (session != null) 'token': session.token,
+            }),
           )
           .timeout(const Duration(seconds: 8));
     } catch (_) {
