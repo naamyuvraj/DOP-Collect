@@ -907,7 +907,22 @@ class _SyncScreenState extends State<SyncScreen> {
         _snack(result.error ?? 'No accounts found.');
         return;
       }
+      // Merge whatever was read — replaceAll is an upsert, so a short read adds
+      // and updates but never removes, and the accounts it did reach are worth
+      // keeping.
       await widget.repo.replaceAll(result.accounts);
+
+      // ...but a partial run is NOT a sync. Stamping last_sync would silence the
+      // "you haven't synced" nag on a run that failed, and `sync_done` is what
+      // the admin dashboard reads as the agent's book size — it takes the most
+      // recent one per device, so a short count would overwrite a good figure
+      // and under-report him until a full sync happened to follow.
+      if (!result.complete) {
+        if (!mounted) return;
+        _snack(result.error ?? 'Sync did not finish — please run it again.');
+        return;
+      }
+
       await AppSettings.setLastSyncNow();
       unawaited(Analytics.track('sync_done', {
         'accounts': result.accounts.length,

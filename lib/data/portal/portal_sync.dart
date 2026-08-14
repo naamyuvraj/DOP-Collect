@@ -10,13 +10,29 @@ import 'agent_list_parser.dart';
 import 'aslaas_report_parser.dart';
 import 'saved_installments_parser.dart';
 
+/// What happened when the engine tried to turn a page.
+///
+/// Three states, not two: "I moved", "there was nothing to move to", and "I
+/// tried and the page never came back". The last one is a failure and must not
+/// be mistaken for the second.
+enum PageAdvance { moved, lastPage, stalled }
+
 /// Result of an auto-sync attempt.
 class SyncResult {
   final List<RdAccount> accounts;
   final bool reachedList;
   final String? error;
 
-  const SyncResult(this.accounts, {this.reachedList = true, this.error});
+  /// True only when every page the portal advertised was actually read.
+  ///
+  /// A partial run still returns the accounts it managed to read — they are
+  /// worth merging — but the caller must NOT treat it as a finished sync:
+  /// stamping `last_sync` or reporting the count as the agent's book size off a
+  /// short read is how a stall turns into a wrong number on the dashboard.
+  final bool complete;
+
+  const SyncResult(this.accounts,
+      {this.reachedList = true, this.error, this.complete = true});
 }
 
 /// Result of preparing a bulk list on the portal (mode + account selection +
@@ -265,7 +281,9 @@ class PortalSyncEngine {
   }) async {
     if (await _isSessionExpired()) {
       return const SyncResult([],
-          reachedList: false, error: 'Session expired — please log in again.');
+          reachedList: false,
+          error: 'Session expired — please log in again.',
+          complete: false);
     }
     if (!await _onListPage()) {
       final ok = await navigateToAccountList();
@@ -274,13 +292,15 @@ class PortalSyncEngine {
             reachedList: false,
             error:
                 'Could not open the account list. Open Accounts → Agent Inquire '
-                'and Update, then tap Sync.');
+                'and Update, then tap Sync.',
+            complete: false);
       }
     }
 
     final byAccount = <String, RdAccount>{};
     final firstHtml = await currentPageHtml();
     final total = totalPages(firstHtml);
+    var walked = 0; // pages actually read — compared against `total` at the end
 
     for (var page = 1; page <= total; page++) {
       final html = page == 1 ? firstHtml : await currentPageHtml();
@@ -288,15 +308,44 @@ class PortalSyncEngine {
         byAccount.putIfAbsent(r.accountNumber, () => r);
       }
       onProgress?.call(page, total, byAccount.length);
-      if (page == total) break;
+      if (page == total) {
+        walked = page;
+        break;
+      }
 
-      final moved = await _clickNextAndWait(pageTimeout);
-      if (!moved) break;
+      final advance = await _clickNextAndWait(pageTimeout);
+      if (advance != PageAdvance.moved) {
+        // Finacle's stale-token guard stops the table rendering, which looks
+        // exactly like a stall. Probe for it so the agent is told what actually
+        // happened instead of being handed a short book.
+        final blocked = await _isBlockedPage();
+        return SyncResult(_serialised(byAccount),
+            reachedList: true,
+            error: blocked
+                ? 'The portal blocked navigation at page $page of $total. '
+                    'Log in again, then run Sync.'
+                : 'Sync stopped at page $page of $total — only '
+                    '${byAccount.length} accounts were read. Run Sync again; '
+                    'nothing already on the phone was changed.',
+            complete: false);
+      }
+      walked = page + 1;
       if (await _isSessionExpired()) {
         return SyncResult(_serialised(byAccount),
             reachedList: true,
-            error: 'Session expired at page $page — synced what loaded.');
+            error: 'Session expired at page $page of $total — synced what '
+                'loaded. Run Sync again.',
+            complete: false);
       }
+    }
+
+    // Belt and braces: the loop can only end early via the paths above, but a
+    // future edit must not be able to reintroduce a silent short read.
+    if (walked < total) {
+      return SyncResult(_serialised(byAccount),
+          reachedList: true,
+          error: 'Sync ended at page $walked of $total — run it again.',
+          complete: false);
     }
     return SyncResult(_serialised(byAccount));
   }
@@ -587,7 +636,12 @@ class PortalSyncEngine {
       }
       if (page == pages) break;
       if (shouldStop?.call() ?? false) return done;
-      if (!await _clickNextAndWait(pageTimeout)) break;
+      final advance = await _clickNextAndWait(pageTimeout);
+      if (advance == PageAdvance.stalled) {
+        onDiag?.call('page $page of $pages stopped loading after $done');
+        break;
+      }
+      if (advance == PageAdvance.lastPage) break;
     }
     return done;
   }
@@ -623,7 +677,7 @@ class PortalSyncEngine {
         return _parseDetailAndBack(pageTimeout);
       }
       if (page == total) break;
-      if (!await _clickNextAndWait(pageTimeout)) break;
+      if (await _clickNextAndWait(pageTimeout) != PageAdvance.moved) break;
     }
     return null;
   }
@@ -761,7 +815,7 @@ class PortalSyncEngine {
         onProgress?.call(page, total, found.length);
         if (found.length >= accountNumbers.length) break;
         if (page == total) break;
-        if (!await _clickNextAndWait(pageTimeout)) break;
+        if (await _clickNextAndWait(pageTimeout) != PageAdvance.moved) break;
         if (await _isSessionExpired()) {
           return ListPrepResult(found, accountNumbers.length,
               error: 'Session expired at page $page — selected ${found.length}.');
@@ -1135,7 +1189,7 @@ class PortalSyncEngine {
         }
       }
       if (page == total) break;
-      if (!await _clickNextAndWait(pageTimeout)) break;
+      if (await _clickNextAndWait(pageTimeout) != PageAdvance.moved) break;
     }
     return done;
   }
@@ -1228,21 +1282,30 @@ class PortalSyncEngine {
 
   /// Click "Next" and wait for the reloaded page's table. Retries a couple of
   /// times if the page stalls (legacy portal posts occasionally drop a load).
-  Future<bool> _clickNextAndWait(Duration timeout) async {
+  /// Advance one page.
+  ///
+  /// This used to return a plain bool, and every caller read `false` as "that
+  /// was the last page". It is not: it also meant "I clicked Next three times
+  /// and the table never came back". Collapsing the two made a stalled sync
+  /// indistinguishable from a finished one, so a run that died on page 3 of 47
+  /// was reported to the agent as a success. Keep them apart.
+  Future<PageAdvance> _clickNextAndWait(Duration timeout) async {
     for (var attempt = 0; attempt < 3; attempt++) {
       _pageLoad = Completer<void>();
       final clicked =
           _unwrap(await controller.runJavaScriptReturningResult(_nextJs));
       if (!clicked.contains('true')) {
         _pageLoad = null;
-        return false; // no Next button -> last page
+        return PageAdvance.lastPage; // no Next button — genuinely the end
       }
       await _awaitLoad(timeout);
       await _settle();
       // Confirm the table actually rendered before declaring success.
-      if (await _waitForTable(const Duration(seconds: 20))) return true;
+      if (await _waitForTable(const Duration(seconds: 20))) {
+        return PageAdvance.moved;
+      }
     }
-    return false;
+    return PageAdvance.stalled; // clicked, never rendered — a real failure
   }
 
   Future<void> _awaitLoad(Duration timeout) async {
