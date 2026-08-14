@@ -71,6 +71,51 @@ supabase functions deploy otp    --use-api
 `--use-api` avoids the local Docker bundler hang. `devices.mobile` already
 exists, so the ingest upsert won't error.
 
+## 3b. Release signing (do not skip — this is what stops updates wiping data)
+
+Releases are signed with the upload keystore at `android/upload-keystore.jks`
+(PKCS12, RSA-4096, alias `upload`, valid to 2053), configured through
+`android/key.properties`. Both are git-ignored; neither is recoverable if lost.
+
+Both commands run from the **repo root**. `apksigner` ships inside the Android
+SDK build-tools and is not on `PATH`, so resolve it rather than calling it bare:
+
+```
+# Confirm the release variant uses the upload key, not the debug key.
+(cd android && ./gradlew :app:signingReport -PrequireReleaseSigning=true)
+
+# Confirm a built APK actually carries it.
+"$(ls ~/Library/Android/sdk/build-tools/*/apksigner | sort -V | tail -1)" \
+  verify --print-certs build/app/outputs/flutter-apk/app-release.apk
+# Expect: CN=DOP Collect  /  SHA-256 e9a34af8a05a1b38fd891b17c50801cf87871b51820202d22d1b32993adbe224
+```
+
+(`apksigner` on a recent JDK prints several `WARNING: A restricted method…`
+lines before the certificate block. They are noise — read the `Signer #1` lines.)
+
+> **Why this matters.** Android refuses to install an APK over one signed with a
+> different key. Before this keystore existed the release build fell back to
+> `~/.android/debug.keystore`, which is per-machine and regenerates — so a
+> release built on another machine could not install over the previous one, and
+> the agent had to uninstall. Uninstall wipes app-private storage, which is the
+> ONLY copy of the `collections` ledger and the `lots` lists (see
+> `lib/data/database.dart`). Losing this keystore re-creates that failure
+> permanently. **Back up `upload-keystore.jks` + its password offline now.**
+>
+> **One-time cutover cost.** The first upload-signed APK still cannot install
+> over an existing debug-signed install — those phones must uninstall, and their
+> local data does not survive it. Accounts come back with a portal Deep Sync;
+> the collections ledger, the lists, and `route_order`/`daily_amount`/`status`
+> do not. Land an export/restore path before pushing this to a phone that holds
+> real data.
+>
+> **`ANDROID_ID` changes with the signing key.** It is scoped per app-signing
+> key, and `DeviceIdentity._derive` (`lib/services/device_identity.dart:97`)
+> hashes it into the device id. Every existing phone therefore reports a NEW
+> device id after the cutover and burns a fresh slot against the 3-phone limit;
+> the old row lingers as a ghost. Anything keyed on device id — including any
+> future restore path — must key on the DOP agent id instead.
+
 ## 4. Ship the app release
 
 The deployed app sends `agent_id`/`sol_id` but not `name`/`mobile`. Ship the

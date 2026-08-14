@@ -147,7 +147,7 @@ The `onNavigationRequest` host-allowlist broke the DOP portal's post-login windo
 # Remediation plan
 
 ## Before Play Store launch (blockers)
-- [ ] **A2** — upload keystore + `-PrequireReleaseSigning=true` + Play App Signing + offline backup
+- [~] **A2** — upload keystore **done** (`android/upload-keystore.jks`, PKCS12/RSA-4096, alias `upload`; release APK verified as `CN=DOP Collect`, SHA-256 `e9a34a…e224`); `-PrequireReleaseSigning=true` now passes. **Still outstanding: Play App Signing enrolment + an offline backup of the keystore and its password** — lose either and updates can never install over an existing build again (see RUNBOOK §3b).
 - [ ] **A1** — dashboard: reject default creds, random per-session token, login throttle
 - [ ] **A3** — rotate `service_role`
 
