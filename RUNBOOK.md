@@ -3,7 +3,7 @@
 How to make the admin dashboard show **complete, correct** user data. Do the
 steps in order — later steps depend on earlier ones.
 
-Supabase project ref: `ojorpmtptryldizogtkz` · App version: `0.9.48+20`
+Supabase project ref: `ojorpmtptryldizogtkz` · App version: `0.9.52+26`
 
 ---
 
@@ -14,26 +14,40 @@ different thing to be live:
 
 | Field | Source | Needs |
 |---|---|---|
-| Agent, Version, Last seen, Status | `identify()` → `devices` | already working |
+| Version, Last seen, Status | `identify()` → `devices` | already working |
 | **Verified** | live `device_sessions` row | already working (dashboard reads the session) |
 | Region (SOL) / Agent ID | `agent_id` → `devices.sol_id` | already working |
-| **Name** (display) | `devices.name` | ingest redeploy + app release + agent fills the **Name** field |
+| **Agent name** | `devices.agent_name` | agent fills **Agent name** at sign-up |
 | **Mobile** | `devices.mobile` | `schema_accounts.sql` + ingest redeploy + app release |
+| **Handset** | `devices.model` | `schema_device_model.sql` + app 0.9.51+ |
 | **Accounts** | `sync_done` event `{accounts}` | agent does a portal **Sync** |
 | **Collected ₹** | `list_submitted` event `{amount}` | agent **submits a list** on the portal |
-| Plan | `subscriptions` (by agent_id) | agent subscribes |
+| Plan | `subscriptions` (by agent_id), else a derived trial | agent subscribes — see below |
 
 > The raw **mobile** is *only* stored if the app sends it — the OTP flow keeps
 > just a hash. Verified status does **not** depend on `devices.phone_verified`
 > anymore (the dashboard derives it from the session), so it's already correct.
+>
+> **One name.** Onboarding used to ask for "Name" and "Agent Name" separately,
+> landing in `devices.name` and `devices.agent_name`. Agents filled either or
+> both, so neither column could be trusted alone. There is one now —
+> `agent_name` — and `devices.name` is dropped by `admin/schema_one_name.sql`.
+>
+> **Plan while payments are off.** `pay`'s `resolve()` returns an ephemeral trial
+> and deliberately writes no `subscriptions` row (a row per agent id that ever
+> opens the app would be trial-row spam). The dashboard therefore derives the
+> same trial at read time, so a new agent shows "On trial" instead of "No record
+> yet". Nothing is persisted — real rows take over the moment
+> `app_config.payments_enabled` flips, and `admin/backfill_trials.sql` still
+> closes out existing agents. The **Subscribers** KPI counts real rows only.
 
 ---
 
 ## 1. Schema (mostly done — verify)
 
 Run in the Supabase SQL editor if not already applied (all are `if not exists`
-/ safe to re-run). Current DB already has the views + `devices.name/mobile`, so
-this is a **verification** step:
+/ safe to re-run). Current DB already has the views + `devices.mobile`, so this
+is a **verification** step:
 
 ```
 admin/schema.sql              -- core analytics
@@ -43,11 +57,20 @@ admin/schema_otp.sql          -- accounts, device_sessions, otp_*
 admin/schema_payments.sql     -- plans, subscriptions, payments
 admin/schema_releases.sql     -- releases, v_app_versions
 admin/schema_regions.sql      -- devices.agent_id/sol_id, v_regions
-admin/schema_accounts.sql     -- devices.name/mobile, v_agent_accounts, v_accounts_summary
+admin/schema_accounts.sql     -- devices.mobile, v_agent_accounts, v_accounts_summary
+admin/schema_device_model.sql -- devices.model, v_device_models
 ```
 
-Quick check (SQL editor): `select id, name, mobile, agent_id, sol_id, phone_verified from public.devices limit 1;`
-— it should run without a "column does not exist" error.
+One-shots, run once each rather than as part of a verification pass:
+
+```
+admin/schema_one_name.sql     -- rescue devices.name -> agent_name, then DROP it
+admin/backfill_trials.sql     -- ONLY immediately before flipping payments_enabled
+```
+
+Quick check (SQL editor): `select id, agent_name, mobile, model, agent_id, sol_id, phone_verified from public.devices limit 1;`
+— it should run without a "column does not exist" error. Note there is no `name`
+column once `schema_one_name.sql` has run; that is the intended end state.
 
 ## 2. Set a real dashboard password (fixes login)
 
@@ -60,8 +83,17 @@ still has them, login returns `not_configured`.
 
 ## 3. Redeploy the edge functions
 
-The **deployed** `ingest` is stale (forwards `agent_id`/`sol_id` but not
-`name`/`mobile`). `otp` should set `phone_verified`/`account_id` at the source.
+`ingest` is the only writer for telemetry, so the deployed copy has to be ahead
+of — or level with — the schema. The current one writes a single `agent_name`
+(folding a legacy `name` in from phones on an older build), never writes
+`devices.name`, and no longer blanks an agent name when a client sends none.
+`otp` should set `phone_verified`/`account_id` at the source.
+
+> **Deploy this BEFORE running `admin/schema_one_name.sql`.** That file drops
+> `devices.name`. The older `ingest` still writes that column, and its 42703
+> fallback covers `model` only — so dropping it underneath a stale deploy fails
+> every device upsert and silently takes `last_seen`, `mobile`, `agent_id` and
+> `model` down with it.
 
 Run these from the **repo root**. The CLI resolves `supabase/functions/` from the
 current directory, so from anywhere else (`android/`, `dashboard/`) it fails with
@@ -148,17 +180,18 @@ shorebird release android -- --dart-define-from-file=env.json --no-tree-shake-ic
 > confirm `last_seen` is still moving. If it froze the moment you patched, the
 > flag was missing — re-patch with it.
 
-Onboarding note: **Name** (display) and **Agent Name** are two different fields.
-The agent must fill **Name** for the Name column to populate; the mobile is
+Onboarding note: there is ONE name field, **Agent name**, and it is required to
+create an account. It populates the dashboard's Agent name column. The mobile is
 captured from the phone they verify.
 
 ## 5. Verify (in the app + dashboard)
 
-1. In the app: complete onboarding (Name + phone OTP) → **run a Sync** → build &
-   **submit a list** on the portal.
-2. On the dashboard **Users** tab, that agent should now show: Name, Mobile,
-   Region, **Verified**, **Accounts** (after sync), **Collected ₹** (after a
-   submitted list).
+1. In the app: complete onboarding (Agent name + phone OTP) → **run a Sync** →
+   build & **submit a list** on the portal.
+2. On the dashboard **Users** tab, that agent should now show: Agent name,
+   Mobile, Region, **Verified**, **Accounts** (after sync), **Collected ₹**
+   (after a submitted list), and — while payments are off — a **Free trial**
+   plan pill rather than a blank.
 3. **Overview** → "Accounts under management" and "Total collected ₹" update.
 
 ---
