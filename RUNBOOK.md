@@ -63,7 +63,13 @@ still has them, login returns `not_configured`.
 The **deployed** `ingest` is stale (forwards `agent_id`/`sol_id` but not
 `name`/`mobile`). `otp` should set `phone_verified`/`account_id` at the source.
 
+Run these from the **repo root**. The CLI resolves `supabase/functions/` from the
+current directory, so from anywhere else (`android/`, `dashboard/`) it fails with
+`Entrypoint path does not exist` — and the 400 comes back from the server, which
+makes it read like a project problem rather than a `cd`.
+
 ```
+cd /Users/yuvrajmandal/Desktop/papa
 supabase functions deploy ingest --use-api
 supabase functions deploy otp    --use-api
 ```

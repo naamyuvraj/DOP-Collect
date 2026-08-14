@@ -15,7 +15,9 @@
 -- 42703 ("column does not exist") — that path has a fallback for `model` only,
 -- so last_seen, mobile and agent id would stop landing too.
 --
---   1. supabase functions deploy ingest --use-api --project-ref ojorpmtptryldizogtkz
+--   1. from the REPO ROOT (the CLI resolves supabase/functions/ from the cwd —
+--      run it anywhere else and it fails with "Entrypoint path does not exist"):
+--        supabase functions deploy ingest --use-api --project-ref ojorpmtptryldizogtkz
 --   2. deploy the dashboard
 --   3. then run this file, top to bottom
 -- ============================================================================
