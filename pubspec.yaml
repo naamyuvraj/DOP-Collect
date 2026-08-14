@@ -49,6 +49,11 @@ dependencies:
   speech_to_text: ^7.0.0
   flutter_tts: ^4.2.0
   razorpay_flutter: ^1.4.5
+  # Backup/restore. `encrypt` is pure Dart (AES-256-GCM over pointycastle), so it
+  # rides a Shorebird patch. `file_picker` is NATIVE — the restore side can only
+  # ship in a full release, never a patch.
+  encrypt: ^5.0.3
+  file_picker: ^8.1.7
 dev_dependencies:
   flutter_test:
     sdk: flutter
