@@ -9,6 +9,7 @@ import '../models/daily_rule.dart';
 import '../services/analytics.dart';
 import '../services/otp_service.dart';
 import '../services/subscription.dart';
+import '../services/supabase_config.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
 import '../widgets/loading_overlay.dart';
@@ -39,7 +40,10 @@ class SettingsScreen extends StatefulWidget {
   /// spotlight targets).
   final Future<void> Function()? onTour;
 
-  static const _version = '0.9.50';
+  /// Shown at the bottom of Settings. Derived, never hand-typed — this was a
+  /// separate constant and had drifted three releases behind what the app
+  /// actually was, so a support call started from the wrong version.
+  static String get _version => SupabaseConfig.buildVersion;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();

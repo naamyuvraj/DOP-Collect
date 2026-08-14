@@ -19,7 +19,16 @@ if (hasReleaseKey) {
 
 android {
     namespace = "com.dopcollect.dop_collect"
-    compileSdk = flutter.compileSdkVersion
+    // Pinned, not inherited from `flutter.compileSdkVersion` (34 on this
+    // toolchain). `file_picker` pulls `flutter_plugin_android_lifecycle`, which
+    // requires its consumers to compile against API 36 — below that the build
+    // fails at :file_picker:checkReleaseAarMetadata.
+    //
+    // compileSdk only decides which APIs are available at COMPILE time. It does
+    // not change runtime behaviour (that is targetSdk) and does not change which
+    // handsets can install the app (that is minSdk), so raising it costs the
+    // agent nothing.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
