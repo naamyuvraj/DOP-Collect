@@ -71,12 +71,16 @@ Deno.serve(async (req) => {
     if ((await bump(`ip:${ip}`, 3600)) > 3000) return json({ ok: false, error: "rate" }, 429);
 
     if (kind === "event") {
-      await sb.from("events").insert({
+      const { error } = await sb.from("events").insert({
         device_id: clip(row.device_id, 64),
         event: clip(row.event, 64),
         props: row.props && typeof row.props === "object" ? row.props : {},
         app_version: clip(row.app_version, 32),
       });
+      if (error) {
+        console.error("events insert failed", error);
+        return json({ ok: false, error: error.message }, 500);
+      }
     } else if (kind === "device") {
       const id = clip(row.id, 64);
       if (!id) return json({ ok: false, error: "id required" }, 400);
@@ -123,14 +127,35 @@ Deno.serve(async (req) => {
       // "Redmi Note 12". Only older builds omit it, and an omission must not
       // wipe a model we already know — same rule as every field above.
       if (row.model) deviceRow.model = clip(row.model, 64);
-      await sb.from("devices").upsert(deviceRow, { onConflict: "id" });
+
+      let up = await sb.from("devices").upsert(deviceRow, { onConflict: "id" });
+
+      // The app and the schema ship separately, so a build can start sending a
+      // column before the migration lands. Postgres 42703 = "column does not
+      // exist": drop the newest field and write the rest, so a migration lag
+      // costs the model and NOT last_seen, name, mobile and agent id along with
+      // it. The whole device row used to vanish in that window, silently.
+      if (up.error && (up.error as { code?: string }).code === "42703"
+          && "model" in deviceRow) {
+        console.warn("devices.model missing — run admin/schema_device_model.sql");
+        delete deviceRow.model;
+        up = await sb.from("devices").upsert(deviceRow, { onConflict: "id" });
+      }
+      if (up.error) {
+        console.error("devices upsert failed", up.error);
+        return json({ ok: false, error: up.error.message }, 500);
+      }
     } else if (kind === "key_usage") {
-      await sb.from("key_usage").insert({
+      const { error } = await sb.from("key_usage").insert({
         device_id: clip(row.device_id, 64),
         key_index: Number(row.key_index) || 0,
         model: clip(row.model, 64),
         ok: !!row.ok,
       });
+      if (error) {
+        console.error("key_usage insert failed", error);
+        return json({ ok: false, error: error.message }, 500);
+      }
     } else {
       return json({ ok: false, error: "bad kind" }, 400);
     }

@@ -256,6 +256,64 @@ Deno.test("S4: plain events are unaffected — they carry no identity", async ()
   assertEquals(db.tables.events.length, 1);
 });
 
+// ---------------------------------------------------------------------------
+// A failed write must never report success
+// ---------------------------------------------------------------------------
+
+Deno.test("a write that fails is reported, not swallowed", async () => {
+  const db = await seeded();
+  db.failWrite = {
+    table: "devices",
+    op: "upsert",
+    error: { code: "23502", message: 'null value in column "platform"' },
+  };
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(ingest, deviceRow({ id: "dev-new" }));
+
+  assertEquals(res.status, 500);
+  assertEquals(res.json.ok, false);
+  assert(String(res.json.error).includes("platform"));
+});
+
+Deno.test("a missing model column costs the model, not the whole row", async () => {
+  // The app and the schema deploy separately, so a build can send `model`
+  // before the migration lands. That used to fail the entire upsert — and
+  // report ok — so last_seen, name and mobile silently stopped updating too.
+  const db = await seeded();
+  db.failWrite = {
+    table: "devices",
+    op: "upsert",
+    error: { code: "42703", message: 'column "model" does not exist' },
+  };
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(ingest, deviceRow({ id: "dev-new", model: "Redmi Note 12" }));
+
+  assertEquals(res.json.ok, true, "the rest of the row must still land");
+  const saved = db.tables.devices.find((d) => d.id === "dev-new");
+  assert(saved, "row should exist");
+  assertEquals(saved!.name, "Real Agent");
+  assertEquals(saved!.mobile, "9810000001");
+  assertEquals(saved!.model, undefined, "dropped, because the column is not there");
+});
+
+Deno.test("when the column DOES exist the model is stored", async () => {
+  const db = await seeded();
+  begin(db, { env: BASE_ENV });
+  await post(ingest, deviceRow({ id: "dev-new", model: "Redmi Note 12" }));
+  assertEquals(db.tables.devices.find((d) => d.id === "dev-new")!.model,
+    "Redmi Note 12");
+});
+
+Deno.test("an older build that sends no model does not wipe a known one", async () => {
+  const db = await seeded();
+  db.tables.devices.push({ id: "dev-old", account_id: null, model: "Pixel 7" });
+  begin(db, { env: BASE_ENV });
+  await post(ingest, { kind: "device", row: { id: "dev-old", name: "X" } });
+  assertEquals(db.tables.devices[0].model, "Pixel 7");
+});
+
 Deno.test("S4: a device write with no id is refused", async () => {
   const db = await seeded();
   begin(db, { env: BASE_ENV });
