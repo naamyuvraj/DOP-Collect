@@ -195,6 +195,7 @@ class _MainShellState extends State<MainShell> {
       AccountListScreen(
           key: ValueKey('accounts-$_dataVersion'),
           repo: widget.repo,
+          collections: widget.collections,
           revision: _accountsRevision),
       CollectScreen(
           key: ValueKey('collect-$_dataVersion'),

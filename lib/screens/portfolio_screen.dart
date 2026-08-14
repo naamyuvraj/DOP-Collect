@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../calc/po_calc.dart';
 import '../data/account_repository.dart';
 import '../data/app_settings.dart';
+import '../data/collection_repository.dart';
 import '../models/rd_account.dart';
 import '../models/summaries.dart';
 import '../theme/app_theme.dart';
 import '../util/format.dart';
+import 'khata_tab.dart';
 import 'portal/sync_screen.dart';
 
 /// Per-account profile — a rich, tile-based view of one RD account, mirroring
@@ -18,9 +20,14 @@ class PortfolioScreen extends StatefulWidget {
     super.key,
     required this.repo,
     required this.accountNumber,
+    this.collections,
   });
   final AccountRepository repo;
   final String accountNumber;
+
+  /// The ledger behind the Khata tab. Optional: the assistant opens this screen
+  /// without one, and a missing ledger hides the tab rather than crashing.
+  final CollectionRepository? collections;
 
   @override
   State<PortfolioScreen> createState() => _PortfolioScreenState();
@@ -115,18 +122,53 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Account')),
-      body: FutureBuilder<RdAccount?>(
-        future: _future,
-        builder: (context, snap) {
-          if (!snap.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final a = snap.data!;
-          final term = _termYears ?? a.termYears;
+    // Two tabs, not a longer scroll: Details answers "what is this account",
+    // Khata answers "what has he actually paid me". They're different questions
+    // and the agent arrives knowing which one he wants.
+    //
+    // The Khata tab is dropped entirely when no ledger was passed (the assistant
+    // opens this screen without one) rather than shown empty and broken.
+    final withKhata = widget.collections != null;
+    return DefaultTabController(
+      length: withKhata ? 2 : 1,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Account'),
+          bottom: withKhata
+              ? TabBar(
+                  labelStyle: AppTheme.body(13.5, weight: FontWeight.w800),
+                  unselectedLabelStyle: AppTheme.body(13.5),
+                  tabs: const [Tab(text: 'DETAILS'), Tab(text: 'KHATA')],
+                )
+              : null,
+        ),
+        body: FutureBuilder<RdAccount?>(
+          future: _future,
+          builder: (context, snap) {
+            if (!snap.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final a = snap.data!;
+            return TabBarView(
+              children: [
+                _details(a),
+                if (withKhata)
+                  KhataTab(
+                    collections: widget.collections!,
+                    accountNumber: a.accountNumber,
+                    monthlyAmount: a.denominationAmount,
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
 
-          return ListView(
+  Widget _details(RdAccount a) {
+    final term = _termYears ?? a.termYears;
+    return ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
             children: [
               _headerCard(a),
@@ -155,9 +197,6 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
               // "coming soon" no-ops — hidden until they actually do something,
               // so every tap here isn't teaching him the buttons are decorative.
             ],
-          );
-        },
-      ),
     );
   }
 

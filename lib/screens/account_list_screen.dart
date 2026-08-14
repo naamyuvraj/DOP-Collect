@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/account_repository.dart';
+import '../data/collection_repository.dart';
 import '../models/account_sort.dart';
 import '../models/rd_account.dart';
 import '../models/summaries.dart';
@@ -16,8 +17,15 @@ import 'portfolio_screen.dart';
 /// "View" (e.g. Defaulters).
 class AccountListScreen extends StatefulWidget {
   const AccountListScreen(
-      {super.key, required this.repo, this.filter, this.revision = 0});
+      {super.key,
+      required this.repo,
+      this.collections,
+      this.filter,
+      this.revision = 0});
   final AccountRepository repo;
+
+  /// Ledger for each account's Khata tab.
+  final CollectionRepository? collections;
   final AccountFilter? filter;
 
   /// Bumped by the shell whenever the data may have changed (a Sync, or simply
@@ -133,6 +141,7 @@ class _AccountListScreenState extends State<AccountListScreen> {
                         builder: (_) => PortfolioScreen(
                           repo: widget.repo,
                           accountNumber: list[i].accountNumber,
+                          collections: widget.collections,
                         ),
                       ),
                     ),
