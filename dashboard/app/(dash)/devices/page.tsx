@@ -12,7 +12,6 @@ type UserRow = {
   signed_in: number;
   name: string | null;
   mobile: string | null;
-  agent_name: string | null;
   agent_id: string | null;
   model: string | null;
   region: string | null;
@@ -30,11 +29,10 @@ type UserRow = {
 type Labels = Record<string, string>;
 type Data = { rows: UserRow[]; totals: { agents?: number; verified?: number; active?: number; installs?: number; accounts?: number; value?: number; collected?: number; lists?: number; subscribers?: number }; region_labels?: Labels };
 
-type SortKey = "name" | "mobile" | "agent_name" | "signed_in" | "region" | "accounts" | "value" | "collected" | "plan" | "app_version" | "last_seen";
+type SortKey = "name" | "mobile" | "signed_in" | "region" | "accounts" | "value" | "collected" | "plan" | "app_version" | "last_seen";
 const COLS: { key: SortKey; label: string; num?: boolean }[] = [
-  { key: "name", label: "Name" },
+  { key: "name", label: "Agent name" },
   { key: "mobile", label: "Mobile" },
-  { key: "agent_name", label: "Agent" },
   { key: "signed_in", label: "Phones", num: true },
   { key: "region", label: "Region" },
   { key: "accounts", label: "Accounts", num: true },
@@ -85,7 +83,7 @@ export default function Users() {
       if (verified === "verified" && !r.phone_verified) return false;
       if (verified === "unverified" && r.phone_verified) return false;
       if (needle) {
-        const hay = [r.name, r.mobile, r.agent_name, r.agent_id, r.region, regionOf(r.region), r.plan, r.app_version].join(" ").toLowerCase();
+        const hay = [r.name, r.mobile, r.agent_id, r.region, regionOf(r.region), r.plan, r.app_version].join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
@@ -127,10 +125,10 @@ export default function Users() {
   }
 
   function exportCsv() {
-    const head = ["Name", "Mobile", "Phone", "Agent", "Agent ID", "Region", "District", "Accounts", "Monthly book", "Collected", "Plan", "Status", "Phone verified", "Version", "First seen", "Last seen"];
+    const head = ["Agent name", "Mobile", "Phone", "Agent ID", "Region", "District", "Accounts", "Monthly book", "Collected", "Plan", "Status", "Phone verified", "Version", "First seen", "Last seen"];
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = view.map((r) =>
-      [r.name, r.mobile, r.model, r.agent_name, r.agent_id, r.region, regionOf(r.region), r.accounts, r.value, r.collected, r.plan, r.active ? "active" : "dormant", r.phone_verified ? "yes" : "no", r.app_version, r.first_seen, r.last_seen].map(esc).join(",")
+      [r.name, r.mobile, r.model, r.agent_id, r.region, regionOf(r.region), r.accounts, r.value, r.collected, r.plan, r.active ? "active" : "dormant", r.phone_verified ? "yes" : "no", r.app_version, r.first_seen, r.last_seen].map(esc).join(",")
     );
     const csv = [head.map(esc).join(","), ...lines].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -228,13 +226,12 @@ export default function Users() {
               <tbody>
                 {!d
                   ? Array.from({ length: 6 }).map((_, i) => (
-                      <tr key={i}><td colSpan={10} className="py-2 px-2"><Skel className="h-6 w-full" /></td></tr>
+                      <tr key={i}><td colSpan={9} className="py-2 px-2"><Skel className="h-6 w-full" /></td></tr>
                     ))
                   : view.map((r) => (
                       <tr key={r.device_id} onClick={() => setOpen(r)} className="border-t border-line hover:bg-focal/20 cursor-pointer">
-                        <Cell className="font-semibold">{r.name || r.agent_name || <span className="text-faint">—</span>}</Cell>
+                        <Cell className="font-semibold">{r.name || <span className="text-faint">—</span>}</Cell>
                         <Cell className="font-mono text-xs">{r.mobile || <span className="text-faint">—</span>}</Cell>
-                        <Cell>{r.agent_name || <span className="text-faint">—</span>}</Cell>
                         <Cell right>{r.devices > 1 ? <Pill tone="a">{r.devices}</Pill> : <span className="text-muted">{r.devices}</span>}</Cell>
                         <Cell className="font-mono text-xs">
                           {r.region ? <>{r.region}{regionOf(r.region) && <span className="text-muted font-sans"> · {regionOf(r.region)}</span>}</> : <span className="text-faint">—</span>}
@@ -275,11 +272,10 @@ type Detail = {
   stats?: { events: number; lists: number; collected: number; first: string | null; last: string | null };
 };
 
-type EditForm = { name: string; mobile: string; agent_name: string; agent_id: string; sol_id: string };
+type EditForm = { name: string; mobile: string; agent_id: string; sol_id: string };
 const formOf = (r: UserRow): EditForm => ({
   name: r.name ?? "",
   mobile: r.mobile ?? "",
-  agent_name: r.agent_name ?? "",
   agent_id: r.agent_id ?? "",
   sol_id: r.region ?? "",
 });
@@ -333,9 +329,10 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
         body: JSON.stringify({
           deviceIds: row.device_ids,
           patch: {
-            name: form.name.trim(),
+            // One name, one column. `devices.name` is gone — see
+            // admin/schema_one_name.sql.
             mobile: form.mobile.replace(/\D/g, ""),
-            agent_name: form.agent_name.trim(),
+            agent_name: form.name.trim(),
             agent_id: form.agent_id.trim(),
             sol_id: form.sol_id.trim(),
           },
@@ -413,7 +410,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
       <aside className="relative w-full max-w-[440px] bg-canvas h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-sidebar text-white px-5 py-4 flex items-start justify-between">
           <div>
-            <div className="font-extrabold text-lg leading-tight">{form.name || form.agent_name || "Agent"}</div>
+            <div className="font-extrabold text-lg leading-tight">{form.name || "Agent"}</div>
             <div className="text-white/60 text-xs mt-0.5">
               {form.mobile ? `+91 ${form.mobile} · ` : ""}{form.sol_id ? `SOL ${form.sol_id}${district ? ` · ${district}` : ""}` : "region unknown"}
             </div>
@@ -433,14 +430,12 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
           <div className="card p-4">
             <div className="lbl mb-2.5">Details</div>
             <div className="flex flex-col gap-2.5">
-              <Field label="Name" value={form.name}
-                onChange={(v) => setForm({ ...form, name: v })} placeholder="Display name" />
+              <Field label="Agent name" value={form.name}
+                onChange={(v) => setForm({ ...form, name: v })} placeholder="As it appears on his lists" />
               <Field label="Mobile" value={form.mobile} prefix="+91" inputMode="numeric"
                 onChange={(v) => setForm({ ...form, mobile: v.replace(/\D/g, "").slice(0, 10) })}
                 placeholder="10 digits"
                 error={mobileBad ? "Needs to be 10 digits." : null} />
-              <Field label="Agent name" value={form.agent_name}
-                onChange={(v) => setForm({ ...form, agent_name: v })} />
               <Field label="Agent ID" value={form.agent_id} mono
                 onChange={(v) => setForm({ ...form, agent_id: v })} />
               <Field label="Region (SOL)" value={form.sol_id} mono

@@ -14,9 +14,14 @@ export type UserRow = {
   devices: number;
   /** Installs with a LIVE session right now. This is "how many phones is he on". */
   signed_in: number;
+  /**
+   * The agent's ONE name, from `devices.agent_name`. Onboarding used to capture
+   * two ("Name" for display and "Agent Name" for the DOP paperwork) into two
+   * columns; agents filled either or both, so neither could be trusted alone.
+   * `devices.name` has since been dropped — see admin/schema_one_name.sql.
+   */
   name: string | null;
   mobile: string | null;
-  agent_name: string | null;
   agent_id: string | null;
   /** Handset, e.g. "Redmi Note 12". Null for installs older than 0.9.51. */
   model: string | null;
@@ -54,7 +59,7 @@ export async function computeUsers(): Promise<UsersData> {
   if (!dbConfigured()) return { rows: [], totals: empty, region_labels: {} };
   const sb = admin();
 
-  const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes, sessRes, acctRes, aiRes] = await Promise.all([
+  const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes, sessRes, acctRes, aiRes, payCfgRes, planRes] = await Promise.all([
     sb.from("v_devices").select("*"),
     sb.from("devices").select("*"),
     sb.from("v_subscriptions").select("agent_id,plan_name,plan_code,status"),
@@ -64,6 +69,8 @@ export async function computeUsers(): Promise<UsersData> {
     sb.from("device_sessions").select("device_id,account_id,revoked_at"),
     sb.from("accounts").select("id,agent_id"),
     sb.from("events").select("id", { count: "exact", head: true }).eq("event", "assistant_query"),
+    sb.from("app_config").select("key,value").in("key", ["payments_enabled", "trial_days"]),
+    sb.from("plans").select("code,name,duration_days").eq("code", "trial").maybeSingle(),
   ]);
 
   const base = (baseRes.error ? (devRes.data as any[]) : (baseRes.data as any[])) || [];
@@ -106,6 +113,27 @@ export async function computeUsers(): Promise<UsersData> {
   const subByAgent = new Map<string, { plan: string | null; status: string | null }>();
   for (const s of subs) subByAgent.set(s.agent_id, { plan: s.plan_name ?? s.plan_code ?? null, status: s.status ?? null });
 
+  // While `payments_enabled` is OFF, `pay`'s resolve() hands the app a trial but
+  // deliberately writes NO subscriptions row (see supabase/functions/pay/index.ts
+  // and admin/backfill_trials.sql — a row per agent id that ever opens the app
+  // would be trial-row spam). So the table is empty for every new agent, and
+  // reading it alone made the drawer say "No record yet" while the phone in the
+  // agent's hand said "Free trial". Mirror the same rule here so the dashboard
+  // reports what the agent is actually experiencing.
+  //
+  // Deliberately NOT persisted: this stays a read-time derivation, so the moment
+  // payments are switched on the real rows take over and the backfill's
+  // "existing agents have had their go" logic is untouched.
+  const payCfg = new Map<string, unknown>(
+    ((payCfgRes.data as any[]) || []).map((r) => [r.key, r.value])
+  );
+  const paymentsEnabled = payCfg.get("payments_enabled") === true;
+  const trialPlan = planRes.data as { name?: string; duration_days?: number } | null;
+  const ephemeralTrial = {
+    plan: trialPlan?.name ?? "Free trial",
+    status: "trial" as const,
+  };
+
   const weekAgo = Date.now() - 7 * 864e5;
   const perDevice = base.map((b) => {
     const id = String(b.id);
@@ -117,10 +145,10 @@ export async function computeUsers(): Promise<UsersData> {
       id,
       account_id: accountId,
       agentId,
-      name: x.name || null,
+      // One name, one column. `devices.name` no longer exists.
+      name: b.agent_name || x.agent_name || null,
       mobile: x.mobile || null,
       model: x.model || null,
-      agent_name: b.agent_name || null,
       sol_id: x.sol_id || (agentId ? solOf(agentId) || null : null),
       accounts: accByDevice.has(id) ? accByDevice.get(id)! : null,
       value: valueByDevice.has(id) ? valueByDevice.get(id)! : null,
@@ -134,7 +162,7 @@ export async function computeUsers(): Promise<UsersData> {
   });
 
   const groupKey = (d: (typeof perDevice)[number]) =>
-    d.agentId ? `id:${d.agentId}` : d.account_id ? `acc:${d.account_id}` : d.agent_name ? `nm:${d.agent_name.toLowerCase()}` : `dev:${d.id}`;
+    d.agentId ? `id:${d.agentId}` : d.account_id ? `acc:${d.account_id}` : d.name ? `nm:${d.name.toLowerCase()}` : `dev:${d.id}`;
   const groups = new Map<string, (typeof perDevice)[number][]>();
   for (const d of perDevice) {
     const k = groupKey(d);
@@ -145,13 +173,15 @@ export async function computeUsers(): Promise<UsersData> {
   const rows: UserRow[] = [...groups.values()].map((ds) => {
     const byRecent = [...ds].sort((a, b) => (a.last_seen || "") < (b.last_seen || "") ? 1 : -1);
     const agentId = pick(byRecent, (d) => d.agentId);
-    const sub = agentId ? subByAgent.get(agentId) : undefined;
+    const sub = agentId
+      ? subByAgent.get(agentId) ?? (paymentsEnabled ? undefined : ephemeralTrial)
+      : undefined;
     const accVals = ds.map((d) => d.accounts).filter((v): v is number => v != null);
     const valVals = ds.map((d) => d.value).filter((v): v is number => v != null);
     const lastSeen = pick(byRecent, (d) => d.last_seen);
     const verified = ds.some((d) => d.phone_verified);
     const accounts = accVals.length ? Math.max(...accVals) : null;
-    const agent_name = pick(byRecent, (d) => d.agent_name);
+    const name = pick(byRecent, (d) => d.name);
     return {
       device_id: byRecent[0].id,
       device_ids: ds.map((d) => d.id),
@@ -161,10 +191,9 @@ export async function computeUsers(): Promise<UsersData> {
       // limit actually governs — and what anyone reading this column means — is
       // how many are signed in NOW.
       signed_in: ds.filter((d) => d.session_live).length,
-      name: pick(byRecent, (d) => d.name),
+      name,
       mobile: pick(byRecent, (d) => d.mobile),
       model: pick(byRecent, (d) => d.model),
-      agent_name,
       agent_id: agentId,
       region: pick(byRecent, (d) => d.sol_id),
       accounts,
@@ -175,7 +204,7 @@ export async function computeUsers(): Promise<UsersData> {
       phone_verified: verified,
       // "Onboarded" = a real agent (not just an app-open): has an agent id, is
       // verified, has synced a book, or at least typed an agent name.
-      onboarded: !!agentId || verified || accounts != null || !!agent_name,
+      onboarded: !!agentId || verified || accounts != null || !!name,
       app_version: byRecent[0].app_version,
       first_seen: ds.reduce<string | null>((m, d) => (!m || (d.first_seen && d.first_seen < m) ? d.first_seen : m), null),
       last_seen: lastSeen,
@@ -194,7 +223,12 @@ export async function computeUsers(): Promise<UsersData> {
     value: rows.reduce((s, r) => s + (r.value || 0), 0),
     collected: rows.reduce((s, r) => s + r.collected, 0),
     lists: submits.length,
-    subscribers: rows.filter((r) => r.sub_status && r.sub_status !== "expired").length,
+    // Counted off REAL subscription rows, never the derived trial above —
+    // otherwise, with payments off, every agent would read as a subscriber and
+    // this KPI would just restate `agents`.
+    subscribers: rows.filter(
+      (r) => r.agent_id && subByAgent.get(r.agent_id)?.status && subByAgent.get(r.agent_id)!.status !== "expired"
+    ).length,
     ai_queries: (aiRes as any).count ?? 0,
   };
 

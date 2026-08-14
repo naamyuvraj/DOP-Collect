@@ -115,12 +115,21 @@ Deno.serve(async (req) => {
       // build that omits them can't null out a value already on the row.
       const deviceRow: Record<string, unknown> = {
         id,
-        agent_name: clip(row.agent_name, 80),
         app_version: clip(row.app_version, 32),
         platform: clip(row.platform, 16) || "android",
         last_seen: new Date().toISOString(),
       };
-      if (row.name) deviceRow.name = clip(row.name, 80);
+      // ONE name now: `agent_name`. It used to be written unconditionally, so a
+      // build that sent no agent name blanked the one already on the row — with
+      // two name fields that was survivable, with one it erases the only name we
+      // have. Same "never null out what we already know" rule as every field
+      // below.
+      //
+      // Older builds send the retired `name` instead (and may send only that).
+      // Fold it in so a phone that hasn't updated yet still keeps its row
+      // labelled; `name` itself is no longer written by any current build.
+      const sentName = row.agent_name || row.name;
+      if (sentName) deviceRow.agent_name = clip(sentName, 80);
       if (row.mobile) deviceRow.mobile = clip(String(row.mobile).replace(/\D/g, ""), 15);
       if (row.agent_id) deviceRow.agent_id = clip(row.agent_id, 64);
       if (row.sol_id) deviceRow.sol_id = clip(row.sol_id, 32);
@@ -133,8 +142,8 @@ Deno.serve(async (req) => {
       // The app and the schema ship separately, so a build can start sending a
       // column before the migration lands. Postgres 42703 = "column does not
       // exist": drop the newest field and write the rest, so a migration lag
-      // costs the model and NOT last_seen, name, mobile and agent id along with
-      // it. The whole device row used to vanish in that window, silently.
+      // costs the model and NOT last_seen, agent name, mobile and agent id along
+      // with it. The whole device row used to vanish in that window, silently.
       if (up.error && (up.error as { code?: string }).code === "42703"
           && "model" in deviceRow) {
         console.warn("devices.model missing — run admin/schema_device_model.sql");

@@ -58,7 +58,9 @@ export async function PATCH(req: NextRequest) {
 
     const p = (body as { patch?: Record<string, unknown> }).patch ?? {};
     const row: Record<string, string | null> = {};
-    if ("name" in p) row.name = clip(p.name, 80);
+    // There is ONE name and it is `agent_name`. `devices.name` was the second,
+    // retired name column and is dropped by admin/schema_one_name.sql — writing
+    // it here after the drop would fail the whole patch with a 42703.
     if ("agent_name" in p) row.agent_name = clip(p.agent_name, 80);
     if ("agent_id" in p) row.agent_id = clip(p.agent_id, 64);
     if ("sol_id" in p) row.sol_id = clip(p.sol_id, 32);

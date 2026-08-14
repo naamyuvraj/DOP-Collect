@@ -8,11 +8,15 @@
 -- Read-only telemetry; service_role only.
 -- ============================================================================
 
--- The agent's display name + mobile number (shown on the Users tab). Sent by
--- the app with its telemetry; nullable until the app update that sends them
--- ships. NOTE: mobile is stored raw here for the admin's contact list — distinct
--- from the OTP flow, which only ever keeps a hash.
-alter table public.devices add column if not exists name   text;
+-- The agent's mobile number (shown on the Users tab). Sent by the app with its
+-- telemetry; nullable until the app update that sends it ships. NOTE: mobile is
+-- stored raw here for the admin's contact list — distinct from the OTP flow,
+-- which only ever keeps a hash.
+--
+-- This used to add a `name` column too, for a second "display name" the app no
+-- longer captures. It is NOT recreated here — a fresh deployment must not get a
+-- column that schema_one_name.sql exists to drop. The one name is
+-- devices.agent_name (created in schema.sql).
 alter table public.devices add column if not exists mobile text;
 
 -- Latest known account count per device (from its most recent sync_done).
