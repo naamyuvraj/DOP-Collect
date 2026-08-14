@@ -14,6 +14,7 @@ type UserRow = {
   mobile: string | null;
   agent_name: string | null;
   agent_id: string | null;
+  model: string | null;
   region: string | null;
   accounts: number | null;
   value: number | null;
@@ -126,10 +127,10 @@ export default function Users() {
   }
 
   function exportCsv() {
-    const head = ["Name", "Mobile", "Agent", "Agent ID", "Region", "District", "Accounts", "Monthly book", "Collected", "Plan", "Status", "Phone verified", "Version", "First seen", "Last seen"];
+    const head = ["Name", "Mobile", "Phone", "Agent", "Agent ID", "Region", "District", "Accounts", "Monthly book", "Collected", "Plan", "Status", "Phone verified", "Version", "First seen", "Last seen"];
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = view.map((r) =>
-      [r.name, r.mobile, r.agent_name, r.agent_id, r.region, regionOf(r.region), r.accounts, r.value, r.collected, r.plan, r.active ? "active" : "dormant", r.phone_verified ? "yes" : "no", r.app_version, r.first_seen, r.last_seen].map(esc).join(",")
+      [r.name, r.mobile, r.model, r.agent_name, r.agent_id, r.region, regionOf(r.region), r.accounts, r.value, r.collected, r.plan, r.active ? "active" : "dormant", r.phone_verified ? "yes" : "no", r.app_version, r.first_seen, r.last_seen].map(esc).join(",")
     );
     const csv = [head.map(esc).join(","), ...lines].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -465,6 +466,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
 
           <div className="card p-4 text-[13px]">
             <Row k="Phone verified" v={row.phone_verified ? "yes" : "no"} />
+            <Row k="Phone" v={row.model || "—"} />
             <Row k="App version" v={row.app_version || "—"} />
             <Row k="Signed in on" v={`${row.signed_in} phone${row.signed_in === 1 ? "" : "s"}`} />
             <Row

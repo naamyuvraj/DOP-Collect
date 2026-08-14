@@ -39,6 +39,10 @@ dependencies:
   share_plus: ^10.1.4
   # AI assistant — Groq free-tier calls (already in the tree transitively)
   http: ^1.6.0
+  # SHA-256 for the derived device id. Already resolved in the lock as a
+  # transitive dep, so declaring it adds no new package to the tree — it just
+  # stops us importing something we never asked for.
+  crypto: ^3.0.7
   # AI assistant voice: on-device speech-to-text + text-to-speech (free).
   # NOTE: native plugins -> the first build that includes these must be a NEW
   # Shorebird release, not a patch.

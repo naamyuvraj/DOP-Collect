@@ -1,14 +1,12 @@
 import 'dart:convert';
-import 'dart:math';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/agent_id.dart';
 import '../data/app_settings.dart';
 import '../data/credentials.dart';
 import '../data/session.dart';
+import 'device_identity.dart';
 import 'supabase_config.dart';
 
 /// Product + account telemetry -> Supabase (via the `ingest` edge function).
@@ -27,7 +25,6 @@ import 'supabase_config.dart';
 ///
 /// The opt-out covers everything in this class — including [identify].
 class Analytics {
-  static String? _deviceId;
   static bool _identified = false;
   static bool _enabled = true; // mirrors the user's opt-out, loaded at startup
 
@@ -39,23 +36,10 @@ class Analytics {
 
   static void setEnabled(bool v) => _enabled = v;
 
-  /// Stable anonymous per-install id — also used by the Groq proxy for
-  /// per-device rate limiting. Generated regardless of the analytics opt-out.
-  ///
-  /// Stable for the life of the INSTALL, not just the process: it is generated
-  /// once and kept in app storage, so signing out and back in reuses it. That
-  /// matters because the `otp` function keys a device session on this value —
-  /// if it changed per login, one phone would take a fresh slot every time and
-  /// the agent would eventually kick themselves off their own account.
-  ///
-  /// It does NOT survive "Clear data" or a reinstall; the phone then arrives as
-  /// a new device. Surviving that needs a native identifier.
-  static Future<String> deviceId() => _did();
-
-  /// Drops the in-process cache so a test can act out a fresh launch and prove
-  /// the id is read back from storage rather than merely remembered.
-  @visibleForTesting
-  static void debugForgetCachedDeviceId() => _deviceId = null;
+  /// This phone's id — see [DeviceIdentity.id] for how it is chosen and what it
+  /// survives. Resolved regardless of the analytics opt-out, because the OTP
+  /// session and the Groq rate limit both key on it.
+  static Future<String> deviceId() => DeviceIdentity.id();
 
   static bool get _live => SupabaseConfig.configured && _enabled;
 
@@ -76,6 +60,10 @@ class Analytics {
     // in (identify is re-sent with force:true right after login).
     final agentId = (await Credentials.load()).agentId.trim();
     final sol = AgentId.solOf(agentId);
+    // The handset itself — so a support call can start from "which phone is
+    // this" rather than a uuid, and so a build that misbehaves on one model is
+    // visible as a pattern.
+    final model = await DeviceIdentity.modelName();
     await _ingest('device', {
       'id': await _did(),
       'name': displayName.isEmpty ? null : displayName,
@@ -83,6 +71,7 @@ class Analytics {
       'agent_name': name.isEmpty ? null : name,
       'agent_id': agentId.isEmpty ? null : agentId,
       'sol_id': sol.isEmpty ? null : sol,
+      'model': (model == null || model.isEmpty) ? null : model,
       'app_version': SupabaseConfig.buildVersion,
       'platform': 'android',
     });
@@ -145,24 +134,5 @@ class Analytics {
     }
   }
 
-  static Future<String> _did() async {
-    if (_deviceId != null) return _deviceId!;
-    final p = await SharedPreferences.getInstance();
-    var id = p.getString('analytics_device_id');
-    if (id == null || id.isEmpty) {
-      id = _uuidV4();
-      await p.setString('analytics_device_id', id);
-    }
-    return _deviceId = id;
-  }
-
-  static String _uuidV4() {
-    final r = Random.secure();
-    final b = List<int>.generate(16, (_) => r.nextInt(256));
-    b[6] = (b[6] & 0x0f) | 0x40; // version 4
-    b[8] = (b[8] & 0x3f) | 0x80; // variant
-    final h = b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
-    return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}'
-        '-${h.substring(16, 20)}-${h.substring(20)}';
-  }
+  static Future<String> _did() => DeviceIdentity.id();
 }

@@ -18,6 +18,8 @@ export type UserRow = {
   mobile: string | null;
   agent_name: string | null;
   agent_id: string | null;
+  /** Handset, e.g. "Redmi Note 12". Null for installs older than 0.9.51. */
+  model: string | null;
   region: string | null;
   accounts: number | null;
   value: number | null;
@@ -117,6 +119,7 @@ export async function computeUsers(): Promise<UsersData> {
       agentId,
       name: x.name || null,
       mobile: x.mobile || null,
+      model: x.model || null,
       agent_name: b.agent_name || null,
       sol_id: x.sol_id || (agentId ? solOf(agentId) || null : null),
       accounts: accByDevice.has(id) ? accByDevice.get(id)! : null,
@@ -160,6 +163,7 @@ export async function computeUsers(): Promise<UsersData> {
       signed_in: ds.filter((d) => d.session_live).length,
       name: pick(byRecent, (d) => d.name),
       mobile: pick(byRecent, (d) => d.mobile),
+      model: pick(byRecent, (d) => d.model),
       agent_name,
       agent_id: agentId,
       region: pick(byRecent, (d) => d.sol_id),

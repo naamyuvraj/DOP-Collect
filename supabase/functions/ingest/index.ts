@@ -120,6 +120,9 @@ Deno.serve(async (req) => {
       if (row.mobile) deviceRow.mobile = clip(String(row.mobile).replace(/\D/g, ""), 15);
       if (row.agent_id) deviceRow.agent_id = clip(row.agent_id, 64);
       if (row.sol_id) deviceRow.sol_id = clip(row.sol_id, 32);
+      // "Redmi Note 12". Only older builds omit it, and an omission must not
+      // wipe a model we already know — same rule as every field above.
+      if (row.model) deviceRow.model = clip(row.model, 64);
       await sb.from("devices").upsert(deviceRow, { onConflict: "id" });
     } else if (kind === "key_usage") {
       await sb.from("key_usage").insert({

@@ -26,14 +26,39 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
-                if (call.method == "restart") {
-                    result.success(true)
-                    restartApp()
-                } else {
-                    result.notImplemented()
+                when (call.method) {
+                    "restart" -> {
+                        result.success(true)
+                        restartApp()
+                    }
+                    "deviceInfo" -> result.success(deviceInfo())
+                    else -> result.notImplemented()
                 }
             }
     }
+
+    /**
+     * What phone this is, and a hardware-backed handle for it.
+     *
+     * `androidId` (Settings.Secure.ANDROID_ID) is the one identifier that
+     * survives an uninstall/reinstall or a "Clear data" — the app's own random
+     * id lives in app storage and does not, which is why one phone could show up
+     * as several devices. It is scoped to this app's signing key and this user,
+     * and resets on factory reset, so it identifies the install-target rather
+     * than the person. Dart hashes it before it is used or sent.
+     *
+     * No third-party Gradle dependency for this, matching the reasoning on
+     * `restart` above — `device_info_plus` would pull in a whole plugin to read
+     * three fields of `android.os.Build`.
+     */
+    private fun deviceInfo(): Map<String, Any?> = mapOf(
+        "androidId" to android.provider.Settings.Secure.getString(
+            contentResolver, android.provider.Settings.Secure.ANDROID_ID
+        ),
+        "model" to android.os.Build.MODEL,
+        "manufacturer" to android.os.Build.MANUFACTURER,
+        "sdkInt" to android.os.Build.VERSION.SDK_INT
+    )
 
     // Full restart: launch a fresh task, then kill this process. The relaunch is
     // a genuine COLD start, which is what makes the app pick up a downloaded
