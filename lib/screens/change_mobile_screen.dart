@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../data/app_settings.dart';
 import '../data/credentials.dart';
 import '../services/analytics.dart';
+import '../services/remote_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/push_button.dart';
 import 'otp_verify_screen.dart';
@@ -118,7 +119,8 @@ class _ChangeMobileScreenState extends State<ChangeMobileScreen> {
               const SizedBox(height: 6),
               Text(
                 'We\'ll send a code to confirm you own it. Your account '
-                'then moves to this number (works on up to 2 phones).',
+                'then moves to this number (works on up to '
+                '${RemoteConfig.devicesPhrase}).',
                 style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
               ),
               const SizedBox(height: 16),

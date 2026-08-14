@@ -77,6 +77,26 @@ class RemoteConfig {
     return def;
   }
 
+  static int _int(String key, {required int def, int min = 1, int max = 99}) {
+    final v = _values[key];
+    final n = v is num ? v.toInt() : int.tryParse('$v');
+    if (n == null) return def;
+    return n < min ? min : (n > max ? max : n);
+  }
+
+  /// How many phones one account may be signed in on at once.
+  ///
+  /// The `otp` function enforces this from the SAME `app_config.max_devices`
+  /// key and kicks the oldest session past it. Read here so every sentence that
+  /// mentions the limit is generated from the number actually in force — a
+  /// hardcoded "2 phones" in the copy silently becomes a lie the day the config
+  /// changes, which is exactly how the OTP length went wrong.
+  static int get maxDevices => _int('max_devices', def: 3, max: 10);
+
+  /// "up to 3 phones" — for copy that describes the allowance.
+  static String get devicesPhrase =>
+      maxDevices == 1 ? '1 phone' : '$maxDevices phones';
+
   static Map<String, dynamic> _obj(String key) {
     final v = _values[key];
     return v is Map ? v.cast<String, dynamic>() : const {};

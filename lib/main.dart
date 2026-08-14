@@ -205,8 +205,9 @@ class _DopCollectAppState extends State<DopCollectApp> {
                       key: const ValueKey('verify-gate'),
                       reason: OtpService.signedOutRemotely
                           ? 'You were signed out because your account is now '
-                              'active on 2 other phones. Verify again to use it '
-                              'on this one.'
+                              'active on ${RemoteConfig.devicesPhrase}. Log out '
+                              'on one of those phones first, then verify here — '
+                              'otherwise this will keep happening.'
                           : null,
                       onVerified: () {
                         OtpService.signedOutRemotely = false;

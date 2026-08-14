@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/remote_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/developer_card.dart';
 
@@ -40,7 +41,7 @@ class PrivacyScreen extends StatelessWidget {
           _section('What we do collect', [
             'About you: your name, your Agent ID, your post-office region (SOL) '
                 'and your mobile number. This is what runs your account and '
-                'keeps it to your two phones.',
+                'keeps it to your ${RemoteConfig.devicesPhrase}.',
             'About your usage: a random device id, the app version, and event '
                 'names like "sync completed" or "calculator used".',
             'Never your customers. No name, account number, amount or due date '
@@ -48,7 +49,7 @@ class PrivacyScreen extends StatelessWidget {
                 'the assistant.',
             'Turn off "Usage analytics" in Settings and all of the above stops '
                 'being sent. Phone verification still records your number as a '
-                'one-way code (we cannot read it back) so the two-phone limit '
+                'one-way code (we cannot read it back) so the device limit '
                 'can work.',
           ], tone: AppTheme.surfaceSoft, dot: AppTheme.inkMuted),
           _section('Security', [

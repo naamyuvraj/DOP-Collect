@@ -163,7 +163,10 @@ Deno.serve(async (req) => {
   const maxAttempts = L.maxAttempts ?? 5;   // wrong tries before burn
   const { data: mdRow } = await sb
     .from("app_config").select("value").eq("key", "max_devices").maybeSingle();
-  const maxDevices = Number(mdRow?.value ?? 2) || 2;
+  // How many phones one account may be signed in on at once. The app reads the
+  // same app_config key to word its copy, so this number and what the agent is
+  // told stay in step — change it in one place and both move.
+  const maxDevices = Number(mdRow?.value ?? 3) || 3;
 
   const bump = async (key: string, secs: number): Promise<number> => {
     const { data } = await sb.rpc("bump_rate", { p_device: key, p_window_secs: secs });
