@@ -21,8 +21,12 @@ class PrivacyScreen extends StatelessWidget {
           _section('What stays on your phone', [
             'Your customers, their RD account numbers, names, amounts and dues '
                 'are stored only on this device.',
+            'That store is ENCRYPTED with AES-256. The key lives in the '
+                'phone\'s hardware-backed Keystore, so the file is unreadable '
+                'even if someone copies it off the device.',
             'This data is never uploaded to us or any third party.',
-            'Uninstalling the app removes it.',
+            'Uninstalling the app erases it — permanently, and we hold no copy '
+                'to restore it from. Keep your phone safe.',
           ], tone: AppTheme.greenSoft, dot: AppTheme.green),
           _section('Your DOP login', [
             'Your Agent ID and password are saved in the phone\'s encrypted '
@@ -36,26 +40,33 @@ class PrivacyScreen extends StatelessWidget {
             'For other questions, only the question and a description of the '
                 'data structure (never customer names, numbers or amounts) are '
                 'sent to the AI service to work out the answer.',
-            'Turn on "Offline-only AI" in Settings to stop all cloud use.',
+            'With no network, the assistant answers on-device by itself — there '
+                'is nothing to switch on.',
           ], tone: AppTheme.focal, dot: AppTheme.amber),
           _section('What we do collect', [
-            'About you: your name, your Agent ID, your post-office region (SOL) '
-                'and your mobile number. This is what runs your account and '
-                'keeps it to your ${RemoteConfig.devicesPhrase}.',
-            'About your usage: a random device id, the app version, and event '
-                'names like "sync completed" or "calculator used".',
+            'About you: your Agent name, your Agent ID, your post-office region '
+                '(SOL), your phone model and your mobile number. This is what '
+                'runs your account and keeps it to your '
+                '${RemoteConfig.devicesPhrase}.',
+            'About your usage: a device id, the app version, and event names '
+                'like "sync completed" or "calculator used".',
             'Never your customers. No name, account number, amount or due date '
                 'ever leaves your phone — and neither do the questions you ask '
                 'the assistant.',
-            'Turn off "Usage analytics" in Settings and all of the above stops '
-                'being sent. Phone verification still records your number as a '
-                'one-way code (we cannot read it back) so the device limit '
-                'can work.',
+            'This usage data is always on, and you accepted it when you created '
+                'your account. It carries nothing about your customers, so '
+                'there is no per-phone switch for it.',
+            'Your mobile number is stored as a one-way code we cannot read '
+                'back, so the device limit can work.',
           ], tone: AppTheme.surfaceSoft, dot: AppTheme.inkMuted),
           _section('Security', [
+            'The account database on this phone is encrypted at rest with '
+                'AES-256 (SQLCipher).',
+            'Your DOP password never leaves the encrypted Keystore, and the '
+                'captcha is read on-device.',
             'All network traffic uses HTTPS.',
-            'The app is excluded from cloud backups so your data isn\'t copied '
-                'off the device.',
+            'The app is excluded from cloud backups and device-to-device '
+                'transfer, so your book is never copied off this phone.',
             'No advertising or tracking SDKs are included.',
           ], tone: AppTheme.greenSoft, dot: AppTheme.green),
           _section('Permissions', [
@@ -88,9 +99,9 @@ class PrivacyScreen extends StatelessWidget {
               style: AppTheme.display(20, weight: FontWeight.w800)),
           const SizedBox(height: 6),
           Text(
-            'DOP Collect is offline-first. Your customers\' information lives on '
-            'this phone and is never sent to us. Here is exactly what happens '
-            'with your data.',
+            'DOP Collect is offline-first. Your customers\' information lives '
+            'encrypted on this phone and is never sent to us. Here is exactly '
+            'what happens with your data.',
             style: AppTheme.body(13.5, color: AppTheme.inkMuted, height: 1.45),
           ),
         ],

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../assistant/assistant_config.dart';
 import '../data/account_repository.dart';
 import '../data/app_settings.dart';
 import '../data/credentials.dart';
@@ -46,20 +45,12 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _offlineAi = false;
-  bool _analytics = true;
   DailyRule _dailyRule = DailyRule.standard;
   int _versionTaps = 0; // 7 taps reveals the debug tools
 
   @override
   void initState() {
     super.initState();
-    AppSettings.offlineOnlyAi().then((v) {
-      if (mounted) setState(() => _offlineAi = v);
-    });
-    AppSettings.analyticsEnabled().then((v) {
-      if (mounted) setState(() => _analytics = v);
-    });
     AppSettings.dailyRule().then((v) {
       if (mounted) setState(() => _dailyRule = v);
     });
@@ -200,21 +191,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _dailyRule = saved);
   }
 
-  Future<void> _setOfflineAi(bool v) async {
-    setState(() => _offlineAi = v);
-    Analytics.track('setting_toggle', {'name': 'offline_ai', 'on': v});
-    await AppSettings.setOfflineOnlyAi(v);
-    AssistantConfig.userOfflineOnly = v;
-  }
-
-  Future<void> _setAnalytics(bool v) async {
-    setState(() => _analytics = v);
-    // Record the choice BEFORE applying, so an opt-out itself is still sent.
-    Analytics.track('setting_toggle', {'name': 'analytics', 'on': v});
-    await AppSettings.setAnalyticsEnabled(v);
-    Analytics.setEnabled(v);
-  }
-
   @override
   void dispose() {
     super.dispose();
@@ -334,17 +310,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: 8),
           _heading('APP'),
-          _toggleTile(
-              'Offline-only AI',
-              'Assistant answers on-device only. Nothing — not even the '
-                  'question — leaves the phone.',
-              _offlineAi,
-              _setOfflineAi),
-          _toggleTile(
-              'Usage analytics',
-              'Anonymous app usage (no customer data) to improve the app.',
-              _analytics,
-              _setAnalytics),
+          // "Offline-only AI" and "Usage analytics" used to sit here. Both are
+          // gone: the assistant now falls back to on-device answers by itself
+          // when the network is out, and what analytics sends is disclosed in
+          // the Privacy Policy the agent accepts at sign-up. Anything the agent
+          // needs to KNOW is on that screen, one tap below.
           _btn(
               'Subscription',
               () => Navigator.of(context).push(MaterialPageRoute(
@@ -382,36 +352,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _toggleTile(
-      String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
-        decoration: AppTheme.card(radius: 14),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: AppTheme.body(15, weight: FontWeight.w600)),
-                  Text(subtitle,
-                      style: AppTheme.body(11, color: AppTheme.inkMuted)),
-                ],
-              ),
-            ),
-            Switch(
-              value: value,
-              activeThumbColor: AppTheme.accent,
-              onChanged: onChanged,
-            ),
-          ],
-        ),
       ),
     );
   }

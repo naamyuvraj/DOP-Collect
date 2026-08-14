@@ -19,7 +19,7 @@ class ProfileView extends StatefulWidget {
 }
 
 class _ProfileViewState extends State<ProfileView> {
-  String _name = '', _agent = '', _userId = '', _photo = '';
+  String _agent = '', _userId = '', _photo = '';
   Uint8List? _photoBytes; // decoded once (P4)
   bool _loading = true;
 
@@ -30,13 +30,11 @@ class _ProfileViewState extends State<ProfileView> {
   }
 
   Future<void> _load() async {
-    final name = await AppSettings.displayName();
     final agent = await AppSettings.agentName();
     final photo = await AppSettings.profilePhoto();
     final creds = await Credentials.load();
     if (!mounted) return;
     setState(() {
-      _name = name;
       _agent = agent;
       _photo = photo;
       _photoBytes = photo.isEmpty ? null : base64Decode(photo);
@@ -46,7 +44,7 @@ class _ProfileViewState extends State<ProfileView> {
   }
 
   String get _initials {
-    final n = _name.trim().isEmpty ? 'Agent' : _name.trim();
+    final n = _agent.trim().isEmpty ? 'Agent' : _agent.trim();
     final parts = n.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
     return parts.isEmpty
         ? 'A'
@@ -107,14 +105,9 @@ class _ProfileViewState extends State<ProfileView> {
           ),
           const SizedBox(height: 16),
           Center(
-            child: Text(_name.isEmpty ? 'Agent' : _name,
+            child: Text(_agent.isEmpty ? 'Agent' : _agent,
                 style: AppTheme.display(24, weight: FontWeight.w800)),
           ),
-          if (_agent.isNotEmpty)
-            Center(
-              child: Text(_agent,
-                  style: AppTheme.body(14, color: AppTheme.inkMuted)),
-            ),
           const SizedBox(height: 24),
           _row('User ID', _userId.isEmpty ? '—' : _mask(_userId)),
           _row('Photo', _photo.isEmpty ? 'Not set' : 'Tap avatar to view'),

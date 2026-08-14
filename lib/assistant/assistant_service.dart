@@ -119,6 +119,9 @@ class AssistantService {
           system: SchemaPrompt.system,
           user: SchemaPrompt.user(_withContext(trimmed)),
         );
+        // A reply of any kind means the network is back — clear the latch so the
+        // next question is allowed to reach the cloud again.
+        AssistantConfig.markNetworkOk();
         final obj = jsonDecode(content) as Map<String, dynamic>;
         final sql = (obj['sql'] as String?)?.trim() ?? '';
         final kind = _kind(obj['kind'] as String?);
@@ -132,6 +135,10 @@ class AssistantService {
         // Not an account query -> try an interest calculation, else general.
         return await _calcOrGeneral(trimmed, lang);
       } on GroqUnavailable {
+        // Every key and model was exhausted — no signal, DNS, or timeout. Latch
+        // offline so the next question is answered on-device immediately instead
+        // of making the agent wait out the timeout again.
+        AssistantConfig.markNetworkDown();
         return AssistantAnswer.offline(lang: lang);
       } catch (_) {
         // Bad/failed SQL — try calculation, then a general answer.
@@ -313,11 +320,13 @@ class AssistantService {
         system: GeneralPrompt.system,
         user: GeneralPrompt.user(_withContext(question)),
       );
+      AssistantConfig.markNetworkOk();
       final t = text.trim();
       return t.isEmpty
           ? AssistantAnswer.notUnderstood(lang: lang)
           : AssistantAnswer.text(t);
     } on GroqUnavailable {
+      AssistantConfig.markNetworkDown();
       return AssistantAnswer.offline(lang: lang);
     } catch (_) {
       return AssistantAnswer.notUnderstood(lang: lang);

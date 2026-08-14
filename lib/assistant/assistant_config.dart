@@ -33,14 +33,23 @@ class AssistantConfig {
   /// the admin dashboard without an app update.
   static bool cloudEnabled = true;
 
-  /// Privacy toggle set by the user (loaded at startup from AppSettings). When
-  /// true, the assistant stays fully offline even if keys are present.
-  static bool userOfflineOnly = false;
+  /// Set to true once a cloud call has failed for a NETWORK reason (no signal,
+  /// DNS, timeout) rather than a bad answer. While it is set, the assistant
+  /// stops paying the timeout on every question and answers from the on-device
+  /// engine instead.
+  ///
+  /// This replaces the old manual "Offline-only AI" switch. An agent walking a
+  /// round with no bars should not have to know a setting exists — the app
+  /// notices and adapts, then recovers on its own via [markNetworkOk] as soon as
+  /// any call succeeds.
+  static bool networkDown = false;
+
+  static void markNetworkDown() => networkDown = true;
+  static void markNetworkOk() => networkDown = false;
 
   /// The effective gate the service checks: cloud is on, keys exist, and the
-  /// user hasn't switched to offline-only.
-  static bool get cloudActive =>
-      cloudEnabled && hasCloudKeys && !userOfflineOnly;
+  /// network has not just failed us.
+  static bool get cloudActive => cloudEnabled && hasCloudKeys && !networkDown;
 
   /// Max rows returned to the UI / injected as LIMIT into generated SQL.
   static const int maxRows = 200;

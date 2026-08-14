@@ -50,8 +50,8 @@ Future<void> main() async {
   await RdRatesStore.load();
   // "New Accounts" window (default 1 month).
   AccountFilter.newAccountMonths = await AppSettings.newAccountMonths();
-  // Honour the privacy toggle (offline-only AI) from the first question.
-  AssistantConfig.userOfflineOnly = await AppSettings.offlineOnlyAi();
+  // Fold the retired second name ("display name") into the single Agent name.
+  await AppSettings.migrateLegacyName();
 
   // Remote config (admin-dashboard controlled): loads instantly from cache,
   // refreshes in the background. Read the flags it exposes right after.
@@ -62,8 +62,9 @@ Future<void> main() async {
   Subscription.opener = RazorpayCheckout.open; // wire the native checkout sheet
   unawaited(Subscription.init());
 
-  // Anonymous analytics: load opt-out (defaulting to the remote-config value for
-  // a brand-new install), register the install, log the open.
+  // Anonymous analytics: always on for the device (disclosed in the Privacy
+  // Policy accepted at sign-up), but still killable fleet-wide from the
+  // dashboard. Register the install, log the open.
   await Analytics.init(defaultEnabled: RemoteConfig.analyticsDefault);
   unawaited(Analytics.identify());
   unawaited(Analytics.track('app_open'));

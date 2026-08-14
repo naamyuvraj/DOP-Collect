@@ -26,12 +26,17 @@ import 'supabase_config.dart';
 /// The opt-out covers everything in this class — including [identify].
 class Analytics {
   static bool _identified = false;
-  static bool _enabled = true; // mirrors the user's opt-out, loaded at startup
+  static bool _enabled = true;
 
-  /// Load the opt-out flag once at startup. [defaultEnabled] is the value used
-  /// for a brand-new install that hasn't chosen yet (from remote config).
+  /// Set the fleet-wide switch once at startup.
+  ///
+  /// The per-device opt-out toggle is gone; analytics is on by default and is
+  /// disclosed in the Privacy Policy the agent accepts before signing up. What
+  /// remains is [defaultEnabled], driven by `RemoteConfig.analyticsDefault`, so
+  /// collection can still be halted for everyone from the dashboard without
+  /// shipping an app update.
   static Future<void> init({bool defaultEnabled = true}) async {
-    _enabled = await AppSettings.analyticsEnabled(orDefault: defaultEnabled);
+    _enabled = defaultEnabled;
   }
 
   static void setEnabled(bool v) => _enabled = v;
@@ -53,7 +58,6 @@ class Analytics {
     if (!_live || (_identified && !force)) return;
     _identified = true;
     final name = await AppSettings.agentName();
-    final displayName = await AppSettings.displayName();
     final mobile = await AppSettings.mobile();
     // Attach the DOP agent id + its SOL ID (post-office branch) so the dashboard
     // can track usage per agent and per region. Empty until the agent has logged
@@ -66,7 +70,9 @@ class Analytics {
     final model = await DeviceIdentity.modelName();
     await _ingest('device', {
       'id': await _did(),
-      'name': displayName.isEmpty ? null : displayName,
+      // `name` is deliberately no longer sent — there is one name now, and it
+      // travels as `agent_name`. `ingest` still ACCEPTS `name` so phones on an
+      // older build keep populating their row until they update.
       'mobile': mobile.isEmpty ? null : mobile,
       'agent_name': name.isEmpty ? null : name,
       'agent_id': agentId.isEmpty ? null : agentId,

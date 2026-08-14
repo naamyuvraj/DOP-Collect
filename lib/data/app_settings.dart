@@ -25,11 +25,26 @@ class AppSettings {
   static Future<void> setAgentName(String v) async =>
       (await SharedPreferences.getInstance()).setString(_kAgentName, v.trim());
 
-  static const _kDisplayName = 'display_name';
-  static Future<String> displayName() async =>
-      (await SharedPreferences.getInstance()).getString(_kDisplayName) ?? '';
-  static Future<void> setDisplayName(String v) async =>
-      (await SharedPreferences.getInstance()).setString(_kDisplayName, v.trim());
+  // The app used to carry TWO names — a "Name" for display and a separate
+  // "Agent Name" for the DOP paperwork. Agents filled one, the other, or both
+  // with the same thing, and the dashboard then had to guess which to show.
+  // There is now ONE name: [agentName].
+  static const _kDisplayName = 'display_name'; // legacy — read once, then dropped
+
+  /// One-time fold of the retired `display_name` into `agent_name`.
+  ///
+  /// Runs at startup. Only fills a BLANK agent name, so an agent who set both
+  /// keeps the one that appears on his receipts; the legacy key is then removed
+  /// so this never runs twice. Safe on a fresh install (both are empty).
+  static Future<void> migrateLegacyName() async {
+    final p = await SharedPreferences.getInstance();
+    final legacy = p.getString(_kDisplayName);
+    if (legacy == null) return;
+    if ((p.getString(_kAgentName) ?? '').trim().isEmpty && legacy.trim().isNotEmpty) {
+      await p.setString(_kAgentName, legacy.trim());
+    }
+    await p.remove(_kDisplayName);
+  }
 
   // The agent's mobile number (digits only), captured at onboarding. Sent with
   // telemetry so the admin dashboard can list/contact agents.
@@ -154,14 +169,12 @@ class AppSettings {
   static Future<void> setTourSeen(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(_kTourSeen, v);
 
-  /// Privacy mode: when true, the AI assistant never calls the cloud — only the
-  /// offline intent engine runs, so nothing (not even the schema) leaves the
-  /// phone.
-  static const _kOfflineOnly = 'ai_offline_only';
-  static Future<bool> offlineOnlyAi() async =>
-      (await SharedPreferences.getInstance()).getBool(_kOfflineOnly) ?? false;
-  static Future<void> setOfflineOnlyAi(bool v) async =>
-      (await SharedPreferences.getInstance()).setBool(_kOfflineOnly, v);
+  // "Offline-only AI" used to be a manual switch. It is gone: the assistant now
+  // decides per question — every common question is still answered by the
+  // on-device intent engine first, and the cloud is only consulted when that
+  // engine has no match AND the network is actually reachable. An agent with no
+  // signal gets the offline answer without having flipped anything.
+  // See AssistantConfig.cloudActive / AssistantService.ask.
 
   /// "New Accounts" window in months (1/2/3), default 1.
   static const _kNewMonths = 'new_account_months';
@@ -170,12 +183,12 @@ class AppSettings {
   static Future<void> setNewAccountMonths(int v) async =>
       (await SharedPreferences.getInstance()).setInt(_kNewMonths, v);
 
-  /// Anonymous usage analytics (default on). Opt-out from Settings.
-  static const _kAnalytics = 'analytics_enabled';
-  static Future<bool> analyticsEnabled({bool orDefault = true}) async =>
-      (await SharedPreferences.getInstance()).getBool(_kAnalytics) ?? orDefault;
-  static Future<void> setAnalyticsEnabled(bool v) async =>
-      (await SharedPreferences.getInstance()).setBool(_kAnalytics, v);
+  // Anonymous usage analytics no longer has a Settings toggle — it is always on
+  // and is disclosed up front in the Privacy Policy the agent must accept before
+  // signing up. What it sends is unchanged and still excludes every customer
+  // detail (see Analytics.identify). The kill switch that remains is the remote
+  // one: RemoteConfig.analyticsDefault, so it can be stopped fleet-wide without
+  // an app update.
 
   /// Lot ids whose report has been downloaded/printed (for the Downloads tab's
   /// "Download / Downloaded" state).

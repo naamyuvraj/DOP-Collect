@@ -33,7 +33,6 @@ class OnboardingLogin extends StatefulWidget {
 }
 
 class _OnboardingLoginState extends State<OnboardingLogin> {
-  final _name = TextEditingController();
   final _agentName = TextEditingController();
   final _userId = TextEditingController();
   final _password = TextEditingController();
@@ -53,7 +52,6 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
         setState(() => _otpOn = RemoteConfig.otpRequired);
       }
     });
-    AppSettings.displayName().then((v) => _name.text = v);
     AppSettings.agentName().then((v) => _agentName.text = v);
     AppSettings.mobile().then((v) {
       if (v.isNotEmpty && mounted) _phone.text = v;
@@ -77,7 +75,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
 
   @override
   void dispose() {
-    for (final c in [_name, _agentName, _userId, _password, _phone, _loginPhone]) {
+    for (final c in [_agentName, _userId, _password, _phone, _loginPhone]) {
       c.dispose();
     }
     super.dispose();
@@ -125,7 +123,6 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
   }
 
   Future<void> _persist({required String agentId, required String phone}) async {
-    await AppSettings.setDisplayName(_name.text);
     await AppSettings.setAgentName(_agentName.text);
     await AppSettings.setProfilePhoto(_photo);
     if (phone.isNotEmpty) await AppSettings.setMobile(phone);
@@ -146,8 +143,8 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
   /// Sign up: full details (+ OTP when verification is on) + privacy consent.
   Future<void> _signup() async {
     final agentId = _userId.text.trim();
-    if (_name.text.trim().isEmpty || agentId.isEmpty || _password.text.isEmpty) {
-      _snack('Please fill your name, Agent ID and password.');
+    if (_agentName.text.trim().isEmpty || agentId.isEmpty || _password.text.isEmpty) {
+      _snack('Please fill your Agent name, Agent ID and password.');
       return;
     }
     if (!_agreed) {
@@ -295,8 +292,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
         Center(child: _photoPicker()),
         const SizedBox(height: 22),
         _sectionLabel('YOUR PROFILE'),
-        _field(_name, 'Name', Icons.badge_outlined),
-        _field(_agentName, 'Agent Name', Icons.person_outline),
+        _field(_agentName, 'Agent name', Icons.person_outline),
         const SizedBox(height: 18),
         _sectionLabel('DOP LOGIN'),
         _field(_userId, 'User ID (Agent ID)', Icons.tag),
@@ -346,8 +342,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
               Center(child: _photoPicker()),
               const SizedBox(height: 26),
               _sectionLabel('YOUR PROFILE'),
-              _field(_name, 'Name', Icons.badge_outlined),
-              _field(_agentName, 'Agent Name', Icons.person_outline),
+              _field(_agentName, 'Agent name', Icons.person_outline),
               const SizedBox(height: 18),
               _sectionLabel('DOP LOGIN'),
               _field(_userId, 'User ID (Agent ID)', Icons.tag),
@@ -406,9 +401,11 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
                 TextSpan(
                   style: AppTheme.body(12.5, color: AppTheme.inkMuted, height: 1.4),
                   children: [
-                    const TextSpan(text: 'I agree to the '),
+                    const TextSpan(
+                        text: 'My customers\' details stay encrypted on this '
+                            'phone and are never uploaded. I agree to the '),
                     TextSpan(
-                      text: 'Privacy Policy',
+                      text: 'Privacy & Data Policy',
                       style: AppTheme.body(12.5,
                               weight: FontWeight.w700, color: AppTheme.black)
                           .copyWith(decoration: TextDecoration.underline),
@@ -416,7 +413,9 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
                         ..onTap = () => Navigator.of(context).push(MaterialPageRoute(
                             builder: (_) => const PrivacyScreen())),
                     ),
-                    const TextSpan(text: '.'),
+                    const TextSpan(
+                        text: ', including the anonymous usage data it '
+                            'describes.'),
                   ],
                 ),
               ),

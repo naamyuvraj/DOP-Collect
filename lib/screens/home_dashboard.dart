@@ -59,7 +59,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
     AppSettings.lastSyncMs().then((v) {
       if (mounted) setState(() => _lastSyncMs = v);
     });
-    AppSettings.displayName().then((v) {
+    AppSettings.agentName().then((v) {
       if (mounted) setState(() => _name = v);
     });
     AppSettings.profilePhoto().then((v) {
