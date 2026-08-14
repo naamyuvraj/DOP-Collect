@@ -10,7 +10,10 @@ import { solOf } from "./agentId";
 export type UserRow = {
   device_id: string;
   device_ids: string[];
+  /** Installs ever seen for this agent — a reinstall adds one and never removes it. */
   devices: number;
+  /** Installs with a LIVE session right now. This is "how many phones is he on". */
+  signed_in: number;
   name: string | null;
   mobile: string | null;
   agent_name: string | null;
@@ -70,11 +73,18 @@ export async function computeUsers(): Promise<UsersData> {
   const acctToAgent = new Map<string, string>();
   for (const a of (acctRes.data as any[]) || []) if (a.id && a.agent_id) acctToAgent.set(a.id, a.agent_id);
 
-  const sessByDevice = new Map<string, { account_id: string | null; verified: boolean }>();
+  const sessByDevice =
+    new Map<string, { account_id: string | null; verified: boolean; live: boolean }>();
   for (const s of (sessRes.data as any[]) || []) {
     const cur = sessByDevice.get(s.device_id);
     const active = !s.revoked_at;
-    if (!cur || active) sessByDevice.set(s.device_id, { account_id: s.account_id ?? cur?.account_id ?? null, verified: active || !!cur?.verified });
+    if (!cur || active) {
+      sessByDevice.set(s.device_id, {
+        account_id: s.account_id ?? cur?.account_id ?? null,
+        verified: active || !!cur?.verified,
+        live: active || !!cur?.live,
+      });
+    }
   }
 
   const accByDevice = new Map<string, number>();
@@ -113,6 +123,7 @@ export async function computeUsers(): Promise<UsersData> {
       value: valueByDevice.has(id) ? valueByDevice.get(id)! : null,
       collected: collByDevice.get(id) || 0,
       phone_verified: !!x.phone_verified || !!sess?.verified,
+      session_live: !!sess?.live,
       app_version: b.app_version || null,
       first_seen: b.first_seen || null,
       last_seen: b.last_seen || null,
@@ -142,6 +153,11 @@ export async function computeUsers(): Promise<UsersData> {
       device_id: byRecent[0].id,
       device_ids: ds.map((d) => d.id),
       devices: ds.length,
+      // A reinstall, a "Clear data", or a build signed with a different key all
+      // mint a fresh device id, so `devices` counts ghosts for ever. What the
+      // limit actually governs — and what anyone reading this column means — is
+      // how many are signed in NOW.
+      signed_in: ds.filter((d) => d.session_live).length,
       name: pick(byRecent, (d) => d.name),
       mobile: pick(byRecent, (d) => d.mobile),
       agent_name,

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -40,7 +41,21 @@ class Analytics {
 
   /// Stable anonymous per-install id — also used by the Groq proxy for
   /// per-device rate limiting. Generated regardless of the analytics opt-out.
+  ///
+  /// Stable for the life of the INSTALL, not just the process: it is generated
+  /// once and kept in app storage, so signing out and back in reuses it. That
+  /// matters because the `otp` function keys a device session on this value —
+  /// if it changed per login, one phone would take a fresh slot every time and
+  /// the agent would eventually kick themselves off their own account.
+  ///
+  /// It does NOT survive "Clear data" or a reinstall; the phone then arrives as
+  /// a new device. Surviving that needs a native identifier.
   static Future<String> deviceId() => _did();
+
+  /// Drops the in-process cache so a test can act out a fresh launch and prove
+  /// the id is read back from storage rather than merely remembered.
+  @visibleForTesting
+  static void debugForgetCachedDeviceId() => _deviceId = null;
 
   static bool get _live => SupabaseConfig.configured && _enabled;
 

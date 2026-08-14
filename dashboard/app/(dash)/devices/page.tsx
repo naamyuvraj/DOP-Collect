@@ -9,6 +9,7 @@ type UserRow = {
   device_id: string;
   device_ids: string[];
   devices: number;
+  signed_in: number;
   name: string | null;
   mobile: string | null;
   agent_name: string | null;
@@ -28,12 +29,12 @@ type UserRow = {
 type Labels = Record<string, string>;
 type Data = { rows: UserRow[]; totals: { agents?: number; verified?: number; active?: number; installs?: number; accounts?: number; value?: number; collected?: number; lists?: number; subscribers?: number }; region_labels?: Labels };
 
-type SortKey = "name" | "mobile" | "agent_name" | "devices" | "region" | "accounts" | "value" | "collected" | "plan" | "app_version" | "last_seen";
+type SortKey = "name" | "mobile" | "agent_name" | "signed_in" | "region" | "accounts" | "value" | "collected" | "plan" | "app_version" | "last_seen";
 const COLS: { key: SortKey; label: string; num?: boolean }[] = [
   { key: "name", label: "Name" },
   { key: "mobile", label: "Mobile" },
   { key: "agent_name", label: "Agent" },
-  { key: "devices", label: "Phones", num: true },
+  { key: "signed_in", label: "Phones", num: true },
   { key: "region", label: "Region" },
   { key: "accounts", label: "Accounts", num: true },
   { key: "value", label: "Monthly ₹", num: true },
@@ -465,7 +466,15 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
           <div className="card p-4 text-[13px]">
             <Row k="Phone verified" v={row.phone_verified ? "yes" : "no"} />
             <Row k="App version" v={row.app_version || "—"} />
-            <Row k="Phones" v={`${row.devices}${row.devices > 1 ? " (merged)" : ""}`} />
+            <Row k="Signed in on" v={`${row.signed_in} phone${row.signed_in === 1 ? "" : "s"}`} />
+            <Row
+              k="Installs seen"
+              v={
+                row.devices > row.signed_in
+                  ? `${row.devices} — ${row.devices - row.signed_in} no longer signed in (a reinstall or "Clear data" makes the same phone look new)`
+                  : String(row.devices)
+              }
+            />
             <Row k="First seen" v={row.first_seen ? when(row.first_seen) : "—"} />
             <Row k="Last seen" v={row.last_seen ? when(row.last_seen) : "—"} />
             <Row k="Devices" v={row.device_ids.map((x) => x.slice(0, 8)).join(", ")} mono last />
