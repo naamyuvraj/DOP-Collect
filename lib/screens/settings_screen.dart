@@ -18,6 +18,7 @@ import 'change_mobile_screen.dart';
 import 'debug_breakdown.dart';
 import 'onboarding_login.dart';
 import 'paywall_screen.dart';
+import 'khata_backup_screen.dart';
 import 'privacy_screen.dart';
 import 'rd_rates_screen.dart';
 import 'portal/sync_screen.dart';
@@ -321,6 +322,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (_) => const PaywallScreen()))),
           if (widget.onTour != null)
             _btn('Take a tour', () => widget.onTour!()),
+          _btn(
+              'Khata backup',
+              () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const KhataBackupScreen()))),
           _btn(
               'Privacy & Safety',
               () => Navigator.of(context).push(MaterialPageRoute(

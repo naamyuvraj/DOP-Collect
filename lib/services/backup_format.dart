@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as enc;
 
-/// The on-disk shape of a `.dopbackup` file, and the crypto around it.
+/// The on-disk shape of a khata backup file, and the crypto around it.
 ///
 /// This is deliberately pure: no database, no plugins, no `dart:io`. Everything
 /// here is a function of its inputs, so the whole format — including the failure
@@ -14,11 +14,11 @@ import 'package:encrypt/encrypt.dart' as enc;
 ///
 /// WHY THIS EXISTS
 /// ---------------
-/// Uninstalling the app erases the only copy of the `collections` ledger and the
-/// `lots` lists. The portal can re-supply accounts via Deep Sync; it has never
-/// heard of the cash the agent took at a door, and neither has our server. The
-/// app is also excluded from cloud backup and device transfer on purpose, so
-/// there is no Android-level safety net. This file is the safety net.
+/// Uninstalling the app erases the `collections` ledger — every rupee the agent
+/// took at a door. The portal can re-supply accounts via Deep Sync; it has never
+/// heard of that money, and neither has our server. The app is also excluded
+/// from cloud backup and device transfer on purpose, so there is no
+/// Android-level safety net. This file is the safety net.
 class BackupFormat {
   BackupFormat._();
 
@@ -36,9 +36,9 @@ class BackupFormat {
   static const int _saltBytes = 16;
   static const int _ivBytes = 12; // GCM standard
 
-  /// Build the plaintext body. [tables] is the raw row data; [prefs] the
-  /// key/value settings that are NOT in the database but would still be missed
-  /// (day close, daily rule, ASLAAS, RD rates).
+  /// Build the plaintext body. [tables] is the raw row data. [prefs] is carried
+  /// by the format but empty for a khata backup — kept so the container can hold
+  /// settings later without a version bump.
   static String encode({
     required Map<String, List<Map<String, Object?>>> tables,
     required Map<String, Object?> prefs,
@@ -175,13 +175,13 @@ class BackupFormat {
     return Uint8List.fromList(out);
   }
 
-  /// `DOP-backup-2026-08-14.dopbackup` — dated so a folder of them sorts, and
+  /// `DOP-khata-2026-08-14.dopbackup` — dated so a folder of them sorts, and
   /// so the agent can tell at a glance how old his newest one is.
   static String fileNameFor(DateTime when) {
     final y = when.year.toString().padLeft(4, '0');
     final m = when.month.toString().padLeft(2, '0');
     final d = when.day.toString().padLeft(2, '0');
-    return 'DOP-backup-$y-$m-$d.dopbackup';
+    return 'DOP-khata-$y-$m-$d.dopbackup';
   }
 }
 

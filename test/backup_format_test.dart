@@ -182,9 +182,9 @@ void main() {
 
   test('the file name is dated so a folder of them sorts', () {
     expect(BackupFormat.fileNameFor(DateTime(2026, 8, 14)),
-        'DOP-backup-2026-08-14.dopbackup');
+        'DOP-khata-2026-08-14.dopbackup');
     expect(BackupFormat.fileNameFor(DateTime(2026, 1, 5)),
-        'DOP-backup-2026-01-05.dopbackup');
+        'DOP-khata-2026-01-05.dopbackup');
   });
 
   test('the passphrase is not recoverable from the file', () {

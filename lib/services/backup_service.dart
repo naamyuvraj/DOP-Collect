@@ -9,7 +9,7 @@ import '../data/database.dart';
 import 'backup_format.dart';
 import 'supabase_config.dart';
 
-/// Reads the whole book out to an encrypted file, and puts it back.
+/// Reads the khata out to an encrypted file, and puts it back.
 ///
 /// Pairs with [BackupFormat], which owns the bytes; this owns the database and
 /// the filesystem. Split that way so the format — and every way it can fail — is
@@ -18,34 +18,22 @@ class BackupService {
   BackupService(this._db);
   final AppDatabase _db;
 
-  /// Everything worth carrying across a reinstall.
+  /// The khata, and only the khata.
   ///
-  /// `accounts` is here even though a portal Deep Sync could rebuild most of it,
-  /// because four of its columns could not: `status`, `aslaas`, `route_order`
-  /// and `daily_amount` are the agent's own and the portal has never heard of
-  /// them. `collections` and `lots` have no other copy anywhere.
-  static const tables = ['accounts', 'collections', 'lots'];
+  /// `collections` is every rupee taken at a door. It is the one thing in this
+  /// app with no other copy anywhere — the portal has never heard of it and
+  /// neither has our server, so an uninstall ends it. Accounts are deliberately
+  /// NOT here: a portal Deep Sync rebuilds them, and leaving them out means a
+  /// restore can never overwrite the agent's live account book by accident.
+  ///
+  /// The format itself is keyed by table name, so widening this list is the only
+  /// change needed if `lots` or the account book should travel too.
+  static const tables = ['collections'];
 
-  /// Settings that live in SharedPreferences rather than the database and would
-  /// otherwise be silently lost. Deliberately NOT everything: no credentials (a
-  /// backup must never carry the DOP password), no device id, no session token,
-  /// no cached subscription — those are per-phone and must be re-earned.
-  static const prefKeys = [
-    'agent_name',
-    'aslaas_number',
-    'mobile_number',
-    'profile_photo',
-    'daily_rule_flat',
-    'daily_rule_days',
-    'daily_rule_amount',
-    'day_closed_on',
-    'day_closed_counted',
-    'day_closed_total',
-    'collect_daily_mode',
-    'new_account_months',
-    'rd_rate_history_v1',
-    'downloaded_lot_ids',
-  ];
+  /// Nothing. A khata backup carries the ledger and no settings — no agent name,
+  /// no ASLAAS, and above all no credentials, because this file is meant to be
+  /// sent through WhatsApp or parked in Drive.
+  static const prefKeys = <String>[];
 
   static const _kLastBackup = 'last_backup_ms';
 
@@ -106,14 +94,18 @@ class BackupService {
   BackupPayload inspect(Uint8List bytes, String passphrase) =>
       BackupFormat.decode(BackupFormat.open(bytes, passphrase));
 
-  /// Replace the current book with [payload].
+  /// Replace the khata with [payload].
   ///
   /// All-or-nothing: one transaction, so a failure halfway leaves the existing
-  /// book untouched rather than half-replaced. That matters more here than
+  /// ledger untouched rather than half-replaced. That matters more here than
   /// anywhere else in the app — the thing being overwritten is the only copy.
   ///
-  /// Unknown tables and unknown columns are skipped rather than fatal, so a
-  /// backup from a slightly older build still restores what it does have.
+  /// Touches ONLY the tables in [tables]. The account book is not in that list,
+  /// so a restore can never damage it, and anything else the file happens to
+  /// carry is ignored rather than written blindly.
+  ///
+  /// Unknown columns are skipped rather than fatal, so a backup from a slightly
+  /// older build still restores what it does have.
   Future<RestoreReport> restore(BackupPayload payload) async {
     final db = await _db.database;
     final report = RestoreReport();
@@ -164,9 +156,10 @@ class BackupService {
       }
     }
 
-    // The restored book came from the portal originally, so the "please Sync
-    // again" nag from a lost-Keystore recovery no longer applies.
-    await _db.clearResyncFlag();
+    // Deliberately NOT clearing AppDatabase.needsResync. That flag means the
+    // ACCOUNT book was lost and must be pulled from the portal again; restoring
+    // a khata puts the ledger back but no accounts, so the nag is still true and
+    // silencing it here would strand him with an empty book and no prompt.
     return report;
   }
 }
@@ -175,7 +168,6 @@ class RestoreReport {
   final Map<String, int> restored = {};
   final Set<String> droppedColumns = {};
 
-  int get accounts => restored['accounts'] ?? 0;
+  /// Entries put back — the number the agent is shown after a restore.
   int get collections => restored['collections'] ?? 0;
-  int get lots => restored['lots'] ?? 0;
 }
