@@ -10,6 +10,7 @@ type UserRow = {
   device_ids: string[];
   devices: number;
   signed_in: number;
+  phones?: { id: string; model: string | null; app_version: string | null; last_seen: string | null; signed_in: boolean }[];
   name: string | null;
   mobile: string | null;
   agent_id: string | null;
@@ -461,27 +462,41 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
 
           <div className="card p-4 text-[13px]">
             <Row k="Phone verified" v={row.phone_verified ? "yes" : "no"} />
-            <Row k="Phone" v={row.model || "—"} />
-            <Row k="App version" v={row.app_version || "—"} />
-            <Row k="Signed in on" v={`${row.signed_in} phone${row.signed_in === 1 ? "" : "s"}`} />
-            {/* This used to say a reinstall or "Clear data" made the same phone
-                look new. That stopped being true when the device id started
-                being derived from ANDROID_ID so it survives both — see
-                DeviceIdentity.id(). The line stayed, describing behaviour that
-                no longer existed, which made the number impossible to explain.
-                What actually leaves a ghost now is listed below. */}
-            <Row
-              k="Installs seen"
-              v={
-                row.devices > row.signed_in
-                  ? `${row.devices} — ${row.devices - row.signed_in} with no live session (signed out, replaced, factory reset, or an install from before device ids became durable). Only the signed-in count is charged against his limit.`
-                  : String(row.devices)
-              }
-            />
+            <Row k="Signed in on" v={`${row.signed_in} of ${row.devices} phone${row.devices === 1 ? "" : "s"}`} />
             <Row k="First seen" v={row.first_seen ? when(row.first_seen) : "—"} />
-            <Row k="Last seen" v={row.last_seen ? when(row.last_seen) : "—"} />
-            <Row k="Devices" v={row.device_ids.map((x) => x.slice(0, 8)).join(", ")} mono last />
+            <Row k="Last seen" v={row.last_seen ? when(row.last_seen) : "—"} last />
           </div>
+
+          {/* One line per phone. The flat "Phone / App version" rows above used
+              to show whichever install was seen most recently, so an agent on
+              three handsets looked like an agent on one — and the version shown
+              was not necessarily the version on the phone he was calling about. */}
+          {!!row.phones?.length && (
+            <div className="card p-4">
+              <div className="lbl mb-2.5">Phones</div>
+              <div className="flex flex-col gap-2.5">
+                {row.phones.map((p) => (
+                  <div key={p.id} className="flex items-baseline gap-2 text-[12.5px]">
+                    <Pill tone={p.signed_in ? "g" : undefined}>
+                      {p.signed_in ? "signed in" : "signed out"}
+                    </Pill>
+                    <span className="font-semibold">{p.model || "Unknown phone"}</span>
+                    <span className="text-muted font-mono text-[11.5px]">
+                      {p.app_version || "—"}
+                    </span>
+                    <span className="ml-auto text-faint">
+                      {p.last_seen ? when(p.last_seen) : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11.5px] text-faint mt-2.5">
+                Only the signed-in ones count against his limit. A signed-out row
+                is an old install, a replaced or reset phone, or a build signed
+                with a different key — it costs him nothing.
+              </p>
+            </div>
+          )}
 
           <div className="card p-4">
             <div className="lbl mb-2">Recent activity {det?.stats ? `· ${num(det.stats.events)} events` : ""}</div>

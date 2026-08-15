@@ -7,9 +7,22 @@ import { solOf } from "./agentId";
 // (accounts / value) is counted once. Anonymous installs (app opened, never
 // onboarded/verified) are kept as rows but excluded from the "agents" count.
 
+/** One physical phone under an agent, for the drawer's per-phone list. */
+export type PhoneRow = {
+  id: string;
+  /** Handset, e.g. "Redmi Note 12". Null for installs older than 0.9.51. */
+  model: string | null;
+  app_version: string | null;
+  last_seen: string | null;
+  /** True when this phone holds a live session right now. */
+  signed_in: boolean;
+};
+
 export type UserRow = {
   device_id: string;
   device_ids: string[];
+  /** Every phone in this group, newest-seen first. */
+  phones: PhoneRow[];
   /** Distinct device ids ever seen for this agent. Never decreases. */
   devices: number;
   /** Installs with a LIVE session right now. This is "how many phones is he on". */
@@ -161,11 +174,66 @@ export async function computeUsers(): Promise<UsersData> {
     };
   });
 
-  const groupKey = (d: (typeof perDevice)[number]) =>
-    d.agentId ? `id:${d.agentId}` : d.account_id ? `acc:${d.account_id}` : d.name ? `nm:${d.name.toLowerCase()}` : `dev:${d.id}`;
+  // Group a person's phones together — TRANSITIVELY.
+  //
+  // This used to pick ONE key per device (agent id, else account id, else name)
+  // and bucket on it. Identity is not that tidy: the same agent shows up as two
+  // rows the moment one phone carries an agent_id and another does not — a fresh
+  // install that has verified its number but not yet finished the DOP login, or
+  // an older build. Both rows had the same verified mobile and the single-key
+  // scheme could not see it, because `mobile` was not a key at all.
+  //
+  // Union-find instead. Any SHARED strong signal — agent id, account id, or the
+  // OTP-verified mobile — merges two devices, and merges chain: phone A shares a
+  // mobile with B, B shares an agent id with C, so all three are one agent.
+  //
+  // Name is deliberately NOT a merge signal. Two different agents can both be
+  // "Anjali", and a transitive merge on that would silently fuse two people's
+  // books into one row. It stays only as the last-resort bucket for a device
+  // with no strong signal at all, exactly as before.
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    while (parent.get(x) !== r) { const n = parent.get(x)!; parent.set(x, r); x = n; }
+    return r;
+  };
+  const union = (a: string, b: string) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+  for (const d of perDevice) parent.set(d.id, d.id);
+
+  // Mobile is normalised to the last 10 digits: the same number reaches us as
+  // 9153471582 and +919153471582 depending on where it was captured, and those
+  // must not read as two people.
+  const mob10 = (m: string | null) => {
+    const digits = (m || "").replace(/\D/g, "");
+    return digits.length >= 10 ? digits.slice(-10) : "";
+  };
+
+  const firstWithKey = new Map<string, string>();
+  for (const d of perDevice) {
+    const strong = [
+      d.agentId ? `id:${d.agentId}` : "",
+      d.account_id ? `acc:${d.account_id}` : "",
+      mob10(d.mobile) ? `mob:${mob10(d.mobile)}` : "",
+    ].filter(Boolean);
+    const keys = strong.length
+      ? strong
+      : d.name
+        ? [`nm:${d.name.toLowerCase()}`]
+        : [];
+    for (const k of keys) {
+      const seen = firstWithKey.get(k);
+      if (seen) union(seen, d.id);
+      else firstWithKey.set(k, d.id);
+    }
+  }
+
   const groups = new Map<string, (typeof perDevice)[number][]>();
   for (const d of perDevice) {
-    const k = groupKey(d);
+    const k = find(d.id);
     (groups.get(k) || groups.set(k, []).get(k)!).push(d);
   }
 
@@ -185,6 +253,13 @@ export async function computeUsers(): Promise<UsersData> {
     return {
       device_id: byRecent[0].id,
       device_ids: ds.map((d) => d.id),
+      phones: byRecent.map((d) => ({
+        id: d.id,
+        model: d.model,
+        app_version: d.app_version,
+        last_seen: d.last_seen,
+        signed_in: d.session_live,
+      })),
       devices: ds.length,
       // `devices` counts ghosts for ever, so it is not "how many phones is he
       // on". A reinstall and a "Clear data" no longer make one — the id is
