@@ -112,7 +112,11 @@ Future<void> _enforceSession() async {
     // keeping the user onboarded so their setup isn't wiped.
     await SessionStore.clear();
     OtpService.signedOutRemotely = true; // the gate surfaces the reason
-    DopCollectApp.setNeedsVerify?.call(true);
+    if (DopCollectApp.setNeedsVerify != null) {
+      DopCollectApp.setNeedsVerify!(true);
+    } else {
+      DopCollectApp.pendingNeedsVerify = true; // root not listening yet
+    }
   } catch (_) {/* never let this crash startup */}
 }
 
@@ -137,6 +141,18 @@ class DopCollectApp extends StatefulWidget {
   /// Set by the app root so the startup heartbeat can raise the verify gate.
   static void Function(bool)? setNeedsVerify;
 
+  /// Set when the heartbeat finds a revoked session BEFORE the root widget has
+  /// registered [setNeedsVerify].
+  ///
+  /// `_enforceSession()` is fired unawaited from main() and calls
+  /// `setNeedsVerify?.call(true)`. That static is assigned in the root's
+  /// initState, so if the heartbeat ever won the race the call was a silent
+  /// no-op: the session had already been cleared, but the gate never rose and
+  /// the agent kept using the app until the next launch. A network round-trip
+  /// makes initState the overwhelming favourite — which is exactly why this
+  /// would have been miserable to reproduce.
+  static bool pendingNeedsVerify = false;
+
   @override
   State<DopCollectApp> createState() => _DopCollectAppState();
 }
@@ -159,6 +175,11 @@ class _DopCollectAppState extends State<DopCollectApp> {
     DopCollectApp.setNeedsVerify = (v) {
       if (mounted) setState(() => _needsVerify = v);
     };
+    // Claim anything the heartbeat raised before we were listening.
+    if (DopCollectApp.pendingNeedsVerify) {
+      DopCollectApp.pendingNeedsVerify = false;
+      _needsVerify = true;
+    }
     // Entitlement can change under us (background refresh, or a purchase that
     // just completed), so rebuild rather than leave a stale gate on screen.
     Subscription.onChanged = () {

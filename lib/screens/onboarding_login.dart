@@ -185,8 +185,15 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
   /// Edit profile (no OTP) — just save the details.
   Future<void> _saveEdit() async {
     final agentId = _userId.text.trim();
-    if (agentId.isEmpty || _password.text.isEmpty) {
-      _snack('User ID and Password are required.');
+    // Agent name is required here for the same reason it is on sign-up. This
+    // form is what the "Log in" tab pushes on a fresh phone (via
+    // ensureDopLogin), and it used to check only the ID and password — so an
+    // agent who joined that way ended up with no name at all. That is the name
+    // on his receipts and the one the admin list shows him by.
+    if (_agentName.text.trim().isEmpty ||
+        agentId.isEmpty ||
+        _password.text.isEmpty) {
+      _snack('Please fill your Agent name, Agent ID and password.');
       return;
     }
     setState(() => _busy = true);
