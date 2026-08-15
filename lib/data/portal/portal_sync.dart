@@ -297,6 +297,21 @@ class PortalSyncEngine {
       }
     }
 
+    // START AT PAGE 1. This used to read whichever page the WebView happened to
+    // be showing and call it page 1 — and a sync LEAVES the list on the last
+    // page (see fillDetails). So a second Sync in the same session read page 47,
+    // stamped those ten accounts as #1-#10, and every short code from there on
+    // was wrong and collided with the real #1-#10.
+    if (!await _gotoPage(1, pageTimeout)) {
+      // Couldn't rewind — better to sync nothing than to renumber the book from
+      // the middle. `serial` is what he reads off a row to find a customer.
+      return const SyncResult([],
+          reachedList: true,
+          error: 'Could not get back to the first page. Close this and tap '
+              'Sync again.',
+          complete: false);
+    }
+
     final byAccount = <String, RdAccount>{};
     final firstHtml = await currentPageHtml();
     final total = totalPages(firstHtml);
@@ -319,7 +334,7 @@ class PortalSyncEngine {
         // exactly like a stall. Probe for it so the agent is told what actually
         // happened instead of being handed a short book.
         final blocked = await _isBlockedPage();
-        return SyncResult(_serialised(byAccount),
+        return SyncResult(_serialised(byAccount, complete: false),
             reachedList: true,
             error: blocked
                 ? 'The portal blocked navigation at page $page of $total. '
@@ -331,7 +346,7 @@ class PortalSyncEngine {
       }
       walked = page + 1;
       if (await _isSessionExpired()) {
-        return SyncResult(_serialised(byAccount),
+        return SyncResult(_serialised(byAccount, complete: false),
             reachedList: true,
             error: 'Session expired at page $page of $total — synced what '
                 'loaded. Run Sync again.',
@@ -342,7 +357,7 @@ class PortalSyncEngine {
     // Belt and braces: the loop can only end early via the paths above, but a
     // future edit must not be able to reintroduce a silent short read.
     if (walked < total) {
-      return SyncResult(_serialised(byAccount),
+      return SyncResult(_serialised(byAccount, complete: false),
           reachedList: true,
           error: 'Sync ended at page $walked of $total — run it again.',
           complete: false);
@@ -350,8 +365,23 @@ class PortalSyncEngine {
     return SyncResult(_serialised(byAccount));
   }
 
-  List<RdAccount> _serialised(Map<String, RdAccount> byAccount) {
+  /// Stamp each account with its 1-based position in the portal listing.
+  ///
+  /// [complete] must be false when the walk stopped early. A short read only
+  /// ever holds a PREFIX of the book, so numbering it 1..N is right for those
+  /// accounts and leaves every account after them holding a stale number from
+  /// the previous sync — two accounts answering to the same short code. Passing
+  /// serial 0 instead makes `replaceAll` keep whatever each account already had,
+  /// so a failed sync changes no numbering at all.
+  List<RdAccount> _serialised(Map<String, RdAccount> byAccount,
+      {bool complete = true}) {
     final list = byAccount.values.toList();
+    if (!complete) {
+      for (var i = 0; i < list.length; i++) {
+        list[i] = list[i].copyWith(serial: 0);
+      }
+      return list;
+    }
     for (var i = 0; i < list.length; i++) {
       list[i] = list[i].copyWith(serial: i + 1);
     }
