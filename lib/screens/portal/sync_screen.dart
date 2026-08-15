@@ -91,6 +91,16 @@ class _SyncScreenState extends State<SyncScreen> {
   late final PortalSyncEngine _engine;
   final CaptchaSolver _captcha = CaptchaSolver();
   Credentials _creds = const Credentials();
+
+  /// Resolves once the saved login has actually been read out of the Keystore.
+  ///
+  /// `Credentials.load()` is four async hops (prefs, a plaintext migration, then
+  /// two Keystore reads) and used to be fired with `.then()` while the login page
+  /// was already loading. `_autofillIfLogin` bails on `!_creds.hasAny`, so when
+  /// the page won that race — a warm WebView cache is easily faster than the
+  /// Keystore — the Agent ID and password were never typed, and nothing retried
+  /// until the next page load. That is the "ID doesn't fill" everyone sees.
+  late final Future<void> _credsReady;
   bool _busy = false;
   bool _filling = false;
   bool _stopFill = false;
@@ -119,7 +129,7 @@ class _SyncScreenState extends State<SyncScreen> {
       ))
       ..loadRequest(Uri.parse(Portal.agentLoginUrl));
     _engine = PortalSyncEngine(_controller);
-    Credentials.load().then((c) => _creds = c);
+    _credsReady = Credentials.load().then((c) => _creds = c);
   }
 
   @override
@@ -154,7 +164,12 @@ class _SyncScreenState extends State<SyncScreen> {
   // diagnosable on-device.
   static const _captchaExtractJs = r'''
     (function(){
-      function toData(img){
+      // One fixed threshold used to decide the whole thing. Captcha glyph/
+      // background contrast varies per image, so a single cut either ate thin
+      // strokes or kept the noise, and a miss meant the agent typed it himself.
+      // Render several and let the OCR pick the one that reads like a code.
+      var THRESHOLDS=[0.68,0.82,0.95];
+      function toData(img,tf){
         try{
           var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
           if(!w||!h) return '';
@@ -171,13 +186,22 @@ class _SyncScreenState extends State<SyncScreen> {
             var g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
             d[i]=d[i+1]=d[i+2]=g; sum+=g;
           }
-          var th=(sum/n)*0.82;
+          var th=(sum/n)*tf;
           for(var j=0;j<d.length;j+=4){
             var v=d[j]<th?0:255; d[j]=d[j+1]=d[j+2]=v; d[j+3]=255;
           }
           ctx.putImageData(id,0,0);
           return c.toDataURL('image/png');
         }catch(e){ return 'TAINT'; }
+      }
+      function allVariants(img){
+        var out=[];
+        for(var t=0;t<THRESHOLDS.length;t++){
+          var d=toData(img,THRESHOLDS[t]);
+          if(d==='TAINT') return 'TAINT';
+          if(d && d.indexOf('data:')===0) out.push(d);
+        }
+        return out;
       }
       var imgs=Array.prototype.slice.call(document.querySelectorAll('img'));
       var scored=imgs.map(function(img){
@@ -190,19 +214,20 @@ class _SyncScreenState extends State<SyncScreen> {
         if(h>0 && w>h*1.5) s+=1;                 // wide
         return {img:img,w:w,h:h,s:s,done:img.complete};
       }).sort(function(a,b){return b.s-a.s;});
-      var loading=false, data='', taint=false, chosen=null;
+      var loading=false, variants=[], taint=false, chosen=null;
       for(var i=0;i<scored.length;i++){
         if(scored[i].s<3) break;
         if(!scored[i].done){ loading=true; continue; }
-        var d=toData(scored[i].img);
-        if(d==='TAINT'){ taint=true; continue; }
-        if(d && d.indexOf('data:')===0){ data=d; chosen=scored[i]; break; }
+        var v=allVariants(scored[i].img);
+        if(v==='TAINT'){ taint=true; continue; }
+        if(v && v.length){ variants=v; chosen=scored[i]; break; }
       }
       var top=scored[0];
       var dbg=imgs.length+' imgs; top '+(top?top.w+'x'+top.h+' s'+top.s:'none')+
-              (chosen?'; used '+chosen.w+'x'+chosen.h:'')+
-              (taint?'; TAINT':'')+(loading&&!data?'; loading':'');
-      return JSON.stringify({data:data, loading:(data===''&&loading), dbg:dbg});
+              (chosen?'; used '+chosen.w+'x'+chosen.h+' x'+variants.length:'')+
+              (taint?'; TAINT':'')+(loading&&!variants.length?'; loading':'');
+      return JSON.stringify({variants:variants,
+                             loading:(variants.length===0&&loading), dbg:dbg});
     })();
   ''';
 
@@ -221,6 +246,22 @@ class _SyncScreenState extends State<SyncScreen> {
 
   int _captchaTries = 0;
   int _loginClicks = 0; // hard cap on auto-submits (lockout guard)
+
+  /// True only when the Agent ID and password boxes both actually hold something.
+  ///
+  /// The portal locks an agent out after 10 failed attempts. Auto-submit used to
+  /// fire on the captcha alone, so if the credential autofill had not run — the
+  /// race fixed above, a cleared Keystore, a relabelled field — it posted an
+  /// EMPTY login and burned a real attempt, twice per screen, silently. Read the
+  /// DOM rather than trusting that we typed successfully.
+  static const _credsFilledJs = r'''
+    (function(){
+      var id=document.querySelector('[name="AuthenticationFG.USER_PRINCIPAL"]');
+      var pw=document.querySelector('[name="AuthenticationFG.ACCESS_CODE"]');
+      if(!id||!pw) return 'false';
+      return (id.value && pw.value) ? 'true' : 'false';
+    })();
+  ''';
 
   /// The portal's Log in button. Finacle names it VALIDATE_CREDENTIALS; fall
   /// back to value/text matching so a relabelled deployment still works.
@@ -246,6 +287,14 @@ class _SyncScreenState extends State<SyncScreen> {
     })();
   ''';
 
+  /// Does this read look like a captcha code rather than OCR noise?
+  ///
+  /// DOP codes are a single short alphanumeric token. Without this, a stray
+  /// read of "5" or a 14-character smear was filled and auto-submitted, spending
+  /// one of the ten attempts the portal allows before it locks the agent out.
+  static bool _looksLikeCaptcha(String s) =>
+      RegExp(r'^[A-Za-z0-9]{4,8}$').hasMatch(s);
+
   Future<void> _autofillCaptcha({bool manual = false}) async {
     if (_solvingCaptcha) return;
     _solvingCaptcha = true;
@@ -259,11 +308,14 @@ class _SyncScreenState extends State<SyncScreen> {
       } catch (_) {
         res = {'data': '', 'loading': false, 'dbg': 'parse-fail'};
       }
-      final data = (res['data'] as String?) ?? '';
+      final variants = ((res['variants'] as List?) ?? const [])
+          .whereType<String>()
+          .where((v) => v.startsWith('data:'))
+          .toList();
       final loading = res['loading'] == true;
       final dbg = (res['dbg'] as String?) ?? '';
 
-      if (data.isEmpty && loading && _captchaTries < 6) {
+      if (variants.isEmpty && loading && _captchaTries < 6) {
         _captchaTries++;
         _solvingCaptcha = false;
         Future.delayed(const Duration(milliseconds: 600), () {
@@ -271,11 +323,26 @@ class _SyncScreenState extends State<SyncScreen> {
         });
         return;
       }
-      if (!data.startsWith('data:')) {
+      if (variants.isEmpty) {
         if (manual) _snack('Please type the captcha shown, then tap Login.');
         return;
       }
-      final guess = await _captcha.solveFromDataUrl(data);
+
+      // OCR each binarization and take the first that reads like a code. A
+      // less-plausible read is kept only as a fallback to TYPE — never to
+      // submit, because a wrong guess spends one of ten allowed attempts.
+      String? plausible;
+      String? fallback;
+      for (final v in variants) {
+        final g = await _captcha.solveFromDataUrl(v);
+        if (g == null || g.isEmpty) continue;
+        fallback ??= g;
+        if (_looksLikeCaptcha(g)) {
+          plausible = g;
+          break;
+        }
+      }
+      final guess = plausible ?? fallback;
       if (guess == null || guess.isEmpty) {
         if (manual) {
           _snack("Couldn't read the captcha — type it in, then tap Login.");
@@ -295,6 +362,26 @@ class _SyncScreenState extends State<SyncScreen> {
       // 10×500ms (~5s), clicking the instant the button enables. Only a REAL
       // submit counts toward the 2-per-screen lockout guard (a failed find /
       // disabled button is never burned).
+      if (plausible == null) {
+        if (mounted) {
+          _snack('Captcha read as "$guess" — check it, then tap Login.');
+        }
+        return;
+      }
+
+      // Gate the auto-submit on the credentials being present. A wrong captcha
+      // costs one attempt out of ten; an empty login costs the same attempt and
+      // cannot possibly succeed.
+      final credsIn = _decode(
+          await _controller.runJavaScriptReturningResult(_credsFilledJs));
+      if (!credsIn.contains('true')) {
+        if (mounted) {
+          _snack('Captcha filled: $guess — add your Agent ID and password, '
+              'then tap Login.');
+        }
+        return;
+      }
+
       if (_loginClicks < 2) {
         for (var attempt = 0; attempt < 10; attempt++) {
           await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -332,6 +419,7 @@ class _SyncScreenState extends State<SyncScreen> {
   /// Runs on page-finish plus one short retry, since the page wires its virtual
   /// keypad after load.
   Future<void> _autofillIfLogin() async {
+    await _credsReady; // never lose the race to a fast page load again
     if (!_creds.hasAny) return;
     final idVal = jsonEncode(_creds.agentId);
     final pwVal = jsonEncode(_creds.password);
