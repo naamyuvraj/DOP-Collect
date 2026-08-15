@@ -464,11 +464,17 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
             <Row k="Phone" v={row.model || "—"} />
             <Row k="App version" v={row.app_version || "—"} />
             <Row k="Signed in on" v={`${row.signed_in} phone${row.signed_in === 1 ? "" : "s"}`} />
+            {/* This used to say a reinstall or "Clear data" made the same phone
+                look new. That stopped being true when the device id started
+                being derived from ANDROID_ID so it survives both — see
+                DeviceIdentity.id(). The line stayed, describing behaviour that
+                no longer existed, which made the number impossible to explain.
+                What actually leaves a ghost now is listed below. */}
             <Row
               k="Installs seen"
               v={
                 row.devices > row.signed_in
-                  ? `${row.devices} — ${row.devices - row.signed_in} no longer signed in (a reinstall or "Clear data" makes the same phone look new)`
+                  ? `${row.devices} — ${row.devices - row.signed_in} with no live session (signed out, replaced, factory reset, or an install from before device ids became durable). Only the signed-in count is charged against his limit.`
                   : String(row.devices)
               }
             />

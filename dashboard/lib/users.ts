@@ -10,7 +10,7 @@ import { solOf } from "./agentId";
 export type UserRow = {
   device_id: string;
   device_ids: string[];
-  /** Installs ever seen for this agent — a reinstall adds one and never removes it. */
+  /** Distinct device ids ever seen for this agent. Never decreases. */
   devices: number;
   /** Installs with a LIVE session right now. This is "how many phones is he on". */
   signed_in: number;
@@ -186,10 +186,15 @@ export async function computeUsers(): Promise<UsersData> {
       device_id: byRecent[0].id,
       device_ids: ds.map((d) => d.id),
       devices: ds.length,
-      // A reinstall, a "Clear data", or a build signed with a different key all
-      // mint a fresh device id, so `devices` counts ghosts for ever. What the
-      // limit actually governs — and what anyone reading this column means — is
-      // how many are signed in NOW.
+      // `devices` counts ghosts for ever, so it is not "how many phones is he
+      // on". A reinstall and a "Clear data" no longer make one — the id is
+      // derived from ANDROID_ID and survives both (DeviceIdentity.id). What
+      // still does: an install from before that change (random id each time), a
+      // factory reset, a replaced handset, and a build signed with a DIFFERENT
+      // key, since ANDROID_ID is scoped per signing key — so the upload-keystore
+      // cutover hands every existing agent one new ghost.
+      //
+      // What the limit actually governs is how many are signed in NOW.
       signed_in: ds.filter((d) => d.session_live).length,
       name,
       mobile: pick(byRecent, (d) => d.mobile),
