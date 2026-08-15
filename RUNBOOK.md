@@ -3,7 +3,7 @@
 How to make the admin dashboard show **complete, correct** user data. Do the
 steps in order — later steps depend on earlier ones.
 
-Supabase project ref: `ojorpmtptryldizogtkz` · App version: `0.9.52+26`
+Supabase project ref: `ojorpmtptryldizogtkz` · App version: `0.9.53+27`
 
 ---
 
@@ -162,12 +162,27 @@ current build so `identify()` sends them.
 ```
 # OTA patch (Dart-only change). On a patch bump buildVersion ONLY (+22 -> +23);
 # pubspec stays pinned to the release the patch attaches to.
-shorebird patch android -- --dart-define-from-file=env.json --no-tree-shake-icons
+shorebird patch --platforms=android --release-version=0.9.53+27 -- --dart-define-from-file=env.json --no-tree-shake-icons --target-platform=android-arm,android-arm64
 
 # New release (native deps changed). Bump pubspec AND buildVersion together.
-shorebird release android -- --dart-define-from-file=env.json --no-tree-shake-icons
+shorebird release android -- --dart-define-from-file=env.json --no-tree-shake-icons --target-platform=android-arm,android-arm64
 ```
 
+> **`--target-platform=android-arm,android-arm64` is not optional either.**
+> It drops `x86_64`, which is an emulator architecture — no agent's handset runs
+> it. It was 40.5 MB of the 116 MB APK and took the release bundle from 88.1 MB
+> to 67.7 MB.
+>
+> That is not cosmetic. `shorebird patch` re-downloads the whole release bundle
+> with a 60-second timeout and no cache. At ~1.8 MB/s an 88 MB bundle needs ~47s
+> and fails whenever throughput dips — which looked like a flaky network and was
+> actually deterministic. 67.7 MB needs ~36s and lands.
+>
+> Do NOT try to win this with R8 instead. Only ~15.6 MB of the APK is dex; the
+> other 107 MB is native libraries R8 cannot touch. Shrinking would save a few MB
+> while risking ML Kit, Razorpay and the native plugins, which resolve classes
+> reflectively and fail at runtime rather than at build time.
+>
 > **`--dart-define-from-file=env.json` is not optional.** `SupabaseConfig.url`
 > and `anonKey` are `String.fromEnvironment`, so they are resolved at COMPILE
 > time. Build a patch without the flag and they compile to empty strings,
