@@ -204,11 +204,12 @@ class _DopCollectAppState extends State<DopCollectApp> {
               : _needsVerify
                   ? VerifyGateScreen(
                       key: const ValueKey('verify-gate'),
+                      // Says what to DO, in one line. It used to name how
+                      // many phones the plan allows, which told him a rule he
+                      // cannot act on and does not need.
                       reason: OtpService.signedOutRemotely
-                          ? 'You were signed out because your account is now '
-                              'active on ${RemoteConfig.devicesPhrase}. Log out '
-                              'on one of those phones first, then verify here — '
-                              'otherwise this will keep happening.'
+                          ? 'Your account is open on another phone. Log out '
+                              'there, then verify here.'
                           : null,
                       onVerified: () {
                         OtpService.signedOutRemotely = false;

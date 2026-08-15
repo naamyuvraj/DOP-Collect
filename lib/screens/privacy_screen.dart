@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../services/remote_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/developer_card.dart';
 
@@ -44,10 +43,9 @@ class PrivacyScreen extends StatelessWidget {
                 'is nothing to switch on.',
           ], tone: AppTheme.focal, dot: AppTheme.amber),
           _section('What we do collect', [
-            'About you: your Agent name, your Agent ID, your post-office region '
-                '(SOL), your phone model and your mobile number. This is what '
-                'runs your account and keeps it to your '
-                '${RemoteConfig.devicesPhrase}.',
+            'About you: your Agent name, your Agent ID, your post-office '
+                'region (SOL), your phone model and your mobile number. This '
+                'runs your account and keeps it to your own phones.',
             'About your usage: a device id, the app version, and event names '
                 'like "sync completed" or "calculator used".',
             'Never your customers. No name, account number, amount or due date '
@@ -57,7 +55,7 @@ class PrivacyScreen extends StatelessWidget {
                 'your account. It carries nothing about your customers, so '
                 'there is no per-phone switch for it.',
             'Your mobile number is stored as a one-way code we cannot read '
-                'back, so the device limit can work.',
+                'back.',
           ], tone: AppTheme.surfaceSoft, dot: AppTheme.inkMuted),
           _section('Security', [
             'The account database on this phone is encrypted at rest with '

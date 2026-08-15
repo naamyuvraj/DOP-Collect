@@ -66,9 +66,8 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
     if (OtpService.signedOutRemotely) {
       OtpService.signedOutRemotely = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _snack('Signed out here — your account is now active on '
-            '${RemoteConfig.devicesPhrase}. Log out on one of those phones '
-            'first, then verify again here.');
+        _snack('Your account is open on another phone. Log out there, '
+            'then verify again here.');
       });
     }
   }
@@ -269,8 +268,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
             style: AppTheme.display(24, weight: FontWeight.w800)),
         const SizedBox(height: 6),
         Text(
-          'Enter your registered mobile number — we\'ll send a code to log you '
-          'in. Works on up to ${RemoteConfig.devicesPhrase}.',
+          'We\'ll send a code to this number.',
           style: AppTheme.body(14, color: AppTheme.inkMuted, height: 1.4),
         ),
         const SizedBox(height: 22),
@@ -472,8 +470,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
             const SizedBox(width: 7),
             Expanded(
               child: Text(
-                'One code confirms this is you. Works on up to '
-                '${RemoteConfig.devicesPhrase}.',
+                'One code confirms it\'s you.',
                 style: AppTheme.body(11.5, color: AppTheme.inkFaint, height: 1.3),
               ),
             ),

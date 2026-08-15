@@ -105,9 +105,7 @@ class _KhataBackupScreenState extends State<KhataBackupScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'This password locks the backup file. You will need it to put '
-                'your khata back. Write it down — nobody can open the file '
-                'without it, not even us.',
+                'Write this down. Without it the backup cannot be opened.',
                 style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
               ),
               const SizedBox(height: 14),
@@ -252,8 +250,7 @@ class _KhataBackupScreenState extends State<KhataBackupScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Your current khata will be replaced by it. Collections recorded '
-              'since that backup will be lost. Your accounts are not touched.',
+              'Anything collected after that date will be lost.',
               style: AppTheme.body(12.5, color: AppTheme.red, height: 1.4),
             ),
           ],
@@ -287,15 +284,12 @@ class _KhataBackupScreenState extends State<KhataBackupScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Your khata lives only on this phone',
+                  Text('Your khata is only on this phone',
                       style: AppTheme.display(17, weight: FontWeight.w800)),
                   const SizedBox(height: 8),
                   Text(
-                    'Every collection you have ever recorded is stored here and '
-                    'nowhere else. If this phone is lost, or the app is '
-                    'uninstalled, it is gone — the post office has no record of '
-                    'it and neither do we. A backup is the only way to get it '
-                    'back.',
+                    'If the phone is lost, your collections are lost with it. '
+                    'A backup is the only way to get them back.',
                     style: AppTheme.body(13,
                         color: AppTheme.inkMuted, height: 1.45),
                   ),
@@ -335,9 +329,7 @@ class _KhataBackupScreenState extends State<KhataBackupScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Makes one file and opens the share sheet — send it to yourself on '
-              'WhatsApp, or save it to Drive. The file is locked with a password '
-              'you choose.',
+              'Sends one file — keep it on WhatsApp or Drive.',
               style: AppTheme.body(12, color: AppTheme.inkFaint, height: 1.4),
             ),
             const SizedBox(height: 26),
@@ -349,8 +341,7 @@ class _KhataBackupScreenState extends State<KhataBackupScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              'Replaces your khata with the one in the file. Your accounts are '
-              'not touched — run Sync to bring those back.',
+              'Puts back the khata from a backup file.',
               style: AppTheme.body(12, color: AppTheme.inkFaint, height: 1.4),
             ),
           ],
