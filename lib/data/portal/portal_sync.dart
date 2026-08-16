@@ -67,7 +67,7 @@ class InstallmentFillResult {
   /// Single-installment cash rows are NOT counted — the portal pays them at its
   /// default of 1, so [total] == 0 is a perfectly successful all-single list.
   final int total;
-  final Map<String, ({int rebate, int defaultFee})> rebates;
+  final Map<String, ({int? rebate, int? defaultFee})> rebates;
   final String? error;
   const InstallmentFillResult(this.saved, this.total,
       {this.rebates = const {}, this.error});
@@ -1102,7 +1102,7 @@ class PortalSyncEngine {
     }
 
     final targets = installmentsByAccount.keys.where(needsKey).toSet();
-    final rebates = <String, ({int rebate, int defaultFee})>{};
+    final rebates = <String, ({int? rebate, int? defaultFee})>{};
     if (targets.isEmpty) {
       // Nothing to key: an all-single cash list. Pay All handles it as-is.
       return const InstallmentFillResult(0, 0);
@@ -1122,11 +1122,29 @@ class PortalSyncEngine {
       await _fillInstallmentFields(
           installmentsByAccount[acc] ?? 1, chequeByAccount?[acc]);
       await _clickActionAndWait('Action.CALCULATE_REBATE', timeout);
-      rebates[acc] = (
-        rebate: await _rowIntArray('RD_REBATE_ARRAY', idx),
-        defaultFee: await _rowIntArray('RD_DEFAUT_FEE_ARRAY', idx),
-      );
+      // READ ORDER MATTERS, and getting it wrong is why every report said 0.00.
+      //
+      // The portal keeps these in two places. CALCULATE_REBATE fills the
+      // SELECTED ROW's fields (…REBATE / …DEFAULT_FEE, blank until then). The
+      // grid row (…RD_REBATE_ARRAY[i]) is only written when the row is added to
+      // the list. We used to read the grid straight after calculating — before
+      // anything had written to it — so we captured the stale 0.00 sitting
+      // there from page load, every single time.
+      var reb = await _numField('CustomAgentRDAccountFG.REBATE');
+      var def = await _numField('CustomAgentRDAccountFG.DEFAULT_FEE');
+
       await _clickActionAndWait('Action.ADD_TO_LIST', timeout);
+
+      // Now the grid row exists — use it for whatever the selected-row fields
+      // did not give us.
+      reb ??= await _rowNumArray('RD_REBATE_ARRAY', idx);
+      def ??= await _rowNumArray('RD_DEFAUT_FEE_ARRAY', idx);
+
+      // Record only when the portal actually answered. An entry of (null, null)
+      // would overwrite good figures with blanks on a re-submit.
+      if (reb != null || def != null) {
+        rebates[acc] = (rebate: reb, defaultFee: def);
+      }
       onProgress?.call(await _countModifiedTargets(targets), targets.length);
       if (await _isSessionExpired()) {
         return InstallmentFillResult(
@@ -1138,15 +1156,44 @@ class PortalSyncEngine {
     return InstallmentFillResult(saved, targets.length, rebates: rebates);
   }
 
-  Future<int> _rowIntArray(String array, int i) async {
+  /// Read one rupee figure out of a Finacle per-row array field.
+  ///
+  /// Returns null when the field is not on the page — which is NOT the same as
+  /// zero, and used to be reported as zero. That single conflation is why every
+  /// report printed "0.00" for rebate: the value was never found, and a hard 0
+  /// was stored and printed as though the portal had said so.
+  ///
+  /// Reads `.value` before `textContent`: these are <input> elements, and an
+  /// input's textContent is always empty, so the old code took the
+  /// nothing-found path every single time.
+  ///
+  /// Parses as a DECIMAL. The old code stripped every non-digit, which turned
+  /// "400.00" into 40000 — so on the rare path where it did find a value, a
+  /// ₹400 rebate would have printed as ₹40,000.
+  /// The SELECTED row's figure, which `Action.CALCULATE_REBATE` fills in.
+  Future<int?> _numField(String idFragment) => _numFrom(idFragment);
+
+  Future<int?> _rowNumArray(String array, int i) => _numFrom('$array[$i]');
+
+  Future<int?> _numFrom(String idFragment) async {
     final js = '''
       (function(){
-        var el=document.querySelector('[id*="$array[$i]"]');
-        return el ? (el.textContent||'').replace(/[^0-9]/g,'') : '';
+        var el=document.querySelector('[id*="$idFragment"]')
+            || document.querySelector('[name*="$idFragment"]');
+        if(!el) return '';
+        var v = (el.value !== undefined && el.value !== null && el.value !== '')
+              ? el.value : (el.textContent || '');
+        return String(v).trim();
       })();
     ''';
-    final s = _unwrap(await controller.runJavaScriptReturningResult(js));
-    return int.tryParse(s) ?? 0;
+    final raw = _unwrap(await controller.runJavaScriptReturningResult(js)).trim();
+    if (raw.isEmpty) return null;
+    // "1,400.50" -> 1400.5 -> 1400. Commas are thousands separators; the dot is
+    // a decimal point. Rupees are what the report prints.
+    final cleaned = raw.replaceAll(',', '').replaceAll(RegExp(r'[^0-9.]'), '');
+    if (cleaned.isEmpty) return null;
+    final d = double.tryParse(cleaned);
+    return d?.round();
   }
 
   /// Read the reference (C…/DC…/NDC… + digits) off the current portal page.
