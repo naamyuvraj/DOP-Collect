@@ -516,7 +516,8 @@ class _SyncScreenState extends State<SyncScreen> {
 
     for (var i = 0; i < lots.length; i++) {
       if (!mounted) return;
-      final lot = lots[i];
+      // Not final: the portal's rebate/default figures are folded in below.
+      var lot = lots[i];
       if (lot.isSubmitted) continue;
       final label = 'List ${i + 1} of ${lots.length}';
 
@@ -564,6 +565,9 @@ class _SyncScreenState extends State<SyncScreen> {
         await _engine.navigateToAccountList();
         continue;
       }
+      // Capture the fees BEFORE paying: this is the screen that has them, and
+      // after Pay All the portal moves on and they are gone for good.
+      lot = _withPortalFigures(lot, fill);
 
       // 3) Automated audit — pay ONLY if this list's accounts all match the
       // portal screen and are keyed. No per-list tap.
@@ -857,22 +861,10 @@ class _SyncScreenState extends State<SyncScreen> {
       return;
     }
 
-    // Keep what the portal just computed. It works rebate and default fee out
-    // from each account's own history, we cannot derive them, and this is the
-    // only moment they are on screen — the app used to read them here and drop
-    // them, so every printed report said 0.00 in both columns.
+    // Keep what the portal just computed — this screen is the only place it is
+    // ever shown.
     if (fill.rebates.isNotEmpty) {
-      lot = lot.copyWith(
-        items: [
-          for (final it in lot.items)
-            fill.rebates[it.accountNumber] == null
-                ? it
-                : it.copyWith(
-                    rebate: fill.rebates[it.accountNumber]!.rebate,
-                    defaultFee: fill.rebates[it.accountNumber]!.defaultFee,
-                  ),
-        ],
-      );
+      lot = _withPortalFigures(lot, fill);
       await widget.lotStore?.update(lot);
     }
     // Automated audit (replaces the manual confirm): pay ONLY if every one of
@@ -925,6 +917,29 @@ class _SyncScreenState extends State<SyncScreen> {
   /// Installments to key, per account. An account that appears more than once
   /// in the list (added twice) becomes that many installments on its single
   /// portal row — so it's keyed for the advance rebate rather than paid once.
+  /// Fold the portal's rebate / default-fee figures onto a lot's items.
+  ///
+  /// Both submit paths must call this. The single-lot path did and the BATCH
+  /// path did not, so every list submitted through "Submit Lists" — the flow
+  /// actually used — kept printing blank fees while the code looked fixed.
+  ///
+  /// The portal derives these from each account's own history on the
+  /// installment-entry screen. They appear nowhere on its printed report (the
+  /// official PDF leaves both columns empty), so this screen is the only place
+  /// they can ever be captured.
+  static Lot _withPortalFigures(Lot lot, InstallmentFillResult fill) {
+    if (fill.rebates.isEmpty) return lot;
+    return lot.copyWith(items: [
+      for (final it in lot.items)
+        fill.rebates[it.accountNumber] == null
+            ? it
+            : it.copyWith(
+                rebate: fill.rebates[it.accountNumber]!.rebate,
+                defaultFee: fill.rebates[it.accountNumber]!.defaultFee,
+              ),
+    ]);
+  }
+
   Map<String, int> _installmentsFor(Lot lot) {
     final m = <String, int>{};
     for (final it in lot.items) {
