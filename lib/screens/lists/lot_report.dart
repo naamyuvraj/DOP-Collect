@@ -36,7 +36,7 @@ String lotReportText(Lot lot, {String aslaas = ''}) {
             'E-Banking reference.')
     ..writeln(submitted ? '' : 'List No (local): $ref')
     ..writeln('Date: ${DateFormat('dd-MMM-yyyy').format(lot.createdAt)}')
-    ..writeln('Accounts: ${lot.count}  Total: ${inr(lot.totalAmount)}')
+    ..writeln('Accounts: ${lot.count}  Total: ${inr(lot.totalNetAmount)}')
     ..writeln('');
   // ASLAAS is per line, not per list — each account has its own number.
   for (var i = 0; i < lot.items.length; i++) {

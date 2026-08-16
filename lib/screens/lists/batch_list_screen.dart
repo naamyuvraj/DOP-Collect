@@ -141,7 +141,7 @@ class _BatchListScreenState extends State<BatchListScreen> {
                   child: _summary(
                     lots.length,
                     lots.fold(0, (s, l) => s + l.count),
-                    lots.fold(0, (s, l) => s + l.totalAmount),
+                    lots.fold(0, (s, l) => s + l.totalNetAmount),
                   ),
                 ),
                 Expanded(
@@ -211,6 +211,9 @@ class _BatchListScreenState extends State<BatchListScreen> {
 
   Widget _lotCard(int lotIndex, Lot lot) {
     final number = lotIndex + 1;
+    // Deliberately GROSS. The cap is a planning constraint applied while the
+    // list is being built, before the portal has computed any rebate — and
+    // gross is the conservative side of a limit.
     final pct = (lot.totalAmount / BatchListScreen.cap).clamp(0.0, 1.0);
     return Container(
       decoration: AppTheme.card(radius: 18),
@@ -236,7 +239,7 @@ class _BatchListScreenState extends State<BatchListScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${lot.count} accounts · ${inr(lot.totalAmount)}',
+                Text('${lot.count} accounts · ${inr(lot.totalNetAmount)}',
                     style: AppTheme.body(12.5, color: AppTheme.inkMuted)),
                 const SizedBox(height: 6),
                 ClipRRect(

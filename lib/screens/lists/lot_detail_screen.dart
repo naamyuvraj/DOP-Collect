@@ -185,7 +185,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
       ..writeln('DOP Collection List (${lot.mode})')
       ..writeln(lot.dateLabel)
       ..writeln('Accounts: ${lot.count} · Installments: ${lot.totalInstallments} '
-          '· Total: ${inr(lot.totalAmount)}')
+          '· Total: ${inr(lot.totalNetAmount)}')
       ..writeln('');
     for (var i = 0; i < lot.items.length; i++) {
       final it = lot.items[i];
@@ -432,7 +432,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(inr(lot.totalAmount),
+          Text(inr(lot.totalNetAmount),
               style: AppTheme.display(30, weight: FontWeight.w600)),
           const SizedBox(height: 4),
           Text('${lot.mode} · ${lot.count} accounts · '

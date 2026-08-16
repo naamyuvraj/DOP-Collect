@@ -999,7 +999,7 @@ class _SyncScreenState extends State<SyncScreen> {
               'Review the amounts on the portal. When you are sure, tap '
               '"Pay All Saved Installments" there yourself — the app never pays '
               'for you. ${lot.count} account${lot.count == 1 ? '' : 's'} · '
-              '₹${lot.totalAmount} · ${lot.mode}.',
+              '₹${lot.totalNetAmount} · ${lot.mode}.',
               style: AppTheme.body(12.5, color: AppTheme.inkMuted, height: 1.35),
             ),
             const SizedBox(height: 12),

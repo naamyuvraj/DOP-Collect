@@ -170,7 +170,7 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
 
   Future<void> _submitAllOnPortal(List<Lot> unsubmitted) async {
     if (!await gatePremium(context) || !mounted) return;
-    final total = unsubmitted.fold<int>(0, (s, l) => s + l.totalAmount);
+    final total = unsubmitted.fold<int>(0, (s, l) => s + l.totalNetAmount);
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -498,7 +498,7 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(inr(lot.totalAmount),
+                        Text(inr(lot.totalNetAmount),
                             style:
                                 AppTheme.display(20, weight: FontWeight.w600)),
                         const SizedBox(height: 2),
