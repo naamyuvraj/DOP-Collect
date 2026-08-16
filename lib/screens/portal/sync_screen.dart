@@ -245,7 +245,18 @@ class _SyncScreenState extends State<SyncScreen> {
   ''';
 
   int _captchaTries = 0;
-  int _loginClicks = 0; // hard cap on auto-submits (lockout guard)
+  /// Set when a page load asks for a captcha solve while one is already running.
+  bool _captchaAgain = false;
+
+  /// Hard cap on auto-submits per screen — the lockout guard.
+  ///
+  /// Was 2. Captcha OCR is good, not perfect, and each miss costs one attempt;
+  /// at 2 the agent was dropped into typing it himself after two unlucky reads,
+  /// which is most of what "auto sync makes me click things" is. The portal
+  /// allows 10 before it locks him out, so 4 roughly halves the hand-offs while
+  /// still leaving a wide margin — and only a REAL submit is counted, never a
+  /// failed find or a disabled button.
+  int _loginClicks = 0;
 
   /// True only when the Agent ID and password boxes both actually hold something.
   ///
@@ -296,7 +307,15 @@ class _SyncScreenState extends State<SyncScreen> {
       RegExp(r'^[A-Za-z0-9]{4,8}$').hasMatch(s);
 
   Future<void> _autofillCaptcha({bool manual = false}) async {
-    if (_solvingCaptcha) return;
+    // A request that arrives mid-solve used to be DROPPED. That is the common
+    // case, not a rare one: the 900ms timer from the previous page fires while
+    // the next page is loading, so the new page's captcha is never read and the
+    // agent has to type it himself — "sometimes I have to fill it in". Queue it
+    // instead and run once the in-flight solve finishes.
+    if (_solvingCaptcha) {
+      _captchaAgain = true;
+      return;
+    }
     _solvingCaptcha = true;
     if (manual) _captchaTries = 0;
     try {
@@ -382,7 +401,7 @@ class _SyncScreenState extends State<SyncScreen> {
         return;
       }
 
-      if (_loginClicks < 2) {
+      if (_loginClicks < 4) {
         for (var attempt = 0; attempt < 10; attempt++) {
           await Future<void>.delayed(const Duration(milliseconds: 500));
           if (!mounted) return;
@@ -400,6 +419,13 @@ class _SyncScreenState extends State<SyncScreen> {
       if (manual) _snack('Captcha auto-fill failed: $e');
     } finally {
       _solvingCaptcha = false;
+      if (_captchaAgain) {
+        _captchaAgain = false;
+        // Fresh page, fresh image — let it paint before reading it.
+        Future.delayed(const Duration(milliseconds: 400), () {
+          if (mounted) _autofillCaptcha();
+        });
+      }
     }
   }
 
