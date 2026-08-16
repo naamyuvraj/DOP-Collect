@@ -133,7 +133,10 @@ pw.MultiPage _lotPage(
         it.accountNumber,
         it.customerName,
         _cr(it.denomination),
-        _cr(it.amount),
+        // NET of rebate, plus any default fee — what he actually hands over.
+        // The reference report reads 11,600 where the gross deposit is 12,000
+        // and the rebate is 400.
+        _cr(it.netAmount),
         '${it.installments}',
         // The PORTAL's figures, not ours. Blank until it has said — printing a
         // confident 0.00 for a list that was never submitted claims the post
@@ -207,9 +210,12 @@ pw.MultiPage _lotPage(
       // agent reconciles against the cash he handed over.
       pw.Center(
         child: pw.Column(children: [
-          crit('Total Amount:', '${lot.totalAmount}'),
+          crit('Total Amount:', '${lot.totalNetAmount}'),
           crit('Total No Of Records:', '${lot.count}'),
+          // Shown so the net total can be checked rather than trusted: gross
+          // deposit, minus rebate, plus default fee.
           if (lot.hasPortalFigures) ...[
+            crit('Total Deposit:', _amt(lot.totalAmount)),
             crit('Total Rebate:', _amt(lot.totalRebate)),
             crit('Total Default Fee:', _amt(lot.totalDefaultFee)),
           ],
@@ -240,7 +246,7 @@ pw.MultiPage _lotPage(
         child: pw.TableHelper.fromTextArray(
           headers: const ['E-Banking Ref No', 'Total Deposit Amount'],
           data: [
-            [ref, _amt(lot.totalAmount)]
+            [ref, _amt(lot.totalNetAmount)]
           ],
           border: null,
           columnWidths: const {

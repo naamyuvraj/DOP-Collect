@@ -106,13 +106,43 @@ void main() {
           isTrue);
     });
 
-    test('the amount total is unaffected by fees', () {
-      // Rebate and default fee are reported alongside the deposit, never netted
-      // off it — the portal's Total Amount is the deposit.
-      final l = lotOf([
-        item('A1', inst: 12, rebate: 400, defaultFee: 0),
-      ]);
+    test('the gross deposit total ignores fees', () {
+      final l = lotOf([item('A1', inst: 12, rebate: 400, defaultFee: 0)]);
       expect(l.totalAmount, 12000);
+    });
+  });
+
+  group('what he actually hands over', () {
+    test('rebate comes off — the reference report case', () {
+      // 12 x 1000 = 12,000 deposit, 400 rebate, so 11,600 changes hands.
+      final l = lotOf([item('A1', inst: 12, rebate: 400, defaultFee: 0)]);
+      expect(l.totalNetAmount, 11600);
+    });
+
+    test('default fee goes ON, it does not come off', () {
+      // The sign that matters: a defaulter pays MORE. Getting this backwards
+      // would under-collect at the counter.
+      final l = lotOf([item('A1', inst: 1, rebate: 0, defaultFee: 30)]);
+      expect(l.totalNetAmount, 1030);
+    });
+
+    test('a rebate and a fee on the same line net correctly', () {
+      final l = lotOf([item('A1', inst: 12, rebate: 400, defaultFee: 30)]);
+      expect(l.totalNetAmount, 11630);
+    });
+
+    test('an unsubmitted list nets to its gross deposit', () {
+      // No portal figures yet, so nothing to add or take off — never zero.
+      final l = lotOf([item('A1', inst: 12)]);
+      expect(l.totalNetAmount, 12000);
+    });
+
+    test('mixed submitted and unsubmitted lines still total', () {
+      final l = lotOf([
+        item('A1', inst: 12, rebate: 400),
+        item('A2', inst: 1),
+      ]);
+      expect(l.totalNetAmount, 11600 + 1000);
     });
   });
 }

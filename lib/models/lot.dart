@@ -48,6 +48,17 @@ class LotItem {
 
   int get amount => denomination * installments;
 
+  /// What the agent actually hands over for this account.
+  ///
+  /// Rebate is a DISCOUNT for paying ahead and comes off; default fee is a
+  /// SURCHARGE for paying late and goes on. Getting the sign wrong would make a
+  /// defaulter's list read low, which is the one direction that loses money at
+  /// the counter.
+  ///
+  /// Falls back to the gross deposit until the portal has answered, so an
+  /// unsubmitted list still totals to something real.
+  int get netAmount => amount - (rebate ?? 0) + (defaultFee ?? 0);
+
   LotItem copyWith({
     int? installments,
     String? chequeNumber,
@@ -129,6 +140,10 @@ class Lot {
   /// True once the portal has returned figures for at least one line — the
   /// report uses this to decide between printing real numbers and printing
   /// blanks, rather than printing a confident 0.00 it cannot stand behind.
+  /// Total actually payable: deposits, less rebates, plus default fees. This is
+  /// the figure that has to match the cash he hands across the counter.
+  int get totalNetAmount => items.fold(0, (s, i) => s + i.netAmount);
+
   bool get hasPortalFigures =>
       items.any((i) => i.rebate != null || i.defaultFee != null);
   int get totalInstallments => items.fold(0, (s, i) => s + i.installments);
