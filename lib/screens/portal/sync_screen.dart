@@ -799,7 +799,9 @@ class _SyncScreenState extends State<SyncScreen> {
   /// otherwise hand the WebView back to the agent to review and tap "Pay All
   /// Saved Installments" himself. The app captures the reference either way.
   Future<void> _keyInstallmentsThenAwaitPayAll() async {
-    final lot = widget.submitLot!;
+    // Not final: the portal's rebate/default figures are folded back into it
+    // once installments are keyed.
+    var lot = widget.submitLot!;
     final isCheque = lot.mode.toLowerCase().contains('cheque');
     final installments = _installmentsFor(lot);
     final cheques = isCheque ? _chequesFor(lot) : null;
@@ -827,6 +829,25 @@ class _SyncScreenState extends State<SyncScreen> {
       _snack('Could not key installments${fill.error == null ? '' : ' · ${fill.error}'}. '
           'Enter them on the portal instead.');
       return;
+    }
+
+    // Keep what the portal just computed. It works rebate and default fee out
+    // from each account's own history, we cannot derive them, and this is the
+    // only moment they are on screen — the app used to read them here and drop
+    // them, so every printed report said 0.00 in both columns.
+    if (fill.rebates.isNotEmpty) {
+      lot = lot.copyWith(
+        items: [
+          for (final it in lot.items)
+            fill.rebates[it.accountNumber] == null
+                ? it
+                : it.copyWith(
+                    rebate: fill.rebates[it.accountNumber]!.rebate,
+                    defaultFee: fill.rebates[it.accountNumber]!.defaultFee,
+                  ),
+        ],
+      );
+      await widget.lotStore?.update(lot);
     }
     // Automated audit (replaces the manual confirm): pay ONLY if every one of
     // the list's accounts is on the payment screen — no missing, no extra — and

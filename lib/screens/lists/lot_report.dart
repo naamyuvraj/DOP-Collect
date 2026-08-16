@@ -53,6 +53,11 @@ String lotReportText(Lot lot, {String aslaas = ''}) {
 String _cr(num v) => '${NumberFormat('#,##,##0.00').format(v)} Cr.';
 String _amt(num v) => NumberFormat('#,##,##0.00').format(v);
 
+/// A portal-computed fee. Null means the portal has not said — the list was
+/// never submitted — and prints blank rather than a 0.00 the app cannot stand
+/// behind. Zero is a real answer and prints as 0.00.
+String _fee(int? v) => v == null ? '' : _amt(v);
+
 const _red = PdfColor.fromInt(0xFFC1272D); // India Post red
 const _grey = PdfColor.fromInt(0xFFE3E3E3); // header band
 const _zebra = PdfColor.fromInt(0xFFF2F2F2); // alternate row shading
@@ -130,8 +135,11 @@ pw.MultiPage _lotPage(
         _cr(it.denomination),
         _cr(it.amount),
         '${it.installments}',
-        '0.00',
-        '0.00',
+        // The PORTAL's figures, not ours. Blank until it has said — printing a
+        // confident 0.00 for a list that was never submitted claims the post
+        // office charged no default fee, which we cannot know.
+        _fee(it.rebate),
+        _fee(it.defaultFee),
         '', // Bank Name (not captured by the app)
         it.chequeNumber ?? '',
         it.bankAccountNumber ?? '',
@@ -193,12 +201,18 @@ pw.MultiPage _lotPage(
       pw.SizedBox(height: 14),
       pw.Text('Search Results', style: const pw.TextStyle(fontSize: 8)),
       pw.SizedBox(height: 8),
-      // Left blank exactly as the portal's report does — the total appears in
-      // the footer summary below.
+      // The portal fills these in — a real report reads "Total Amount: 11600".
+      // They used to print blank, on a note claiming the portal left them empty.
+      // Rebate and default fee are totalled here too, because that is what the
+      // agent reconciles against the cash he handed over.
       pw.Center(
         child: pw.Column(children: [
-          crit('Total Amount:', ''),
-          crit('Total No Of Records:', ''),
+          crit('Total Amount:', '${lot.totalAmount}'),
+          crit('Total No Of Records:', '${lot.count}'),
+          if (lot.hasPortalFigures) ...[
+            crit('Total Rebate:', _amt(lot.totalRebate)),
+            crit('Total Default Fee:', _amt(lot.totalDefaultFee)),
+          ],
         ]),
       ),
       pw.SizedBox(height: 14),

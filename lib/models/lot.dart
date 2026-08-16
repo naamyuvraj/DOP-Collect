@@ -19,6 +19,21 @@ class LotItem {
   /// One number per account — never the agency-wide value it used to be.
   final String? aslaas;
 
+  /// Rebate and default fee, in paise-free rupees, exactly as the PORTAL
+  /// computed them when the list was submitted.
+  ///
+  /// These are not ours to calculate. The portal works them out from the
+  /// account's own history when "Get Rebate and Default" runs, and the printed
+  /// report has to agree with the receipt the post office holds. The app read
+  /// them during submission and then discarded them, so every report printed
+  /// 0.00 in both columns — for an advance payer that understated what he was
+  /// owed, and for a defaulter it hid the fee he had paid.
+  ///
+  /// Null means "never submitted, so the portal has not said" — printed blank.
+  /// Zero is a real answer and prints as 0.00.
+  final int? rebate;
+  final int? defaultFee;
+
   const LotItem({
     required this.accountNumber,
     required this.customerName,
@@ -27,6 +42,8 @@ class LotItem {
     this.chequeNumber,
     this.bankAccountNumber,
     this.aslaas,
+    this.rebate,
+    this.defaultFee,
   });
 
   int get amount => denomination * installments;
@@ -36,6 +53,8 @@ class LotItem {
     String? chequeNumber,
     String? bankAccountNumber,
     String? aslaas,
+    int? rebate,
+    int? defaultFee,
   }) =>
       LotItem(
         accountNumber: accountNumber,
@@ -45,6 +64,8 @@ class LotItem {
         chequeNumber: chequeNumber ?? this.chequeNumber,
         bankAccountNumber: bankAccountNumber ?? this.bankAccountNumber,
         aslaas: aslaas ?? this.aslaas,
+        rebate: rebate ?? this.rebate,
+        defaultFee: defaultFee ?? this.defaultFee,
       );
 
   Map<String, Object?> toJson() => {
@@ -56,6 +77,10 @@ class LotItem {
         if (chequeNumber != null) 'cn': chequeNumber,
         if (bankAccountNumber != null) 'ba': bankAccountNumber,
         if (aslaas != null) 'as': aslaas,
+        // Only written once the portal has said, so a list prepared but never
+        // submitted stays byte-identical to what older builds wrote.
+        if (rebate != null) 'rb': rebate,
+        if (defaultFee != null) 'df': defaultFee,
       };
 
   factory LotItem.fromJson(Map<String, Object?> j) => LotItem(
@@ -66,6 +91,8 @@ class LotItem {
         chequeNumber: j['cn'] as String?,
         bankAccountNumber: j['ba'] as String?,
         aslaas: j['as'] as String?,
+        rebate: (j['rb'] as num?)?.toInt(),
+        defaultFee: (j['df'] as num?)?.toInt(),
       );
 }
 
@@ -93,6 +120,17 @@ class Lot {
 
   int get count => items.length;
   int get totalAmount => items.fold(0, (s, i) => s + i.amount);
+
+  /// Portal-computed totals across the list. Null contributes nothing, so a
+  /// half-submitted list totals only what the portal actually answered for.
+  int get totalRebate => items.fold(0, (s, i) => s + (i.rebate ?? 0));
+  int get totalDefaultFee => items.fold(0, (s, i) => s + (i.defaultFee ?? 0));
+
+  /// True once the portal has returned figures for at least one line — the
+  /// report uses this to decide between printing real numbers and printing
+  /// blanks, rather than printing a confident 0.00 it cannot stand behind.
+  bool get hasPortalFigures =>
+      items.any((i) => i.rebate != null || i.defaultFee != null);
   int get totalInstallments => items.fold(0, (s, i) => s + i.installments);
 
   /// True once a real portal reference has been captured for this list.

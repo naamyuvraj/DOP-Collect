@@ -41,6 +41,16 @@ android {
         applicationId = "com.dopcollect.dop_collect"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
+        // Ship ARM only. x86_64 is an emulator architecture — no agent's handset
+        // runs it — and it was 40.5 MB of a 116 MB APK, taking the release
+        // bundle to 88.1 MB. `shorebird patch` re-downloads that whole bundle
+        // with a 60-second timeout and no cache, so at a real-world ~1.8 MB/s it
+        // could not finish and patches simply stopped shipping.
+        //
+        // This has to be done HERE, not with `--target-platform` on the build
+        // command: `shorebird release` injects its own
+        // `--target-platform=android-arm,android-arm64,android-x64`, so passing
+        // it again just hands Flutter a duplicate flag and the build dies.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -56,6 +66,25 @@ android {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
             }
+        }
+    }
+
+    // Strip x86_64 at PACKAGING time.
+    //
+    // `ndk.abiFilters` does not work for this: the Flutter Gradle plugin injects
+    // libflutter.so/libapp.so outside NDK packaging, so only `--target-platform`
+    // controls them — and `shorebird release` injects its own
+    // `--target-platform=android-arm,android-arm64,android-x64`, so passing it
+    // again just hands Flutter a duplicate flag and the build dies. Excluding at
+    // packaging catches the libs whoever added them.
+    //
+    // x86_64 is an emulator architecture; no agent's handset runs it. It was
+    // 37.9 MB of the release bundle, and `shorebird patch` re-downloads that
+    // whole bundle with a 60-second timeout and no cache — at a real-world
+    // ~1.8 MB/s an 88 MB bundle cannot finish, so patches stopped shipping.
+    packaging {
+        jniLibs {
+            excludes += listOf("lib/x86_64/**", "lib/x86/**")
         }
     }
 

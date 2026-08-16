@@ -1,0 +1,118 @@
+import 'dart:convert';
+
+import 'package:dop_collect/models/lot.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// Rebate and default fee come from the PORTAL, are shown once during
+/// submission, and were then thrown away — so every printed report said 0.00 in
+/// both columns. For an advance payer that understated the rebate he had earned;
+/// for a defaulter it hid a fee he had actually paid, on a document he hands
+/// across a post office counter.
+///
+/// These tests pin the two things that let that happen: the figures must survive
+/// a save/load round trip, and "the portal has not said" must stay distinct from
+/// "the portal said zero".
+LotItem item(String acct, {int? rebate, int? defaultFee, int inst = 1}) =>
+    LotItem(
+      accountNumber: acct,
+      customerName: 'Sita Devi',
+      denomination: 1000,
+      installments: inst,
+      rebate: rebate,
+      defaultFee: defaultFee,
+    );
+
+Lot lotOf(List<LotItem> items) =>
+    Lot(createdAt: DateTime(2026, 8, 16), mode: 'Cash', items: items);
+
+/// Save and reload the way the database does — items go through JSON.
+LotItem roundTrip(LotItem it) =>
+    LotItem.fromJson(jsonDecode(jsonEncode(it.toJson())) as Map<String, Object?>);
+
+void main() {
+  group('the figures survive being saved', () {
+    test('rebate and default fee come back off disk', () {
+      final out = roundTrip(item('A1', rebate: 400, defaultFee: 25));
+      expect(out.rebate, 400);
+      expect(out.defaultFee, 25);
+    });
+
+    test('a real zero is preserved, not turned back into "unknown"', () {
+      // The attached portal report shows Default Fee 0.00 on a paid-up account.
+      // That is an answer, and it must not decay into a blank.
+      final out = roundTrip(item('A1', rebate: 400, defaultFee: 0));
+      expect(out.defaultFee, 0);
+      expect(out.defaultFee, isNotNull);
+    });
+
+    test('an unsubmitted list stays unknown rather than becoming zero', () {
+      final out = roundTrip(item('A1'));
+      expect(out.rebate, isNull);
+      expect(out.defaultFee, isNull);
+    });
+
+    test('an unsubmitted item writes no rebate keys at all', () {
+      // Keeps lists prepared by older builds byte-identical, so adding these
+      // fields cannot change a stored lot that predates them.
+      final json = item('A1').toJson();
+      expect(json.containsKey('rb'), isFalse);
+      expect(json.containsKey('df'), isFalse);
+    });
+
+    test('a lot saved by an OLDER build still loads', () {
+      final legacy = {'a': 'A1', 'n': 'Sita Devi', 'd': 1000, 'i': 1};
+      final out = LotItem.fromJson(legacy);
+      expect(out.accountNumber, 'A1');
+      expect(out.rebate, isNull);
+      expect(out.defaultFee, isNull);
+    });
+
+    test('copyWith carries them, and does not wipe them when omitted', () {
+      final withFees = item('A1', rebate: 400, defaultFee: 25);
+      expect(withFees.copyWith(installments: 3).rebate, 400);
+      expect(withFees.copyWith(installments: 3).defaultFee, 25);
+      expect(withFees.copyWith(rebate: 500).rebate, 500);
+    });
+  });
+
+  group('list totals', () {
+    test('rebate and default fee total across the list', () {
+      final l = lotOf([
+        item('A1', rebate: 400, defaultFee: 0),
+        item('A2', rebate: 150, defaultFee: 30),
+      ]);
+      expect(l.totalRebate, 550);
+      expect(l.totalDefaultFee, 30);
+    });
+
+    test('an unknown line contributes nothing rather than breaking the sum', () {
+      final l = lotOf([item('A1', rebate: 400), item('A2')]);
+      expect(l.totalRebate, 400);
+      expect(l.totalDefaultFee, 0);
+    });
+
+    test('hasPortalFigures is false until the portal has answered', () {
+      expect(lotOf([item('A1'), item('A2')]).hasPortalFigures, isFalse);
+    });
+
+    test('one answered line is enough to print the totals', () {
+      // A part-submitted list should show what is known, not hide all of it.
+      expect(lotOf([item('A1', rebate: 400), item('A2')]).hasPortalFigures,
+          isTrue);
+    });
+
+    test('a zero answer still counts as the portal having answered', () {
+      expect(lotOf([item('A1', rebate: 0, defaultFee: 0)]).hasPortalFigures,
+          isTrue);
+    });
+
+    test('the amount total is unaffected by fees', () {
+      // Rebate and default fee are reported alongside the deposit, never netted
+      // off it — the portal's Total Amount is the deposit.
+      final l = lotOf([
+        item('A1', inst: 12, rebate: 400, defaultFee: 0),
+      ]);
+      expect(l.totalAmount, 12000);
+    });
+  });
+}
