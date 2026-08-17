@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Td, Th } from "@/components/ui";
+import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Table, Td, Th } from "@/components/ui";
 import { inr, num } from "@/lib/format";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
@@ -188,7 +188,7 @@ export default function Plans() {
       <>
         <PageHead title="Plans & Subscriptions" subtitle="Edit pricing and roll plans out to every install — no app update needed" />
         <Card><Skel className="h-16 w-full" /></Card>
-        <div className="mt-3.5"><KpiSkeletons n={4} /></div>
+        <div className="mt-3.5"><KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-5" focal /></div>
         <Card title="Plans" className="mt-3.5"><Skel className="h-40 w-full" /></Card>
       </>
     );
@@ -239,10 +239,10 @@ export default function Plans() {
         </div>
       </Card>
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 mt-3.5">
-        <Kpi label="Plans offered" value={num(rows.filter((r) => r.active).length)} sub={`${num(rows.length)} total`} />
-        <Kpi label="With access" value={num(withAccess.length)} sub="incl. trials" />
+      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5 mt-3.5">
         <Kpi label="Paying" value={num(paidSubs.length)} sub="excl. trials" focal />
+        <Kpi label="With access" value={num(withAccess.length)} sub="incl. trials" />
+        <Kpi label="Plans offered" value={num(rows.filter((r) => r.active).length)} sub={`${num(rows.length)} total`} />
         <Kpi label="Revenue" value={inr(revenueAllTime)} sub="all time" />
       </div>
 
@@ -250,65 +250,67 @@ export default function Plans() {
       <Card title="Plans" className="mt-3.5" right={
         <button className="btn btn-ghost" onClick={() => setAdding({ ...empty })}>+ Add plan</button>
       }>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr>
-                <Th>Code</Th><Th>Name</Th><Th>Price (₹)</Th><Th>Days</Th>
-                <Th>Sort</Th><Th>Offered</Th><Th></Th>
+        <Table>
+          <thead>
+            <tr>
+              <Th>Code</Th><Th>Name</Th><Th>Price (₹)</Th><Th>Days</Th>
+              <Th>Sort</Th><Th>Offered</Th><Th></Th>
+            </tr>
+          </thead>
+          <tbody>
+            {/* Important, so the shared .tbl row hover doesn't wash the
+                half-typed plan back to the ordinary row colour. */}
+            {adding && (
+              <tr className="!bg-focal/30">
+                <Td><input className="input py-1.5 w-24" placeholder="code" value={adding.code} onChange={(e) => setAdding({ ...adding, code: e.target.value })} /></Td>
+                <Td><input className="input py-1.5 w-32" placeholder="name" value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} /></Td>
+                <Td><input type="number" className="input py-1.5 w-24" value={adding.price_inr} onChange={(e) => setAdding({ ...adding, price_inr: Number(e.target.value) })} /></Td>
+                <Td><input type="number" className="input py-1.5 w-20" value={adding.duration_days} onChange={(e) => setAdding({ ...adding, duration_days: Number(e.target.value) })} /></Td>
+                <Td><input type="number" className="input py-1.5 w-16" value={adding.sort} onChange={(e) => setAdding({ ...adding, sort: Number(e.target.value) })} /></Td>
+                <Td className="text-muted text-xs">—</Td>
+                <Td>
+                  <div className="flex gap-1.5">
+                    <button className="btn py-1.5 px-3" onClick={addPlan}>Add</button>
+                    <button className="btn btn-ghost py-1.5 px-3" onClick={() => setAdding(null)}>✕</button>
+                  </div>
+                </Td>
               </tr>
-            </thead>
-            <tbody>
-              {adding && (
-                <tr className="bg-focal/30">
-                  <Td><input className="input py-1.5 w-24" placeholder="code" value={adding.code} onChange={(e) => setAdding({ ...adding, code: e.target.value })} /></Td>
-                  <Td><input className="input py-1.5 w-32" placeholder="name" value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} /></Td>
-                  <Td><input type="number" className="input py-1.5 w-24" value={adding.price_inr} onChange={(e) => setAdding({ ...adding, price_inr: Number(e.target.value) })} /></Td>
-                  <Td><input type="number" className="input py-1.5 w-20" value={adding.duration_days} onChange={(e) => setAdding({ ...adding, duration_days: Number(e.target.value) })} /></Td>
-                  <Td><input type="number" className="input py-1.5 w-16" value={adding.sort} onChange={(e) => setAdding({ ...adding, sort: Number(e.target.value) })} /></Td>
-                  <Td className="text-muted text-xs">—</Td>
-                  <Td>
-                    <div className="flex gap-1.5">
-                      <button className="btn py-1.5 px-3" onClick={addPlan}>Add</button>
-                      <button className="btn btn-ghost py-1.5 px-3" onClick={() => setAdding(null)}>✕</button>
-                    </div>
-                  </Td>
-                </tr>
-              )}
-              {rows.map((p) => (
-                <tr key={p.code} className={p.active ? "" : "opacity-55"}>
-                  <Td className="font-mono text-xs">{p.code}</Td>
-                  <Td><input className="input py-1.5 w-32" value={p.name} onChange={(e) => edit(p.code, { name: e.target.value })} /></Td>
-                  <Td><input type="number" className="input py-1.5 w-24" value={p.price_inr} onChange={(e) => edit(p.code, { price_inr: Number(e.target.value) })} /></Td>
-                  <Td>
-                    <input
-                      type="number"
-                      className="input py-1.5 w-20"
-                      value={p.duration_days}
-                      onChange={(e) => edit(p.code, { duration_days: Number(e.target.value) })}
-                      title={p.code === "trial" ? "Free-trial length granted to every new agent" : undefined}
-                    />
-                  </Td>
-                  <Td><input type="number" className="input py-1.5 w-16" value={p.sort} onChange={(e) => edit(p.code, { sort: Number(e.target.value) })} /></Td>
-                  <Td><Toggle on={p.active} onChange={(v) => toggleActive(p, v)} /></Td>
-                  <Td>
-                    <div className="flex gap-1.5">
-                      <button className="btn py-1.5 px-3" disabled={busy === p.code} onClick={() => savePlan(p)}>
-                        {busy === p.code ? "…" : "Save"}
-                      </button>
-                      {p.code !== "trial" && (
-                        <button className="btn btn-ghost py-1.5 px-3" title="Delete" onClick={() => del(p.code)}>🗑</button>
-                      )}
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-              {!rows.length && !adding && (
-                <tr><Td className="text-muted">No plans yet — add one, or run admin/schema_payments.sql.</Td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            )}
+            {rows.map((p) => (
+              <tr key={p.code} className={p.active ? "" : "opacity-55"}>
+                <Td className="font-mono text-xs">{p.code}</Td>
+                <Td><input className="input py-1.5 w-32" value={p.name} onChange={(e) => edit(p.code, { name: e.target.value })} /></Td>
+                <Td><input type="number" className="input py-1.5 w-24" value={p.price_inr} onChange={(e) => edit(p.code, { price_inr: Number(e.target.value) })} /></Td>
+                <Td>
+                  <input
+                    type="number"
+                    className="input py-1.5 w-20"
+                    value={p.duration_days}
+                    onChange={(e) => edit(p.code, { duration_days: Number(e.target.value) })}
+                    title={p.code === "trial" ? "Free-trial length granted to every new agent" : undefined}
+                  />
+                </Td>
+                <Td><input type="number" className="input py-1.5 w-16" value={p.sort} onChange={(e) => edit(p.code, { sort: Number(e.target.value) })} /></Td>
+                <Td><Toggle on={p.active} onChange={(v) => toggleActive(p, v)} /></Td>
+                <Td>
+                  <div className="flex gap-1.5">
+                    <button className="btn py-1.5 px-3" disabled={busy === p.code} onClick={() => savePlan(p)}>
+                      {busy === p.code ? "…" : "Save"}
+                    </button>
+                    {p.code !== "trial" && (
+                      <button className="btn btn-ghost py-1.5 px-3" title="Delete" onClick={() => del(p.code)}>🗑</button>
+                    )}
+                  </div>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+        {!rows.length && !adding && (
+          <Empty action="Press “+ Add plan” above, or run admin/schema_payments.sql to seed the standard tiers.">
+            No plans defined
+          </Empty>
+        )}
         <p className="text-muted text-xs mt-3">
           The app reads this list live — flipping <b>Offered</b> off hides a tier from every install on their next
           refresh. The <b>trial</b> row’s <b>Days</b> is the free-trial length granted to every new agent (edit it here,
@@ -336,58 +338,60 @@ export default function Plans() {
                 </span>
               </div>
             }>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr><Th>Agent</Th><Th>Plan</Th><Th>Status</Th><Th>Days left</Th><Th>Renews / ended</Th><Th>Fix access</Th></tr>
-            </thead>
-            <tbody>
-              {shown.slice(0, 100).map((s) => (
-                <tr key={s.agent_id}>
-                  <Td>
-                    <div className="font-semibold">{s.agent_name || "—"}</div>
-                    <div className="font-mono text-[11px] text-muted">{s.agent_id}</div>
-                  </Td>
-                  <Td>{s.plan_name || s.plan_code}</Td>
-                  <Td>
-                    <Pill tone={s.status === "active" ? "g" : s.status === "trial" ? "b" : "r"}>{s.status}</Pill>
-                  </Td>
-                  <Td>{s.days_left == null ? <span className="text-muted">—</span> : num(s.days_left)}</Td>
-                  <Td className="text-muted text-xs">
-                    {s.current_period_end ? new Date(s.current_period_end).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}
-                  </Td>
-                  <Td>
-                    <div className="flex gap-1.5">
-                      {[7, 30].map((d) => (
-                        <button
-                          key={d}
-                          className="btn btn-ghost py-1 px-2 text-xs"
-                          title={`Grant ${d} more days — stacks onto any time left`}
-                          disabled={busy === `sub:${s.agent_id}`}
-                          onClick={() => adjust(s.agent_id, { addDays: d }, `+${d} days`)}
-                        >
-                          +{d}d
-                        </button>
-                      ))}
+        <Table>
+          <thead>
+            <tr><Th>Agent</Th><Th>Plan</Th><Th>Status</Th><Th num>Days left</Th><Th>Renews / ended</Th><Th>Fix access</Th></tr>
+          </thead>
+          <tbody>
+            {shown.slice(0, 100).map((s) => (
+              <tr key={s.agent_id}>
+                <Td>
+                  <div className="font-semibold">{s.agent_name || "—"}</div>
+                  <div className="font-mono text-[11px] text-muted">{s.agent_id}</div>
+                </Td>
+                <Td>{s.plan_name || s.plan_code}</Td>
+                <Td>
+                  <Pill tone={s.status === "active" ? "g" : s.status === "trial" ? "b" : "r"}>{s.status}</Pill>
+                </Td>
+                <Td num className="font-semibold">{s.days_left == null ? <span className="text-muted font-normal">—</span> : num(s.days_left)}</Td>
+                <Td className="text-muted text-xs">
+                  {s.current_period_end ? new Date(s.current_period_end).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}
+                </Td>
+                <Td>
+                  <div className="flex gap-1.5">
+                    {[7, 30].map((d) => (
                       <button
+                        key={d}
                         className="btn btn-ghost py-1 px-2 text-xs"
-                        title="End access now — use after a full refund"
+                        title={`Grant ${d} more days — stacks onto any time left`}
                         disabled={busy === `sub:${s.agent_id}`}
-                        onClick={() => {
-                          if (confirm(`End access for ${s.agent_id} right now?`))
-                            adjust(s.agent_id, { endNow: true }, "access ended");
-                        }}
+                        onClick={() => adjust(s.agent_id, { addDays: d }, `+${d} days`)}
                       >
-                        End
+                        +{d}d
                       </button>
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!data.subscribers.length && <Empty>No subscribers yet.</Empty>}
-        </div>
+                    ))}
+                    <button
+                      className="btn btn-ghost py-1 px-2 text-xs"
+                      title="End access now — use after a full refund"
+                      disabled={busy === `sub:${s.agent_id}`}
+                      onClick={() => {
+                        if (confirm(`End access for ${s.agent_id} right now?`))
+                          adjust(s.agent_id, { endNow: true }, "access ended");
+                      }}
+                    >
+                      End
+                    </button>
+                  </div>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+        {!data.subscribers.length && (
+          <Empty action="While payments are off a trial is handed out without writing a row — switch payments on above, or repair a stranded payment below.">
+            No subscription rows exist
+          </Empty>
+        )}
 
         {/* The stranded-payment repair. An agent who paid but never got a
             subscription row won't appear in the table above, so they need a

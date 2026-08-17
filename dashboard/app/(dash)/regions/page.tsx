@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Td, Th } from "@/components/ui";
+import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Table, Td, Th } from "@/components/ui";
 import { num, when } from "@/lib/format";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
@@ -36,7 +37,7 @@ export default function Regions() {
     return (
       <>
         <PageHead title="Regions" subtitle="Where the app is used — installs & agents by post-office branch (SOL ID)" />
-        <KpiSkeletons n={4} />
+        <KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-5" focal />
         <Card title="Branches / regions" className="mt-3.5"><Skel className="h-40 w-full" /></Card>
       </>
     );
@@ -63,47 +64,49 @@ export default function Regions() {
         </Card>
       )}
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4">
-        <Kpi label="Regions (SOL IDs)" value={num(t.regions)} focal />
+      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
+        <Kpi label="Regions (SOL IDs)" value={num(t.regions)} sub="post-office branches using the app" focal />
         <Kpi label="Installs mapped" value={num(t.installs_with_region)} sub={`${num(t.anonymous_installs)} anonymous`} />
         <Kpi label="Subscribers" value={num(t.subscribers)} />
         <Kpi label="Invalid IDs" value={num(t.invalid_ids)} />
       </div>
 
       <Card title="Branches / regions" className="mt-3.5">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr>
-                <Th>SOL ID (branch)</Th>
-                <Th>Installs</Th>
-                <Th>Active 7d</Th>
-                <Th>Subscribers</Th>
-                <Th>Agents</Th>
-                <Th>Usage</Th>
-                <Th>Last seen</Th>
+        <Table>
+          <thead>
+            <tr>
+              <Th>SOL ID (branch)</Th>
+              <Th num>Installs</Th>
+              <Th num>Active 7d</Th>
+              <Th num>Subscribers</Th>
+              <Th num>Agents</Th>
+              <Th>Usage</Th>
+              <Th>Last seen</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {d.regions.map((r) => (
+              <tr key={r.sol_id}>
+                <Td className="font-mono text-xs font-bold">{r.sol_id}</Td>
+                <Td num className="font-semibold">{num(r.installs)}</Td>
+                <Td num className="text-muted">{num(r.active_installs)}</Td>
+                <Td num>{r.subscribers ? <Pill tone="g">{num(r.subscribers)}</Pill> : <span className="text-faint">0</span>}</Td>
+                <Td num className="text-muted">{num(r.agents)}</Td>
+                <Td>
+                  <div className="h-2 rounded-full bg-line w-28 overflow-hidden">
+                    <div className="h-full bg-blue rounded-full" style={{ width: `${((r.installs + r.subscribers) / maxUse) * 100}%` }} />
+                  </div>
+                </Td>
+                <Td className="text-muted text-xs whitespace-nowrap">{r.last_seen ? when(r.last_seen) : "—"}</Td>
               </tr>
-            </thead>
-            <tbody>
-              {d.regions.map((r) => (
-                <tr key={r.sol_id}>
-                  <Td className="font-mono text-xs font-bold">{r.sol_id}</Td>
-                  <Td>{num(r.installs)}</Td>
-                  <Td className="text-muted">{num(r.active_installs)}</Td>
-                  <Td>{r.subscribers ? <Pill tone="g">{num(r.subscribers)}</Pill> : <span className="text-faint">0</span>}</Td>
-                  <Td className="text-muted">{num(r.agents)}</Td>
-                  <Td>
-                    <div className="h-2 rounded-full bg-line w-28 overflow-hidden">
-                      <div className="h-full bg-blue rounded-full" style={{ width: `${((r.installs + r.subscribers) / maxUse) * 100}%` }} />
-                    </div>
-                  </Td>
-                  <Td className="text-muted text-xs whitespace-nowrap">{r.last_seen ? when(r.last_seen) : "—"}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!d.regions.length && <Empty>No agent IDs seen yet — regions appear once subscribers or SOL-tagged installs exist.</Empty>}
-        </div>
+            ))}
+          </tbody>
+        </Table>
+        {!d.regions.length && (
+          <Empty action={<>Ask an agent to sign in with their DOP agent id — see <Link className="lnk" href="/devices">Users</Link> for who has.</>}>
+            No branches mapped yet
+          </Empty>
+        )}
         <p className="text-muted text-xs mt-3">
           A DOP agent id is <span className="font-mono">MI</span> + <b>SOL ID</b> + a 5-digit sequence. The SOL ID is
           the attached post office, so grouping by it shows the branches/regions using the app.

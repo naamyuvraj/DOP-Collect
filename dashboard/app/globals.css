@@ -24,4 +24,14 @@ body {
   .btn-ghost { @apply bg-white text-ink border border-line; }
   .input { @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5
             text-sm outline-none focus:border-green; }
+
+  /* Every table rendered through <Table>. One row height, one hover, so a row
+     can be tracked across a wide table with the eye instead of a finger. */
+  .tbl { @apply w-full text-[13px]; }
+  .tbl tbody tr { @apply transition-colors; }
+  .tbl tbody tr:hover { @apply bg-canvas/60; }
+
+  /* The next step in an empty state — a real target, not a sentence about it. */
+  .lnk { @apply font-semibold text-green underline underline-offset-2
+          decoration-green/40 hover:decoration-green transition-colors; }
 }

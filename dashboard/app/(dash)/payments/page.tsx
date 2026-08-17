@@ -1,5 +1,6 @@
+import Link from "next/link";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
+import { Card, Empty, Kpi, Pill, Table, Td, Th } from "@/components/ui";
 import { getPlans, getSubscriptions, getSummary, recent } from "@/lib/data";
 import { inr, num, when } from "@/lib/format";
 
@@ -51,8 +52,8 @@ export default async function Payments() {
   return (
     <>
       <PageHead title="Payments" subtitle="Subscriptions, revenue & transactions" />
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
-        <Kpi label="Total revenue" value={inr(s.revenue)} focal />
+      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <Kpi label="Total revenue" value={inr(s.revenue)} sub="all time" focal />
         <Kpi label="Last 30 days" value={inr(mrr)} />
         <Kpi label="Paid subs" value={num(active)}
              sub={`${num(trialing)} trial rows`} />
@@ -71,76 +72,82 @@ export default async function Payments() {
               </div>
             </div>
           ))}
-          {!plans.length && <Empty>Run schema_payments.sql to seed plans.</Empty>}
+          {!plans.length && (
+            <Empty action="Run admin/schema_payments.sql in the Supabase SQL editor, then reload this page.">
+              No plans in the database
+            </Empty>
+          )}
         </div>
       </Card>
 
       <Card title="Subscribers" className="mt-3.5">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr>
-                <Th>Agent ID</Th>
-                <Th>Plan</Th>
-                <Th>Status</Th>
-                <Th>Days left</Th>
-                <Th>Renews / ends</Th>
+        <Table>
+          <thead>
+            <tr>
+              <Th>Agent ID</Th>
+              <Th>Plan</Th>
+              <Th>Status</Th>
+              <Th num>Days left</Th>
+              <Th>Renews / ends</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {subs.map((x) => (
+              <tr key={x.agent_id}>
+                <Td className="font-mono text-xs">{x.agent_id}</Td>
+                <Td className="font-semibold">{x.plan_name || x.plan_code || "—"}</Td>
+                <Td><Pill tone={tone(x.status)}>{x.status}</Pill></Td>
+                <Td num className="font-semibold">{num(x.days_left)}</Td>
+                <Td className="text-muted whitespace-nowrap">{when(x.current_period_end)}</Td>
               </tr>
-            </thead>
-            <tbody>
-              {subs.map((x) => (
-                <tr key={x.agent_id}>
-                  <Td className="font-mono text-xs">{x.agent_id}</Td>
-                  <Td className="font-semibold">{x.plan_name || x.plan_code || "—"}</Td>
-                  <Td><Pill tone={tone(x.status)}>{x.status}</Pill></Td>
-                  <Td className="font-mono">{num(x.days_left)}</Td>
-                  <Td className="text-muted whitespace-nowrap">{when(x.current_period_end)}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!subs.length && <Empty>No subscribers yet.</Empty>}
-        </div>
+            ))}
+          </tbody>
+        </Table>
+        {!subs.length && (
+          <Empty action={<>A row is written only once payments are on — switch them on under <Link className="lnk" href="/plans">Plans</Link>.</>}>
+            No subscription rows yet
+          </Empty>
+        )}
       </Card>
 
       <Card title="Transactions" className="mt-3.5">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr>
-                <Th>When</Th>
-                <Th>Agent ID</Th>
-                <Th>Plan</Th>
-                <Th>Provider</Th>
-                <Th>Reference</Th>
-                <Th>Amount</Th>
-                <Th>Status</Th>
+        <Table>
+          <thead>
+            <tr>
+              <Th>When</Th>
+              <Th>Agent ID</Th>
+              <Th>Plan</Th>
+              <Th>Provider</Th>
+              <Th>Reference</Th>
+              <Th num>Amount</Th>
+              <Th>Status</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {pays.map((p) => (
+              <tr key={p.id}>
+                <Td className="text-muted whitespace-nowrap">{when(p.created_at)}</Td>
+                {/* The two columns support actually needs: who paid, and the
+                    reference to quote back to the provider. */}
+                <Td className="font-mono text-xs">{p.agent_id || "—"}</Td>
+                <Td className="font-semibold">{p.plan || "—"}</Td>
+                <Td className="text-muted">{p.provider || "—"}</Td>
+                <Td className="font-mono text-xs text-muted">{p.ref || "—"}</Td>
+                <Td num className="font-bold">{inr(p.amount)}</Td>
+                <Td>
+                  <Pill tone={p.status === "success" ? "g" : p.status === "failed" ? "r" : "a"}>
+                    {p.status}
+                  </Pill>
+                </Td>
               </tr>
-            </thead>
-            <tbody>
-              {pays.map((p) => (
-                <tr key={p.id}>
-                  <Td className="text-muted whitespace-nowrap">{when(p.created_at)}</Td>
-                  {/* The two columns support actually needs: who paid, and the
-                      reference to quote back to the provider. */}
-                  <Td className="font-mono text-xs">{p.agent_id || "—"}</Td>
-                  <Td className="font-semibold">{p.plan || "—"}</Td>
-                  <Td className="text-muted">{p.provider || "—"}</Td>
-                  <Td className="font-mono text-xs text-muted">{p.ref || "—"}</Td>
-                  <Td className="font-bold font-mono">{inr(p.amount)}</Td>
-                  <Td>
-                    <Pill tone={p.status === "success" ? "g" : p.status === "failed" ? "r" : "a"}>
-                      {p.status}
-                    </Pill>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!pays.length && (
-            <Empty>No payments yet — wire a provider to start selling.</Empty>
-          )}
-        </div>
+            ))}
+          </tbody>
+        </Table>
+        {!pays.length && (
+          <Empty action={<>Wire a payment provider, then switch payments on under <Link className="lnk" href="/plans">Plans</Link>.</>}>
+            Nothing has been charged yet
+          </Empty>
+        )}
       </Card>
     </>
   );

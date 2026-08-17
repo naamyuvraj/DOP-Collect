@@ -1,6 +1,7 @@
+import Link from "next/link";
 import PageHead from "@/components/PageHead";
 import { Bars, Donut, TrendArea } from "@/components/LazyCharts";
-import { Card, Empty, Kpi, Pill, Td, Th } from "@/components/ui";
+import { Card, Empty, Kpi, Pill, Table, Td, Th } from "@/components/ui";
 import {
   getCollections,
   getDaily,
@@ -48,22 +49,25 @@ export default async function Overview() {
     <>
       <PageHead title="Overview" subtitle="Agents · books · activity" />
 
+      {/* The book leads. Everything on this page is downstream of how much RD
+          the agents are carrying, so it is the tile that gets the size — the
+          rest of the row qualifies it, and the row below only counts things. */}
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month" focal />
         <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} />
         <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
         <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} />
-        <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month" focal />
         <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
-        <Kpi icon="installs" label="Installs" value={num(t.installs)} sub="phones" />
       </div>
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 mt-3.5">
-        <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} />
+      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5 mt-3.5">
+        <Kpi icon="installs" label="Installs" value={num(t.installs)} sub="phones" minor />
+        <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} minor />
         {/* Paying only — a free trial is not a subscriber. Said out loud because
             this tile read 1 while both agents were on trial. */}
-        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} sub="paying" />
-        <Kpi icon="ai" label="AI" value={num(t.ai_queries)} />
-        <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" />
+        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} sub="paying" minor />
+        <Kpi icon="ai" label="AI" value={num(t.ai_queries)} minor />
+        <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" minor />
       </div>
 
       <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1.4fr_1fr]">
@@ -71,14 +75,18 @@ export default async function Overview() {
           {dailyView.length ? (
             <TrendArea data={dailyView} x="d" y="dau" />
           ) : (
-            <Empty>No activity yet.</Empty>
+            <Empty action="Install the APK on a handset and sign in — the first launch lands here.">
+              No agent has opened the app yet
+            </Empty>
           )}
         </Card>
         <Card title="Key usage">
           {keyView.length ? (
             <Donut data={keyView} nameKey="name" valueKey="calls" />
           ) : (
-            <Empty>No key calls yet.</Empty>
+            <Empty action={<>Add a Groq key on <Link className="lnk" href="/keys">API Keys</Link>, then ask the Assistant something.</>}>
+              No key calls yet
+            </Empty>
           )}
         </Card>
       </div>
@@ -88,14 +96,18 @@ export default async function Overview() {
           {collView.some((c) => c.amount) ? (
             <Bars data={collView} x="d" y="amount" color="#21A06A" />
           ) : (
-            <Empty>No lists made on the portal yet.</Empty>
+            <Empty action="Ask an agent to submit a list on the portal — the amount is stamped as it goes.">
+              Nothing collected yet
+            </Empty>
           )}
         </Card>
         <Card title="Lists · daily">
           {collView.some((c) => c.lists) ? (
             <TrendArea data={collView} x="d" y="lists" />
           ) : (
-            <Empty>No lists made on the portal yet.</Empty>
+            <Empty action="Ask an agent to submit their first list on the portal.">
+              No lists filed yet
+            </Empty>
           )}
         </Card>
       </div>
@@ -105,48 +117,56 @@ export default async function Overview() {
           {types.length ? (
             <Bars data={types.slice(0, 8)} x="event" y="n" horizontal />
           ) : (
-            <Empty>No events yet.</Empty>
+            <Empty action={<>Check a handset is signed in — see <Link className="lnk" href="/devices">Users</Link>.</>}>
+              No events recorded
+            </Empty>
           )}
         </Card>
         <Card title="Revenue">
           {revView.some((r) => r.revenue) ? (
             <Bars data={revView} x="d" y="revenue" color="#EFE94C" />
           ) : (
-            <Empty>No payments yet.</Empty>
+            <Empty action={<>Price a tier on <Link className="lnk" href="/plans">Plans</Link>, then switch payments on there.</>}>
+              Nothing sold yet
+            </Empty>
           )}
         </Card>
       </div>
 
-      <Card title="Latest activity" className="mt-3.5">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr>
-                <Th>When</Th>
-                <Th>Device</Th>
-                <Th>Event</Th>
-                <Th>Details</Th>
+      <Card
+        title="Latest activity"
+        className="mt-3.5"
+        right={<Link className="lnk text-[13px]" href="/activity">All events →</Link>}
+      >
+        <Table>
+          <thead>
+            <tr>
+              <Th>When</Th>
+              <Th>Device</Th>
+              <Th>Event</Th>
+              <Th>Details</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((e, i) => (
+              <tr key={i}>
+                <Td className="whitespace-nowrap text-muted">{when(e.created_at)}</Td>
+                <Td className="font-mono text-xs">{shortId(e.device_id)}</Td>
+                <Td><Pill>{e.event}</Pill></Td>
+                <Td className="text-muted text-xs">
+                  {Object.entries(e.props || {})
+                    .map(([k, v]) => `${k}:${v}`)
+                    .join(" · ")}
+                </Td>
               </tr>
-            </thead>
-            <tbody>
-              {events.map((e, i) => (
-                <tr key={i}>
-                  <Td className="whitespace-nowrap text-muted">{when(e.created_at)}</Td>
-                  <Td className="font-mono text-xs">{shortId(e.device_id)}</Td>
-                  <Td><Pill>{e.event}</Pill></Td>
-                  <Td className="text-muted text-xs">
-                    {Object.entries(e.props || {})
-                      .map(([k, v]) => `${k}:${v}`)
-                      .join(" · ")}
-                  </Td>
-                </tr>
-              ))}
-              {!events.length && (
-                <tr><Td className="text-muted" >No activity yet.</Td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </Table>
+        {!events.length && (
+          <Empty action={<>Check a handset is signed in — see <Link className="lnk" href="/devices">Users</Link>.</>}>
+            No activity yet
+          </Empty>
+        )}
       </Card>
     </>
   );

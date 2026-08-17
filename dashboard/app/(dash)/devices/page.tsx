@@ -55,6 +55,16 @@ export default function Users() {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "last_seen", dir: -1 });
   const [open, setOpen] = useState<UserRow | null>(null);
 
+  // Offered from the empty state: "no rows" is nearly always over-filtering,
+  // and the fix is one press away rather than four controls to walk back.
+  const filtered = !!q || status !== "all" || plan !== "all" || verified !== "all";
+  function clearFilters() {
+    setQ("");
+    setStatus("all");
+    setPlan("all");
+    setVerified("all");
+  }
+
   useEffect(() => {
     if (isFresh("users")) return; // shown from cache; still fresh — no refetch
     fetch("/api/users").then((r) => r.json()).then((data: Data) => { setCached("users", data); setD(data); setLabels(data.region_labels || {}); }).catch(() => { if (!peekCached("users")) setD({ rows: [], totals: {} }); });
@@ -149,14 +159,14 @@ export default function Users() {
       />
 
       {!d ? (
-        <KpiSkeletons n={5} />
+        <KpiSkeletons n={6} grid="grid-cols-2 md:grid-cols-4 lg:grid-cols-7" focal />
       ) : (
-        <div className="grid gap-3.5 grid-cols-2 md:grid-cols-6">
+        <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
+          <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month, across every agent below" focal />
           <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} />
           <Kpi icon="verified" label="Verified" value={num(t.verified)} />
           <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
           <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} />
-          <Kpi icon="value" label="Monthly book" value={inr(t.value)} focal sub="RD / month" />
           <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
         </div>
       )}
@@ -208,7 +218,6 @@ export default function Users() {
                     <Cell right className="text-muted">{num(Math.round(g.accounts / Math.max(1, g.agents)))}</Cell>
                   </tr>
                 ))}
-                {d && !regions.length && <tr><Cell className="text-muted">No data.</Cell></tr>}
               </tbody>
             </table>
           ) : (
@@ -249,7 +258,22 @@ export default function Users() {
               </tbody>
             </table>
           )}
-          {d && mode === "agents" && !view.length && <Empty>No users match these filters.</Empty>}
+          {d && mode === "regions" && !regions.length && (
+            <Empty action="Regions come from the agent id — nobody has signed in with one yet.">
+              No regions to group by
+            </Empty>
+          )}
+          {d && mode === "agents" && !view.length && (
+            filtered ? (
+              <Empty action={<button className="lnk" onClick={clearFilters}>Clear the search and filters</button>}>
+                No agent matches these filters
+              </Empty>
+            ) : (
+              <Empty action="Install the APK on a handset and sign in — the agent appears here on first launch.">
+                No agents yet
+              </Empty>
+            )
+          )}
         </div>
       </Card>
 
@@ -515,7 +539,9 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
                 ))}
               </div>
             ) : (
-              <Empty>No activity recorded.</Empty>
+              <Empty action="This agent has signed in but not used the app — worth a call.">
+                No activity from this agent
+              </Empty>
             )}
           </div>
 
@@ -673,7 +699,9 @@ function Row({ k, v, mono, last }: { k: string; v: React.ReactNode; mono?: boole
 }
 
 function Cell({ children, right, className = "" }: { children: React.ReactNode; right?: boolean; className?: string }) {
-  return <td className={`py-2.5 px-2 ${right ? "text-right" : ""} ${className}`}>{children}</td>;
+  // `right` also means "this is a number" — tabular figures so digits line up
+  // by place value down the column, matching <Td num> everywhere else.
+  return <td className={`py-2.5 px-2 ${right ? "text-right tabular-nums" : ""} ${className}`}>{children}</td>;
 }
 function Segmented({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
   return (

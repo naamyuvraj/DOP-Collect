@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Pill, Skel, Td, Th } from "@/components/ui";
+import { Card, Empty, Pill, Skel, Table, Td, Th } from "@/components/ui";
 import { num, when } from "@/lib/format";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
@@ -144,29 +144,37 @@ export default function Releases() {
             Showing a live sample — run <code>admin/schema_releases.sql</code> for the full, scalable view.
           </div>
         )}
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead><tr><Th>Version</Th><Th>Installs</Th><Th>Events</Th><Th>Share</Th><Th>Last seen</Th></tr></thead>
-            <tbody>
-              {shownAdoption.map((a, i) => (
-                <tr key={a.app_version}>
-                  <Td className="font-mono text-xs font-bold">
-                    {a.app_version} {i === 0 && <Pill tone="g">latest seen</Pill>}
-                  </Td>
-                  <Td>{num(a.devices)}</Td>
-                  <Td className="text-muted">{num(a.events)}</Td>
-                  <Td>
-                    <div className="h-2 rounded-full bg-line w-32 overflow-hidden">
-                      <div className="h-full bg-green rounded-full" style={{ width: `${(a.devices / maxDevices) * 100}%` }} />
-                    </div>
-                  </Td>
-                  <Td className="text-muted text-xs whitespace-nowrap">{a.last_seen ? when(a.last_seen) : "—"}</Td>
-                </tr>
-              ))}
-              {!shownAdoption.length && <tr><Td className="text-muted">{d.adoption.length ? "No versions at/after the baseline yet." : "No version telemetry yet."}</Td></tr>}
-            </tbody>
-          </table>
-        </div>
+        <Table>
+          <thead><tr><Th>Version</Th><Th num>Installs</Th><Th num>Events</Th><Th>Share</Th><Th>Last seen</Th></tr></thead>
+          <tbody>
+            {shownAdoption.map((a, i) => (
+              <tr key={a.app_version}>
+                <Td className="font-mono text-xs font-bold">
+                  {a.app_version} {i === 0 && <Pill tone="g">latest seen</Pill>}
+                </Td>
+                <Td num className="font-semibold">{num(a.devices)}</Td>
+                <Td num className="text-muted">{num(a.events)}</Td>
+                <Td>
+                  <div className="h-2 rounded-full bg-line w-32 overflow-hidden">
+                    <div className="h-full bg-green rounded-full" style={{ width: `${(a.devices / maxDevices) * 100}%` }} />
+                  </div>
+                </Td>
+                <Td className="text-muted text-xs whitespace-nowrap">{a.last_seen ? when(a.last_seen) : "—"}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+        {!shownAdoption.length && (
+          d.adoption.length ? (
+            <Empty action={<button className="lnk" onClick={() => setControl("version_baseline", "")}>Reset the baseline</button>}>
+              Every known version sits below the baseline
+            </Empty>
+          ) : (
+            <Empty action="Installs report their version on launch — open the app on a handset.">
+              No version telemetry yet
+            </Empty>
+          )
+        )}
       </Card>
 
       <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1fr_1fr]">
@@ -206,7 +214,17 @@ export default function Releases() {
                 <button className="btn btn-ghost py-1 px-2 text-xs" onClick={() => delRelease(r.id)}>🗑</button>
               </div>
             ))}
-            {!shownReleases.length && <Empty>{d.releases.length ? "No releases at/after the baseline." : "No releases logged yet."}</Empty>}
+            {!shownReleases.length && (
+              d.releases.length ? (
+                <Empty action={<button className="lnk" onClick={() => setControl("version_baseline", "")}>Reset the baseline</button>}>
+                  Every logged release sits below the baseline
+                </Empty>
+              ) : (
+                <Empty action="Fill the form above, or press “Log ↑” on a commit to the right.">
+                  Nothing logged yet
+                </Empty>
+              )
+            )}
           </div>
         </Card>
 
@@ -229,7 +247,11 @@ export default function Releases() {
                     <button className="btn btn-ghost py-1 px-2 text-xs whitespace-nowrap" onClick={() => logFromCommit(c)}>Log ↑</button>
                   </div>
                 ))}
-                {!git.commits.length && !git.gitError && <Empty>No commits.</Empty>}
+                {!git.commits.length && !git.gitError && (
+                  <Empty action="Set GITHUB_REPO (and a token, if the repo is private) so the log can be read.">
+                    No commits came back
+                  </Empty>
+                )}
               </>
             )}
           </div>

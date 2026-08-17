@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Bars } from "@/components/LazyCharts";
-import { Card, Empty, Pill, Td, Th } from "@/components/ui";
+import { Card, Empty, Pill, Table, Td, Th } from "@/components/ui";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Key = {
@@ -73,37 +73,39 @@ export default function Keys() {
           {usageView.length ? (
             <Bars data={usageView} x="name" y="calls" horizontal height={200} />
           ) : (
-            <Empty>No key calls recorded yet.</Empty>
+            <Empty action="Add a key below, then ask the Assistant something — calls show up within the minute.">
+              No key calls yet
+            </Empty>
           )}
         </Card>
         <Card title="Success rate">
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr>
-                  <Th>Key</Th>
-                  <Th>Calls</Th>
-                  <Th>OK %</Th>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Key</Th>
+                <Th num>Calls</Th>
+                <Th num>OK %</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.map((u) => (
+                <tr key={u.key_index}>
+                  <Td className="font-semibold">Key {u.key_index}</Td>
+                  <Td num>{u.calls}</Td>
+                  <Td num>
+                    <Pill tone={u.ok_pct >= 90 ? "g" : u.ok_pct >= 60 ? "a" : "r"}>
+                      {u.ok_pct ?? 0}%
+                    </Pill>
+                  </Td>
                 </tr>
-              </thead>
-              <tbody>
-                {usage.map((u) => (
-                  <tr key={u.key_index}>
-                    <Td className="font-semibold">Key {u.key_index}</Td>
-                    <Td>{u.calls}</Td>
-                    <Td>
-                      <Pill tone={u.ok_pct >= 90 ? "g" : u.ok_pct >= 60 ? "a" : "r"}>
-                        {u.ok_pct ?? 0}%
-                      </Pill>
-                    </Td>
-                  </tr>
-                ))}
-                {!usage.length && (
-                  <tr><Td className="text-muted">No data.</Td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </Table>
+          {!usage.length && (
+            <Empty action="Rotation health appears once the Assistant has run a query.">
+              No calls to rate yet
+            </Empty>
+          )}
         </Card>
       </div>
 
@@ -138,19 +140,18 @@ export default function Keys() {
           </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr>
-                <Th>Provider</Th>
-                <Th>Label</Th>
-                <Th>Key</Th>
-                <Th>Enabled</Th>
-                <Th></Th>
-              </tr>
-            </thead>
-            <tbody>
-              {keys.map((k) => (
+        <Table>
+          <thead>
+            <tr>
+              <Th>Provider</Th>
+              <Th>Label</Th>
+              <Th>Key</Th>
+              <Th>Enabled</Th>
+              <Th></Th>
+            </tr>
+          </thead>
+          <tbody>
+            {keys.map((k) => (
                 <tr key={k.id}>
                   <Td><Pill>{k.provider}</Pill></Td>
                   <Td className="font-semibold">{k.label || "—"}</Td>
@@ -173,10 +174,13 @@ export default function Keys() {
                   </Td>
                 </tr>
               ))}
-            </tbody>
-          </table>
-          {!keys.length && <Empty>No managed keys yet.</Empty>}
-        </div>
+          </tbody>
+        </Table>
+        {!keys.length && (
+          <Empty action="Paste a Groq key into the field above and press Add key.">
+            No managed keys stored
+          </Empty>
+        )}
       </Card>
     </>
   );

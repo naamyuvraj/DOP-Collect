@@ -1,5 +1,6 @@
+import Link from "next/link";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Pill, Td, Th } from "@/components/ui";
+import { Card, Empty, Pill, Table, Td, Th } from "@/components/ui";
 import { recent } from "@/lib/data";
 import { shortId, when } from "@/lib/format";
 
@@ -24,35 +25,37 @@ export default async function Activity() {
     <>
       <PageHead title="Activity" subtitle="Latest 150 events" />
       <Card>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr>
-                <Th>When</Th>
-                <Th>Device</Th>
-                <Th>Event</Th>
-                <Th>Details</Th>
-                <Th>Version</Th>
+        <Table>
+          <thead>
+            <tr>
+              <Th>When</Th>
+              <Th>Device</Th>
+              <Th>Event</Th>
+              <Th>Details</Th>
+              <Th>Version</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {events.map((e, i) => (
+              <tr key={i}>
+                <Td className="text-muted whitespace-nowrap">{when(e.created_at)}</Td>
+                <Td className="font-mono text-xs">{shortId(e.device_id)}</Td>
+                <Td><Pill>{e.event}</Pill></Td>
+                <Td className="text-muted text-xs">
+                  {Object.entries(e.props || {})
+                    .map(([k, v]) => `${k}:${v}`)
+                    .join(" · ")}
+                </Td>
+                <Td className="text-muted text-xs">{e.app_version || "—"}</Td>
               </tr>
-            </thead>
-            <tbody>
-              {events.map((e, i) => (
-                <tr key={i}>
-                  <Td className="text-muted whitespace-nowrap">{when(e.created_at)}</Td>
-                  <Td className="font-mono text-xs">{shortId(e.device_id)}</Td>
-                  <Td><Pill>{e.event}</Pill></Td>
-                  <Td className="text-muted text-xs">
-                    {Object.entries(e.props || {})
-                      .map(([k, v]) => `${k}:${v}`)
-                      .join(" · ")}
-                  </Td>
-                  <Td className="text-muted text-xs">{e.app_version || "—"}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!events.length && <Empty>No activity yet.</Empty>}
-        </div>
+            ))}
+          </tbody>
+        </Table>
+        {!events.length && (
+          <Empty action={<>Nothing has reached the database. Check a handset is signed in on <Link className="lnk" href="/devices">Users</Link>.</>}>
+            No events recorded
+          </Empty>
+        )}
       </Card>
     </>
   );

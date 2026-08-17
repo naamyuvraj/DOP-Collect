@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { TrendArea } from "@/components/LazyCharts";
-import { Card, Empty, Kpi, KpiSkeletons, Pill, Td, Th } from "@/components/ui";
+import { Card, Empty, Kpi, KpiSkeletons, Pill, Table, Td, Th } from "@/components/ui";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 import { day, num, when } from "@/lib/format";
 
@@ -130,7 +130,7 @@ export default function Otp() {
     return (
       <>
         <PageHead title="OTP & MSG91" subtitle="Loading verification volume and spend…" />
-        <KpiSkeletons n={4} />
+        <KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-5" focal />
       </>
     );
   }
@@ -175,7 +175,7 @@ export default function Otp() {
         </div>
       )}
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4">
+      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
         <Kpi
           label="Messages sent · 30d"
           value={num(w.d30.sent)}
@@ -213,7 +213,9 @@ export default function Otp() {
           {chart.some((c) => c.sent > 0) ? (
             <TrendArea data={chart} x="label" y="sent" height={220} />
           ) : (
-            <Empty>No OTPs sent yet.</Empty>
+            <Empty action="Nothing has been billed. Turn on “Require phone verification” below to start sending.">
+              No OTPs sent in the last 30 days
+            </Empty>
           )}
         </Card>
 
@@ -274,7 +276,7 @@ export default function Otp() {
       {/* items-start so a short card doesn't stretch to match a tall neighbour */}
       <div className="grid gap-3.5 lg:grid-cols-2 items-start mt-3.5">
         <Card title="Where the money goes">
-          <table className="w-full text-sm">
+          <Table>
             <tbody>
               {[
                 ["Sent (billable)", num(w.all.sent), money(spendAll), "b"],
@@ -285,14 +287,14 @@ export default function Otp() {
               ].map(([label, n, amt, tone]) => (
                 <tr key={label as string}>
                   <Td className="text-muted">{label}</Td>
-                  <Td className="text-right font-extrabold tabular-nums">{n}</Td>
-                  <Td className="text-right">
+                  <Td num className="font-extrabold">{n}</Td>
+                  <Td num>
                     {amt ? <Pill tone={tone as any}>{amt}</Pill> : null}
                   </Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
           <p className="text-muted text-[11px] mt-2.5">
             “Sent but never verified” is the wasteful half of the bill — codes delivered to people who
             dropped off. Tightening the cooldown below cuts it directly.
@@ -301,29 +303,29 @@ export default function Otp() {
 
         <Card title="Failures & refusals">
           {d.failures.length ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr><Th>What happened</Th><Th>Step</Th><Th>Count</Th><Th>Last</Th></tr>
-                </thead>
-                <tbody>
-                  {d.failures.map((f) => (
-                    <tr key={`${f.action}-${f.status}`}>
-                      <Td>
-                        <span className="font-semibold">{STATUS_LABEL[f.status] || f.status}</span>
-                        {COSTLY.has(f.status) && <Pill tone="r">cost</Pill>}
-                        {SAVED.has(f.status) && <Pill tone="g">saved</Pill>}
-                      </Td>
-                      <Td className="text-muted">{f.action}</Td>
-                      <Td className="font-extrabold tabular-nums">{num(f.n)}</Td>
-                      <Td className="text-muted whitespace-nowrap">{when(f.last_seen)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table>
+              <thead>
+                <tr><Th>What happened</Th><Th>Step</Th><Th num>Count</Th><Th>Last</Th></tr>
+              </thead>
+              <tbody>
+                {d.failures.map((f) => (
+                  <tr key={`${f.action}-${f.status}`}>
+                    <Td>
+                      <span className="font-semibold">{STATUS_LABEL[f.status] || f.status}</span>
+                      {COSTLY.has(f.status) && <Pill tone="r">cost</Pill>}
+                      {SAVED.has(f.status) && <Pill tone="g">saved</Pill>}
+                    </Td>
+                    <Td className="text-muted">{f.action}</Td>
+                    <Td num className="font-extrabold">{num(f.n)}</Td>
+                    <Td className="text-muted whitespace-nowrap">{when(f.last_seen)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
           ) : (
-            <Empty>No failed or refused requests — everything sent cleanly.</Empty>
+            <Empty action="Nothing to fix here — tighten the limits below only if the bill grows.">
+              Everything sent cleanly
+            </Empty>
           )}
         </Card>
       </div>
@@ -416,10 +418,10 @@ export default function Otp() {
         right={<span className="text-muted text-[11px]">by billable sends</span>}
       >
         {d.top.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <>
+            <Table>
               <thead>
-                <tr><Th>Phone</Th><Th>Sent</Th><Th>Cost</Th><Th>Verified</Th><Th>Blocked</Th><Th>Last seen</Th></tr>
+                <tr><Th>Phone</Th><Th num>Sent</Th><Th num>Cost</Th><Th num>Verified</Th><Th num>Blocked</Th><Th>Last seen</Th></tr>
               </thead>
               <tbody>
                 {d.top.map((p) => {
@@ -430,23 +432,25 @@ export default function Otp() {
                         {p.phone_hash.slice(0, 10)}…
                         {dud && <Pill tone="r">never verified</Pill>}
                       </Td>
-                      <Td className="font-extrabold tabular-nums">{num(p.sent)}</Td>
-                      <Td className="tabular-nums">{money(p.sent * rate)}</Td>
-                      <Td className="tabular-nums">{num(p.verified)}</Td>
-                      <Td className="tabular-nums text-muted">{num(p.blocked)}</Td>
+                      <Td num className="font-extrabold">{num(p.sent)}</Td>
+                      <Td num>{money(p.sent * rate)}</Td>
+                      <Td num>{num(p.verified)}</Td>
+                      <Td num className="text-muted">{num(p.blocked)}</Td>
                       <Td className="text-muted whitespace-nowrap">{when(p.last_seen)}</Td>
                     </tr>
                   );
                 })}
               </tbody>
-            </table>
+            </Table>
             <p className="text-muted text-[11px] mt-2.5">
               Phone numbers are never stored — only a SHA-256 hash, so these are hash prefixes. A row with
               several sends and no verify is someone pulling paid messages without ever signing in.
             </p>
-          </div>
+          </>
         ) : (
-          <Empty>No OTP requests recorded yet.</Empty>
+          <Empty action="Turn on “Require phone verification” above to start sending — until then this stays empty and the bill stays zero.">
+            No OTP requests recorded
+          </Empty>
         )}
       </Card>
 
