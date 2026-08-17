@@ -218,4 +218,24 @@ class AppSettings {
       (await SharedPreferences.getInstance()).getString(_kRdRates) ?? '';
   static Future<void> setRdRatesJson(String v) async =>
       (await SharedPreferences.getInstance()).setString(_kRdRates, v);
+
+  /// Daily auto-login attempt counter to guard against Finacle's 10-attempt lockout limit.
+  static String _dailyLoginKey([DateTime? date]) {
+    final d = date ?? DateTime.now();
+    final y = d.year.toString().padLeft(4, '0');
+    final m = d.month.toString().padLeft(2, '0');
+    final day = d.day.toString().padLeft(2, '0');
+    return 'dop_auto_login_${y}_${m}_$day';
+  }
+
+  static Future<int> dailyAutoLoginCount([DateTime? date]) async =>
+      (await SharedPreferences.getInstance()).getInt(_dailyLoginKey(date)) ?? 0;
+
+  static Future<int> incrementDailyAutoLoginCount([DateTime? date]) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = _dailyLoginKey(date);
+    final count = (prefs.getInt(key) ?? 0) + 1;
+    await prefs.setInt(key, count);
+    return count;
+  }
 }

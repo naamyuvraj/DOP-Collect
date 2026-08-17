@@ -96,8 +96,9 @@ class PortalSyncEngine {
 
   void notifyPageFinished() {
     final c = _pageLoad;
-    _pageLoad = null;
-    if (c != null && !c.isCompleted) c.complete();
+    if (c != null && !c.isCompleted) {
+      c.complete();
+    }
   }
 
   // --- Low-level DOM reads -------------------------------------------------
@@ -400,10 +401,14 @@ class PortalSyncEngine {
     _pageLoad = Completer<void>();
     final ok = _unwrap(await controller.runJavaScriptReturningResult('''
       (function(){
-        var inp=document.querySelector('input[name*="PAGE_NO" i][type="text"]')
+        var inp=document.querySelector('input[name*="REQUESTED_PAGE_NUMBER" i][type="text"]')
+          || document.querySelector('input[name*="PAGE_NO" i][type="text"]')
           || document.querySelector('input[name*="GOTO_PAGE" i][type="text"]')
           || document.querySelector('input[name*="PAGE" i][type="text"]');
-        var btn=document.querySelector('input[name*="GOTO_PAGE" i]');
+        var btn=document.querySelector('input[name*="GOTO_PAGE" i][type="submit"]')
+          || document.querySelector('input[name*="GOTO_PAGE" i][type="button"]')
+          || document.querySelector('input[name*="GOTO_PAGE" i]')
+          || document.querySelector('input[value="Go" i]');
         if(!inp||!btn) return 'false';
         inp.value='$page';
         inp.dispatchEvent(new Event('change',{bubbles:true}));
@@ -1386,8 +1391,36 @@ class PortalSyncEngine {
   }
 
   Future<void> _awaitLoad(Duration timeout) async {
-    final c = _pageLoad ??= Completer<void>();
-    await c.future.timeout(timeout, onTimeout: () => _pageLoad = null);
+    final c = _pageLoad;
+    if (c == null) return;
+    try {
+      await c.future.timeout(timeout);
+    } catch (_) {
+      // Handled timeout
+    } finally {
+      _pageLoad = null;
+    }
+  }
+
+  /// Prevent session timeout by clicking the portal's keep-alive button if present.
+  Future<bool> keepSessionAlive() async {
+    const js = '''
+      (function() {
+        var btn = document.querySelector('input[name*="PREVENT_SESSION_TIMEOUT" i]')
+          || document.querySelector('input[value*="Prevent Session Timeout" i]');
+        if (btn && !btn.disabled) {
+          btn.click();
+          return 'true';
+        }
+        return 'false';
+      })();
+    ''';
+    try {
+      final res = _unwrap(await controller.runJavaScriptReturningResult(js));
+      return res.contains('true');
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Poll until the account table is present (handles late-rendering DOM).

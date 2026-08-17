@@ -62,4 +62,50 @@ void main() {
         AgentListParser.parsePage('<html><body><p>hi</p></body></html>');
     expect(rows, isEmpty);
   });
+
+  test('parses tables where row 0 is a title/banner row', () {
+    const bannerHtml = '''
+    <html><body>
+      <table id="listTable">
+        <tr><td colspan="6">Agent RD Accounts Summary List - Live</td></tr>
+        <tr>
+          <th>Select</th><th>Account</th><th>Account Name</th>
+          <th>Denomination</th><th>Month Paid Upto</th>
+          <th>Next RD Installment Due Date</th>
+        </tr>
+        <tr>
+          <td><input type="checkbox"></td><td>020002767521</td>
+          <td>PRADIP KUMAR SAH</td><td>2,000.00 Cr.</td><td>67</td>
+          <td>30-08-2026</td>
+        </tr>
+      </table>
+    </body></html>
+    ''';
+    final rows = AgentListParser.parsePage(bannerHtml);
+    expect(rows.length, 1);
+    expect(rows.first.accountNumber, '020002767521');
+    expect(rows.first.customerName, 'PRADIP KUMAR SAH');
+  });
+
+  test('matches standalone "Account" column header without misidentifying "Account Name"', () {
+    const aliasHtml = '''
+    <html><body>
+      <table>
+        <tr>
+          <th>Account Name</th><th>Account</th><th>Denomination</th>
+          <th>Paid</th><th>Due</th>
+        </tr>
+        <tr>
+          <td>SANTOSH SARRAF</td><td>020002775442</td><td>5,000.00</td>
+          <td>12</td><td>15-09-2026</td>
+        </tr>
+      </table>
+    </body></html>
+    ''';
+    final rows = AgentListParser.parsePage(aliasHtml);
+    expect(rows.length, 1);
+    expect(rows.first.accountNumber, '020002775442');
+    expect(rows.first.customerName, 'SANTOSH SARRAF');
+    expect(rows.first.denominationAmount, 5000);
+  });
 }

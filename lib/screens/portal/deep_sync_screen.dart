@@ -29,6 +29,7 @@ class _DeepSyncScreenState extends State<DeepSyncScreen> {
   late final WebViewController _controller;
   late final PortalSyncEngine _engine;
   Credentials _creds = const Credentials();
+  late final Future<void> _credsReady;
   bool _busy = false;
   String? _progress;
 
@@ -46,26 +47,33 @@ class _DeepSyncScreenState extends State<DeepSyncScreen> {
       ))
       ..loadRequest(Uri.parse(Portal.agentLoginUrl));
     _engine = PortalSyncEngine(_controller);
-    Credentials.load().then((c) => _creds = c);
+    _credsReady = Credentials.load().then((c) => _creds = c);
   }
 
   // Credentials are only ever typed on the real portal origin — the guard is
   // inside the injected script below (see SyncScreen for why the navigation
   // allowlist was removed: it broke the portal's post-login window flow).
   Future<void> _autofillIfLogin() async {
+    await _credsReady;
     if (!_creds.hasAny) return;
     final idVal = jsonEncode(_creds.agentId);
     final pwVal = jsonEncode(_creds.password);
-    await _controller.runJavaScript('''
+    final js = '''
       (function() {
         if (location.origin !== 'https://dopagent.indiapost.gov.in') return;
+        function fire(el){['input','change','keyup','blur'].forEach(function(t){
+          el.dispatchEvent(new Event(t,{bubbles:true}));});}
         var id = document.querySelector('[name="AuthenticationFG.USER_PRINCIPAL"]');
         var pw = document.querySelector('[name="AuthenticationFG.ACCESS_CODE"]');
         if (!id && !pw) return;
-        if (id && !id.value && $idVal) id.value = $idVal;
-        if (pw && !pw.value && $pwVal) pw.value = $pwVal;
+        if (id && !id.value && $idVal) { id.value = $idVal; fire(id); }
+        if (pw && !pw.value && $pwVal) { pw.value = $pwVal; fire(pw); }
       })();
-    ''');
+    ''';
+    await _controller.runJavaScript(js);
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (mounted) _controller.runJavaScript(js);
+    });
   }
 
   Future<void> _run() async {

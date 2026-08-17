@@ -28,11 +28,28 @@ class AgentListParser {
     final rows = table.querySelectorAll('tr');
     if (rows.isEmpty) return const [];
 
-    final cols = _mapColumns(_cells(rows.first));
-    if (cols[_Field.account] == null) return const [];
+    int? headerRowIndex;
+    Map<_Field, int?>? cols;
+    for (var i = 0; i < rows.length && i < 3; i++) {
+      final cells = _cells(rows[i]);
+      if (cells.length < 3) continue;
+      final mapped = _mapColumns(cells);
+      if (mapped[_Field.account] != null &&
+          (mapped[_Field.name] != null ||
+              mapped[_Field.denomination] != null ||
+              mapped[_Field.dueDate] != null ||
+              mapped[_Field.monthsPaid] != null)) {
+        headerRowIndex = i;
+        cols = mapped;
+        break;
+      }
+    }
+    if (headerRowIndex == null || cols == null || cols[_Field.account] == null) {
+      return const [];
+    }
 
     final out = <RdAccount>[];
-    for (final row in rows.skip(1)) {
+    for (final row in rows.skip(headerRowIndex + 1)) {
       final cells = _cells(row).map((c) => c.text.trim()).toList();
       final acct = _digits(_at(cells, cols[_Field.account]));
       if (!_looksLikeAccount(acct)) continue;
@@ -54,18 +71,22 @@ class AgentListParser {
     dom.Element? best;
     var bestScore = 0;
     for (final t in doc.querySelectorAll('table')) {
-      final firstRow = t.querySelector('tr');
-      if (firstRow == null) continue;
-      final headerText =
-          _cells(firstRow).map((c) => c.text.toLowerCase()).join(' | ');
-      var score = 0;
-      if (_HeaderMatch.account.any(headerText.contains)) score += 3;
-      if (_HeaderMatch.name.any(headerText.contains)) score += 1;
-      if (_HeaderMatch.denomination.any(headerText.contains)) score += 1;
-      if (_HeaderMatch.dueDate.any(headerText.contains)) score += 1;
-      if (t.querySelectorAll('tr').length > 3) score += 1;
-      if (score > bestScore) {
-        bestScore = score;
+      final rows = t.querySelectorAll('tr');
+      if (rows.isEmpty) continue;
+      var maxHeaderScore = 0;
+      for (final r in rows.take(3)) {
+        final headerText =
+            _cells(r).map((c) => c.text.toLowerCase()).join(' | ');
+        var score = 0;
+        if (_HeaderMatch.account.any(headerText.contains)) score += 3;
+        if (_HeaderMatch.name.any(headerText.contains)) score += 1;
+        if (_HeaderMatch.denomination.any(headerText.contains)) score += 1;
+        if (_HeaderMatch.dueDate.any(headerText.contains)) score += 1;
+        if (score > maxHeaderScore) maxHeaderScore = score;
+      }
+      if (rows.length > 3) maxHeaderScore += 1;
+      if (maxHeaderScore > bestScore) {
+        bestScore = maxHeaderScore;
         best = t;
       }
     }
@@ -77,18 +98,20 @@ class AgentListParser {
   static Map<_Field, int?> _mapColumns(List<dom.Element> headerCells) {
     final headers =
         headerCells.map((c) => c.text.toLowerCase().trim()).toList();
-    int? find(List<String> patterns) {
+    int? find(List<String> patterns, {int? exclude}) {
       for (var i = 0; i < headers.length; i++) {
+        if (i == exclude) continue;
         if (patterns.any(headers[i].contains)) return i;
       }
       return null;
     }
 
+    final nameIdx = find(_HeaderMatch.name);
     return {
       // "account name" also contains "account", so match name first and
       // exclude its index from the account lookup.
-      _Field.name: find(_HeaderMatch.name),
-      _Field.account: find(_HeaderMatch.account),
+      _Field.name: nameIdx,
+      _Field.account: find(_HeaderMatch.account, exclude: nameIdx),
       _Field.denomination: find(_HeaderMatch.denomination),
       _Field.monthsPaid: find(_HeaderMatch.monthsPaid),
       _Field.dueDate: find(_HeaderMatch.dueDate),
@@ -162,7 +185,7 @@ enum _Field { account, name, denomination, monthsPaid, dueDate }
 /// Header-text patterns per field (lowercase substring match). Confirmed
 /// against a real capture; extend if a deployment relabels a column.
 class _HeaderMatch {
-  static const account = ['account no', 'account number', 'acc no', 'a/c'];
+  static const account = ['account no', 'account number', 'acc no', 'a/c', 'account'];
   static const name = ['account name', 'depositor', 'customer name', 'name'];
   static const denomination = ['denomination', 'installment amount', 'deno'];
   static const monthsPaid = ['month paid', 'paid upto', 'inst paid', 'paid'];

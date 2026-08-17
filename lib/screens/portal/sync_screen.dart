@@ -108,6 +108,7 @@ class _SyncScreenState extends State<SyncScreen> {
   bool _solvingCaptcha = false;
   bool _awaitingRef = false; // installments keyed; waiting for agent's Pay All
   String? _progress;
+  Timer? _keepAliveTimer;
 
   @override
   void initState() {
@@ -130,10 +131,14 @@ class _SyncScreenState extends State<SyncScreen> {
       ..loadRequest(Uri.parse(Portal.agentLoginUrl));
     _engine = PortalSyncEngine(_controller);
     _credsReady = Credentials.load().then((c) => _creds = c);
+    _keepAliveTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+      if (mounted) _engine.keepSessionAlive();
+    });
   }
 
   @override
   void dispose() {
+    _keepAliveTimer?.cancel();
     _captcha.dispose();
     super.dispose();
   }
@@ -401,7 +406,8 @@ class _SyncScreenState extends State<SyncScreen> {
         return;
       }
 
-      if (_loginClicks < 4) {
+      final dailyAttempts = await AppSettings.dailyAutoLoginCount();
+      if (_loginClicks < 4 && dailyAttempts < 4) {
         for (var attempt = 0; attempt < 10; attempt++) {
           await Future<void>.delayed(const Duration(milliseconds: 500));
           if (!mounted) return;
@@ -409,12 +415,19 @@ class _SyncScreenState extends State<SyncScreen> {
               _decode(await _controller.runJavaScriptReturningResult(_loginJs));
           if (clicked.contains('true')) {
             _loginClicks++;
+            await AppSettings.incrementDailyAutoLoginCount();
             if (mounted) _snack('Captcha $guess — logging in…');
             return;
           }
         }
       }
-      if (mounted) _snack('Captcha filled: $guess — tap Login.');
+      if (mounted) {
+        if (dailyAttempts >= 4) {
+          _snack('Captcha filled: $guess — daily auto-login limit reached. Tap Login.');
+        } else {
+          _snack('Captcha filled: $guess — tap Login.');
+        }
+      }
     } catch (e) {
       if (manual) _snack('Captcha auto-fill failed: $e');
     } finally {
