@@ -14,6 +14,13 @@ type Payment = {
   provider: string | null;
   status: string;
   created_at: string;
+  /**
+   * Who paid, and the provider's reference. `pay` has always written both, and
+   * the query already selects *, but neither was rendered — so an agent ringing
+   * about a charge could not be matched to a row without opening the database.
+   */
+  agent_id: string | null;
+  ref: string | null;
 };
 
 const tone = (s: string) => (s === "active" ? "g" : s === "trial" ? "b" : "r");
@@ -94,8 +101,10 @@ export default async function Payments() {
             <thead>
               <tr>
                 <Th>When</Th>
+                <Th>Agent ID</Th>
                 <Th>Plan</Th>
                 <Th>Provider</Th>
+                <Th>Reference</Th>
                 <Th>Amount</Th>
                 <Th>Status</Th>
               </tr>
@@ -104,8 +113,12 @@ export default async function Payments() {
               {pays.map((p) => (
                 <tr key={p.id}>
                   <Td className="text-muted whitespace-nowrap">{when(p.created_at)}</Td>
+                  {/* The two columns support actually needs: who paid, and the
+                      reference to quote back to the provider. */}
+                  <Td className="font-mono text-xs">{p.agent_id || "—"}</Td>
                   <Td className="font-semibold">{p.plan || "—"}</Td>
                   <Td className="text-muted">{p.provider || "—"}</Td>
+                  <Td className="font-mono text-xs text-muted">{p.ref || "—"}</Td>
                   <Td className="font-bold font-mono">{inr(p.amount)}</Td>
                   <Td>
                     <Pill tone={p.status === "success" ? "g" : p.status === "failed" ? "r" : "a"}>

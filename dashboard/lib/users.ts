@@ -58,7 +58,16 @@ export type UsersTotals = {
   active: number; // agents active in the last 7 days
   installs: number; // phones/app installs seen
   accounts: number; // RD accounts under management (deduped per agent)
-  value: number; // ₹ deposited across all books (assets under management)
+  /**
+   * The active MONTHLY RD book: sum of every account's monthly installment,
+   * in ₹/month. NOT cumulative deposits — that figure is roughly 20-30x larger.
+   * The app computes it as sum(denominationAmount) and sends it as
+   * `sync_done.total_amount`; the UI labels it "Monthly book".
+   *
+   * The old comment here read "₹ deposited across all books (assets under
+   * management)", which describes a completely different and much bigger number.
+   */
+  value: number;
   collected: number; // ₹ submitted to the post office (list_submitted)
   lists: number; // submitted lists
   subscribers: number; // paying/active subscriptions

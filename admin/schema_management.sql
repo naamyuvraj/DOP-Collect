@@ -30,10 +30,19 @@ alter table public.app_config enable row level security;
 -- extracts the APK's anon key from reading our exact rate-limit thresholds.
 -- Add a new key here whenever the app itself needs to read it.
 drop policy if exists "anon read config" on public.app_config;
+-- The app reads these with the ANON key, so a key missing from this list is
+-- silently filtered out by RLS — no error, just the hardcoded default forever.
+-- `self_serve_billing` and `max_devices` were read by RemoteConfig and absent
+-- here, so self-serve billing could never be switched on remotely and the
+-- device limit was stuck at its built-in 3 whatever the dashboard said.
+--
+-- Keep this in step with the `_flag`/`_int`/`_str` calls in
+-- lib/services/remote_config.dart. Nothing warns when they drift.
 create policy "anon read config" on public.app_config
   for select to anon using (key in (
     'assistant_cloud', 'analytics_default', 'portal_submit',
-    'payments_enabled', 'announcement', 'force_update', 'otp_required'
+    'payments_enabled', 'announcement', 'force_update', 'otp_required',
+    'self_serve_billing', 'max_devices'
   ));
 
 -- Sensible defaults.

@@ -59,7 +59,21 @@ admin/schema_releases.sql     -- releases, v_app_versions
 admin/schema_regions.sql      -- devices.agent_id/sol_id, v_regions
 admin/schema_accounts.sql     -- devices.mobile, v_agent_accounts, v_accounts_summary
 admin/schema_device_model.sql -- devices.model, v_device_models
+admin/schema_devices_view.sql  -- v_devices WITH mobile/agent_id/sol_id/account_id
 ```
+
+> `schema_devices_view.sql` must run **after** `schema.sql`,
+> `schema_accounts.sql`, `schema_regions.sql` and `schema_otp.sql`. It redefines
+> `v_devices` to expose four columns those files add — the view in `schema.sql`
+> predates them, so it cannot carry them (that file runs first, before the
+> columns exist) and anything reading the view saw nulls.
+>
+> **`app_config` keys the app reads must be in the RLS allowlist** in
+> `schema_management.sql`. A key that is missing is silently filtered for the
+> anon key — no error, just the app's hardcoded default forever. That is how
+> `self_serve_billing` and `max_devices` were unreachable. Keep the policy in
+> step with the `_flag`/`_int`/`_str` calls in `lib/services/remote_config.dart`;
+> nothing warns when they drift.
 
 One-shots, run once each rather than as part of a verification pass:
 
