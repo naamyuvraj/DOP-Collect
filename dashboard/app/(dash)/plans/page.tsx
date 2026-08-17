@@ -187,8 +187,16 @@ export default function Plans() {
   }
 
   const on = data.config.payments_enabled !== false;
-  const activeSubs = data.subscribers.filter((s) => s.status !== "expired");
-  const mrrRevenue = (data.mrr || []).reduce((a, b) => a + Number(b.revenue || 0), 0);
+  // Anyone whose access has not lapsed — PAID AND TRIAL together. The name
+  // matters because `status` has a literal 'active' value distinct from 'trial',
+  // so a tile called "Active subscribers" that includes trialists reads as a
+  // contradiction of the data. Labelled "With access" below instead.
+  const withAccess = data.subscribers.filter((s) => s.status !== "expired");
+  const paidSubs = withAccess.filter((s) => s.plan_code !== "trial");
+  // v_mrr is every successful Razorpay payment grouped by day, with no date
+  // window — so summing it is revenue ALL TIME, not a monthly recurring figure,
+  // whatever the view is called.
+  const revenueAllTime = (data.mrr || []).reduce((a, b) => a + Number(b.revenue || 0), 0);
 
   return (
     <>
@@ -217,9 +225,9 @@ export default function Plans() {
 
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 mt-3.5">
         <Kpi label="Plans offered" value={num(rows.filter((r) => r.active).length)} sub={`${num(rows.length)} total`} />
-        <Kpi label="Active subscribers" value={num(activeSubs.length)} focal />
-        <Kpi label="Paid subscribers" value={num(activeSubs.filter((s) => s.plan_code !== "trial").length)} />
-        <Kpi label="Revenue" value={inr(mrrRevenue)} />
+        <Kpi label="With access" value={num(withAccess.length)} sub="incl. trials" />
+        <Kpi label="Paying" value={num(paidSubs.length)} sub="excl. trials" focal />
+        <Kpi label="Revenue" value={inr(revenueAllTime)} sub="all time" />
       </div>
 
       {/* Plan editor */}
@@ -292,8 +300,13 @@ export default function Plans() {
         </p>
       </Card>
 
-      {/* Subscribers */}
-      <Card title="Subscribers" className="mt-3.5">
+      {/* Subscribers — REAL rows only.
+          While payments_enabled is off, `pay` hands the app a trial without
+          writing a row, so most agents on a trial do not appear here at all.
+          That is the table being honest about what exists, not a bug — but it
+          means this is not a roster of who is using the app. The Users tab is. */}
+      <Card title="Subscribers" className="mt-3.5"
+            right={<span className="text-muted text-xs">real rows only</span>}>
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
