@@ -168,6 +168,56 @@ class Lot {
 
   String get dateLabel => DateFormat('dd-MMM-yyyy · hh:mm a').format(createdAt);
 
+  /// The date this list should be FILED under.
+  ///
+  /// Submission time when it has one, creation time otherwise. The Downloads tab
+  /// used to group on `createdAt`, so a list built on Thursday and submitted
+  /// today filed itself under Thursday and read as old — the agent was being
+  /// shown the wrong event. What he is looking for is what he submitted, because
+  /// that is when the reference was minted and when he walks to the counter.
+  DateTime get filedAt => submittedAt ?? createdAt;
+
+  /// Day key for grouping — [filedAt], not creation.
+  String get filedDayLabel => DateFormat('dd-MMM-yyyy').format(filedAt);
+
+  /// Clock time, so two batches submitted on the SAME day separate visually
+  /// instead of merging into one undifferentiated block.
+  String get filedTimeLabel => DateFormat('hh:mm a').format(filedAt);
+
+  /// "Today" / "Yesterday" / the date. A bare `14-Aug-2026` beside
+  /// `16-Aug-2026` does not read as old-versus-new at a glance, which is most of
+  /// why the tab was hard to scan.
+  static String relativeDay(DateTime d, DateTime now) {
+    final day = DateTime(d.year, d.month, d.day);
+    final today = DateTime(now.year, now.month, now.day);
+    final diff = today.difference(day).inDays;
+    if (diff == 0) return 'Today';
+    if (diff == 1) return 'Yesterday';
+    return DateFormat('dd-MMM-yyyy').format(d);
+  }
+
+  /// Lists grouped by the day they were filed, NEWEST DAY FIRST, and newest
+  /// first within each day.
+  ///
+  /// Both orderings used to be incidental: the repository returns
+  /// `created_at DESC`, so day groups appeared in whatever order their first lot
+  /// happened to arrive and a day's lots were ordered by creation rather than
+  /// submission. Today's batch could sit below last week's.
+  static List<({String day, List<Lot> lots})> groupByDay(List<Lot> lots) {
+    final groups = <String, List<Lot>>{};
+    for (final l in lots) {
+      (groups[l.filedDayLabel] ??= []).add(l);
+    }
+    final out = groups.entries
+        .map((e) => (
+              day: e.key,
+              lots: [...e.value]..sort((a, b) => b.filedAt.compareTo(a.filedAt)),
+            ))
+        .toList();
+    out.sort((a, b) => b.lots.first.filedAt.compareTo(a.lots.first.filedAt));
+    return out;
+  }
+
   /// Day only — used to group lists into batches (all lists made the same day).
   String get dayLabel => DateFormat('dd-MMM-yyyy').format(createdAt);
 

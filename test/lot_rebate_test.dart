@@ -112,6 +112,8 @@ void main() {
     });
   });
 
+  _downloadsGrouping();
+
   group('what he actually hands over', () {
     test('rebate comes off — the reference report case', () {
       // 12 x 1000 = 12,000 deposit, 400 rebate, so 11,600 changes hands.
@@ -143,6 +145,62 @@ void main() {
         item('A2', inst: 1),
       ]);
       expect(l.totalNetAmount, 11600 + 1000);
+    });
+  });
+}
+
+/// The Downloads tab grouped on `createdAt` and relied on incidental ordering,
+/// so a list built Thursday and submitted today filed under Thursday, and
+/// today's batch could sit below last week's.
+void _downloadsGrouping() {
+  Lot lot(String ref, DateTime created, {DateTime? submitted}) => Lot(
+        createdAt: created,
+        mode: 'Cash',
+        items: [item('A1')],
+        referenceNumber: ref,
+        submittedAt: submitted,
+      );
+
+  group('Downloads grouping', () {
+    test('files under the day it was SUBMITTED, not created', () {
+      final l = lot('C1', DateTime(2026, 8, 13, 9),
+          submitted: DateTime(2026, 8, 16, 14));
+      expect(l.filedDayLabel, '16-Aug-2026');
+    });
+
+    test('falls back to creation when never submitted', () {
+      final l = Lot(
+          createdAt: DateTime(2026, 8, 13, 9), mode: 'Cash', items: [item('A1')]);
+      expect(l.filedDayLabel, '13-Aug-2026');
+    });
+
+    test('newest day first, regardless of input order', () {
+      final groups = Lot.groupByDay([
+        lot('C_OLD', DateTime(2026, 8, 10), submitted: DateTime(2026, 8, 10, 9)),
+        lot('C_NEW', DateTime(2026, 8, 16), submitted: DateTime(2026, 8, 16, 9)),
+      ]);
+      expect(groups.first.day, '16-Aug-2026');
+      expect(groups.last.day, '10-Aug-2026');
+    });
+
+    test('two batches on one day stay in one group, newest first', () {
+      final groups = Lot.groupByDay([
+        lot('C_AM', DateTime(2026, 8, 16), submitted: DateTime(2026, 8, 16, 9)),
+        lot('C_PM', DateTime(2026, 8, 16), submitted: DateTime(2026, 8, 16, 17)),
+      ]);
+      expect(groups, hasLength(1));
+      expect(groups.first.lots.first.referenceNumber, 'C_PM');
+    });
+
+    test('Today and Yesterday read as words, older as a date', () {
+      final now = DateTime(2026, 8, 16, 12);
+      expect(Lot.relativeDay(DateTime(2026, 8, 16, 9), now), 'Today');
+      expect(Lot.relativeDay(DateTime(2026, 8, 15, 23), now), 'Yesterday');
+      expect(Lot.relativeDay(DateTime(2026, 8, 10), now), '10-Aug-2026');
+    });
+
+    test('an empty list groups to nothing', () {
+      expect(Lot.groupByDay(const []), isEmpty);
     });
   });
 }

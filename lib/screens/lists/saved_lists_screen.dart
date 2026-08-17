@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 
 import '../../data/account_repository.dart';
@@ -206,6 +207,17 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
 
   /// Batch header: the day + a "Download all (N)" button that bundles that day's
   /// lists into one PDF.
+  /// "Today" / "Yesterday" / the date itself. `day` arrives as the already
+  /// formatted `dd-MMM-yyyy` group key, so parse it back rather than plumb a
+  /// DateTime through every caller.
+  static String _relDay(String day) {
+    try {
+      return Lot.relativeDay(DateFormat('dd-MMM-yyyy').parse(day), DateTime.now());
+    } catch (_) {
+      return day; // unparseable — show it as-is rather than lose the header
+    }
+  }
+
   Widget _batchHeader(String day, List<Lot> dayLots) {
     // Only submitted lists (with a real portal reference) can be handed in at
     // the counter — so "Download all" bundles ONLY those, and hides if none.
@@ -218,7 +230,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(day, style: AppTheme.display(15, weight: FontWeight.w800)),
+                Text(_relDay(day),
+                    style: AppTheme.display(15, weight: FontWeight.w800)),
                 Text(
                     '${dayLots.length} list${dayLots.length == 1 ? '' : 's'}'
                     '${submittedLots.isNotEmpty ? ' · ${submittedLots.length} submitted' : ''}',
@@ -393,7 +406,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
           'Tap "Auto-build this month\'s lists" or the "New" button to make '
               'this month\'s ₹20,000 lists, then submit them on the portal.'));
     } else {
-      for (final entry in _byDay(unsubmitted).entries) {
+      for (final entry in Lot.groupByDay(unsubmitted).map(
+          (g) => MapEntry(g.day, g.lots))) {
         items.add(_dayHeader(entry.key, entry.value.length));
         for (final lot in entry.value) {
           items.add(Padding(
@@ -418,9 +432,9 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
               'whole day\'s batch, to submit at the post office.');
     }
     final items = <Widget>[];
-    for (final entry in _byDay(submitted).entries) {
-      items.add(_batchHeader(entry.key, entry.value)); // day + "Download all"
-      for (final lot in entry.value) {
+    for (final entry in Lot.groupByDay(submitted)) {
+      items.add(_batchHeader(entry.day, entry.lots)); // day + "Download all"
+      for (final lot in entry.lots) {
         items.add(Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: _lotCard(lot, downloads: true)));
@@ -432,17 +446,9 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
     );
   }
 
-  Map<String, List<Lot>> _byDay(List<Lot> lots) {
-    final groups = <String, List<Lot>>{};
-    for (final lot in lots) {
-      groups.putIfAbsent(lot.dayLabel, () => []).add(lot);
-    }
-    return groups;
-  }
-
   Widget _dayHeader(String day, int n) => Padding(
         padding: const EdgeInsets.fromLTRB(2, 10, 2, 8),
-        child: Text('$day · $n list${n == 1 ? '' : 's'}',
+        child: Text('${_relDay(day)} · $n list${n == 1 ? '' : 's'}',
             style: AppTheme.body(12.5,
                 weight: FontWeight.w700, color: AppTheme.inkMuted)),
       );
@@ -513,8 +519,13 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                               child: Text(
                                 // Real E-Banking ref once submitted, else the
                                 // local L… id.
+                                // The day is already the group header, so the
+                                // TIME is what separates two batches filed on
+                                // the same day. It also stops this line running
+                                // long enough to ellipsise away the reference —
+                                // the one handle the counter clerk asks for.
                                 '${lot.referenceNumber ?? lotReference(lot)} · '
-                                '${lot.count} accts · ${lot.dateLabel}',
+                                '${lot.count} accts · ${lot.filedTimeLabel}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: AppTheme.body(12,
