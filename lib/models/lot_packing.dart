@@ -41,6 +41,32 @@ class LotPacking {
     return out;
   }
 
+  /// Does this list still lay claim to its accounts?
+  ///
+  /// It used to be `lot.createdAt` in the current calendar month, full stop. Two
+  /// ways that went wrong at a month boundary:
+  ///
+  ///   * A list built on 1 August to settle JULY marked its accounts as "listed
+  ///     in August", so August's own collection silently skipped those
+  ///     customers — missing from his lists with no explanation.
+  ///   * A list built on 31 July and still UNSUBMITTED on 1 August stopped
+  ///     blocking, so auto-build happily listed those accounts a second time
+  ///     while the first list was still sitting there waiting to be submitted.
+  ///
+  /// The second is the one that duplicates work, so it decides the rule:
+  ///
+  ///   * NOT submitted -> always blocks, however old. The cash has not been
+  ///     handed in yet; that list is a claim on those accounts until it is.
+  ///   * Submitted -> blocks for the month it was actually FILED in
+  ///     (submittedAt, falling back to createdAt). Beyond that the portal has
+  ///     moved each account's due date forward, and the `monthsBehind >= 0`
+  ///     filter in [eligible] is the real guard.
+  static bool _stillBlocks(Lot lot, DateTime now) {
+    if (!lot.isSubmitted) return true;
+    final filed = lot.filedAt;
+    return filed.year == now.year && filed.month == now.month;
+  }
+
   /// Account numbers already sitting on a list built for [now]'s cycle — the
   /// replacement for the old sticky "deposited" mark. Between building a list
   /// and the next portal sync the account still *looks* due (its next-due date
@@ -49,7 +75,7 @@ class LotPacking {
   /// the customer owes again.
   static Set<String> listedThisCycle(List<Lot> lots, DateTime now) => {
         for (final lot in lots)
-          if (lot.createdAt.year == now.year && lot.createdAt.month == now.month)
+          if (_stillBlocks(lot, now))
             for (final item in lot.items) item.accountNumber,
       };
 

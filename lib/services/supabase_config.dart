@@ -36,7 +36,7 @@ class SupabaseConfig {
   /// to (`0.9.48+20`). This constant ships inside the patch, so a patched device
   /// reports `+21` and an un-patched one still reports `+20` — that difference
   /// is how the dashboard sees the rollout.
-  static const String buildVersion = '1.0.0+38';
+  static const String buildVersion = '1.0.0+39';
 
   static bool get configured => url.isNotEmpty && anonKey.isNotEmpty;
 }

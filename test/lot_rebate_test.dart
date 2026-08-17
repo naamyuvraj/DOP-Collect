@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dop_collect/models/lot.dart';
+import 'package:dop_collect/models/lot_packing.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Rebate and default fee come from the PORTAL, are shown once during
@@ -113,6 +114,7 @@ void main() {
   });
 
   _downloadsGrouping();
+  _listClaims();
 
   group('what he actually hands over', () {
     test('rebate comes off — the reference report case', () {
@@ -201,6 +203,52 @@ void _downloadsGrouping() {
 
     test('an empty list groups to nothing', () {
       expect(Lot.groupByDay(const []), isEmpty);
+    });
+  });
+}
+
+/// The don't-list-twice guard used to key on `createdAt`'s calendar month.
+void _listClaims() {
+  Lot lot(DateTime created, {DateTime? submitted, String? ref}) => Lot(
+        createdAt: created,
+        mode: 'Cash',
+        items: [item('A1')],
+        referenceNumber: ref,
+        submittedAt: submitted,
+      );
+
+  group('a list claims its accounts', () {
+    final now = DateTime(2026, 8, 16);
+
+    test('an UNSUBMITTED list from last month still blocks', () {
+      // The one that duplicated work: built 31 Jul, never submitted, so the cash
+      // is still uncollected — auto-build must not list A1 again.
+      final claimed = LotPacking.listedThisCycle([lot(DateTime(2026, 7, 31))], now);
+      expect(claimed, contains('A1'));
+    });
+
+    test('a list submitted this month blocks', () {
+      final claimed = LotPacking.listedThisCycle(
+          [lot(DateTime(2026, 8, 2), submitted: DateTime(2026, 8, 3), ref: 'C1')],
+          now);
+      expect(claimed, contains('A1'));
+    });
+
+    test('a list submitted last month no longer blocks', () {
+      // Done and paid; the portal has moved the due date on, and monthsBehind
+      // is the real guard from here.
+      final claimed = LotPacking.listedThisCycle(
+          [lot(DateTime(2026, 7, 2), submitted: DateTime(2026, 7, 3), ref: 'C1')],
+          now);
+      expect(claimed, isEmpty);
+    });
+
+    test('built last month, submitted THIS month, blocks', () {
+      // Keyed on createdAt this read as July and stopped blocking.
+      final claimed = LotPacking.listedThisCycle(
+          [lot(DateTime(2026, 7, 31), submitted: DateTime(2026, 8, 1), ref: 'C1')],
+          now);
+      expect(claimed, contains('A1'));
     });
   });
 }
