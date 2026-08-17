@@ -26,19 +26,30 @@
 -- schema_otp.sql. Safe to re-run; `create or replace view` and it holds no data.
 -- ============================================================================
 
+-- COLUMN ORDER IS NOT COSMETIC HERE.
+--
+-- `create or replace view` may only APPEND columns; it cannot insert them into
+-- the middle. Putting `mobile` after `agent_name` made Postgres read it as a
+-- rename of the existing fourth column and refuse:
+--
+--   42P16: cannot change name of view column "app_version" to "mobile"
+--
+-- So the seven original columns keep their exact names AND positions, and the
+-- four new ones go on the end. Do not tidy this into a "nicer" order.
 create or replace view public.v_devices as
   select
     coalesce(d.id, e.device_id)                          as id,
     d.agent_name,
-    d.mobile,
-    d.agent_id,
-    d.sol_id,
-    d.account_id,
     coalesce(d.app_version, e.last_version)              as app_version,
     d.model,
     coalesce(d.first_seen, e.first_event)                as first_seen,
     greatest(d.last_seen, e.last_event)                  as last_seen,
-    coalesce(e.events, 0)                                as events
+    coalesce(e.events, 0)                                as events,
+    -- Appended (see above).
+    d.mobile,
+    d.agent_id,
+    d.sol_id,
+    d.account_id
   from public.devices d
   full outer join (
     select device_id,
