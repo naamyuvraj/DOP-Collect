@@ -522,6 +522,17 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _submitBatch() async {
     final lots = widget.batchLots!;
     var paid = 0, skipped = 0;
+    // A ledger of what did NOT go through, and why.
+    //
+    // Every skip used to be a _snack() — which calls clearSnackBars() first, so
+    // in a 33-list run each message was wiped by the next progress update before
+    // he could read it. The final tally was snacked and then Navigator.pop()
+    // fired immediately, destroying that too. Net result: 12 lists silently did
+    // not submit and he had to find them himself.
+    //
+    // `paymentUnknown` marks the one failure that must NOT simply be retried:
+    // Pay All ran but no reference came back, so the money may well have moved.
+    final failures = <({String label, String reason, bool paymentUnknown})>[];
     final serials = {
       for (final a in await widget.repo.all())
         if (a.serial > 0) a.accountNumber: a.serial
@@ -550,7 +561,11 @@ class _SyncScreenState extends State<SyncScreen> {
       if (!mounted) return;
       if (!prep.saved) {
         skipped++;
-        _snack('$label skipped (${prep.error ?? 'could not save'}).');
+        failures.add((
+          label: label,
+          reason: prep.error ?? 'could not select and save the accounts',
+          paymentUnknown: false,
+        ));
         await _engine.navigateToAccountList();
         continue;
       }
@@ -574,7 +589,11 @@ class _SyncScreenState extends State<SyncScreen> {
       setState(() => _busy = false);
       if (!fill.ok) {
         skipped++;
-        _snack('$label skipped (could not key installments).');
+        failures.add((
+          label: label,
+          reason: fill.error ?? 'could not key the installments',
+          paymentUnknown: false,
+        ));
         await _engine.navigateToAccountList();
         continue;
       }
@@ -588,7 +607,7 @@ class _SyncScreenState extends State<SyncScreen> {
       if (!mounted) return;
       if (problem != null) {
         skipped++;
-        _snack('$label held ($problem) — not paid.');
+        failures.add((label: label, reason: problem, paymentUnknown: false));
         await _engine.navigateToAccountList();
         continue;
       }
@@ -612,7 +631,15 @@ class _SyncScreenState extends State<SyncScreen> {
         paid++;
       } else {
         skipped++;
-        _snack('$label paid? no reference captured — check the portal.');
+        // Pay All ran. Without a reference we cannot tell whether it went
+        // through, so this one is flagged for a manual check rather than lumped
+        // in with the safe failures.
+        failures.add((
+          label: label,
+          reason: 'Pay All ran but no reference came back — check the portal '
+              'before submitting this list again',
+          paymentUnknown: true,
+        ));
       }
       unawaited(Analytics.track('list_submitted', {
         'accounts': lot.count,
@@ -630,10 +657,83 @@ class _SyncScreenState extends State<SyncScreen> {
     setState(() => _busy = false);
     unawaited(Analytics.track('portal_batch',
         {'lists': lots.length, 'paid': paid, 'skipped': skipped}));
-    _snack('Done — $paid submitted${skipped > 0 ? ', $skipped skipped' : ''}.');
-    Navigator.of(context).pop(true);
+    if (failures.isEmpty) {
+      _snack('Done — $paid submitted.');
+      Navigator.of(context).pop(true);
+      return;
+    }
+    // Something did not go. Hold the screen and SAY WHAT, rather than snacking a
+    // tally into a navigation that discards it.
+    await _showBatchSummary(paid: paid, failures: failures);
+    if (mounted) Navigator.of(context).pop(true);
   }
 
+
+  /// What did not submit, and what to do about it.
+  ///
+  /// Deliberately a dialog he has to dismiss, not a snackbar: the batch pops its
+  /// screen the moment it finishes, so anything transient is gone before it can
+  /// be read. Twelve lists out of thirty-three failing quietly is how an agent
+  /// ends up re-submitting by hand without knowing which ones.
+  Future<void> _showBatchSummary({
+    required int paid,
+    required List<({String label, String reason, bool paymentUnknown})> failures,
+  }) async {
+    final unknown = failures.where((f) => f.paymentUnknown).toList();
+    final safe = failures.where((f) => !f.paymentUnknown).toList();
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('$paid submitted, ${failures.length} not',
+            style: AppTheme.display(17)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (safe.isNotEmpty) ...[
+                Text('Submit these again — nothing was paid:',
+                    style: AppTheme.body(13, weight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                ...safe.map((f) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text('• ${f.label} — ${f.reason}',
+                          style: AppTheme.body(12.5,
+                              color: AppTheme.inkMuted, height: 1.35)),
+                    )),
+              ],
+              if (unknown.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text('Check the portal FIRST — these may already be paid:',
+                    style: AppTheme.body(13,
+                        weight: FontWeight.w700, color: AppTheme.red)),
+                const SizedBox(height: 6),
+                ...unknown.map((f) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text('• ${f.label} — ${f.reason}',
+                          style: AppTheme.body(12.5,
+                              color: AppTheme.red, height: 1.35)),
+                    )),
+              ],
+              const SizedBox(height: 10),
+              Text(
+                'The lists that did not go are still in Lists, ready to submit '
+                'again.',
+                style: AppTheme.body(12, color: AppTheme.inkFaint, height: 1.35),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+              onPressed: () => Navigator.pop(dctx),
+              child: const Text('Got it')),
+        ],
+      ),
+    );
+  }
 
   /// Deep Sync mission: fill exact per-account detail (last-deposit date etc.)
   /// for accounts that don't have it yet. Bounded + resumable across runs.
