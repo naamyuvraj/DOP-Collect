@@ -17,6 +17,7 @@ type Sub = {
   agent_id: string;
   plan_code: string;
   plan_name: string;
+  agent_name: string | null;
   status: string;
   days_left: number;
   current_period_end: string;
@@ -306,7 +307,11 @@ export default function Plans() {
           That is the table being honest about what exists, not a bug — but it
           means this is not a roster of who is using the app. The Users tab is. */}
       <Card title="Subscribers" className="mt-3.5"
-            right={<span className="text-muted text-xs">real rows only</span>}>
+            right={<span className="text-muted text-xs">
+              {data.subscribers.length > 100
+                ? `showing 100 of ${data.subscribers.length} · real rows only`
+                : "real rows only"}
+            </span>}>
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
@@ -315,7 +320,10 @@ export default function Plans() {
             <tbody>
               {data.subscribers.slice(0, 100).map((s) => (
                 <tr key={s.agent_id}>
-                  <Td className="font-mono text-xs">{s.agent_id}</Td>
+                  <Td>
+                    <div className="font-semibold">{s.agent_name || "—"}</div>
+                    <div className="font-mono text-[11px] text-muted">{s.agent_id}</div>
+                  </Td>
                   <Td>{s.plan_name || s.plan_code}</Td>
                   <Td>
                     <Pill tone={s.status === "active" ? "g" : s.status === "trial" ? "b" : "r"}>{s.status}</Pill>

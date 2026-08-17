@@ -7,18 +7,29 @@ export const dynamic = "force-dynamic";
 
 const loadPlansData = async () => {
   const sb = admin();
-  const [plans, cfg, subs, mrr] = await Promise.all([
+  const [plans, cfg, subs, mrr, devs] = await Promise.all([
     sb.from("plans").select("*").order("sort"),
     sb.from("app_config").select("key,value").in("key", ["payments_enabled", "trial_days"]),
     sb.from("v_subscriptions").select("*").limit(500),
     sb.from("v_mrr").select("*"),
+    // v_subscriptions carries agent_id and no name, so the Subscribers table
+    // could only show "DOP.MI8472350100005" — unidentifiable without going to
+    // the Users tab and matching by eye. Resolve the name here.
+    sb.from("devices").select("agent_id,agent_name"),
   ]);
+  const nameByAgent = new Map<string, string>();
+  for (const d of (devs.data as any[]) || []) {
+    if (d.agent_id && d.agent_name) nameByAgent.set(d.agent_id, d.agent_name);
+  }
   const config: Record<string, unknown> = {};
   for (const row of cfg.data || []) config[(row as any).key] = (row as any).value;
   return {
     plans: plans.data || [],
     config: { payments_enabled: config.payments_enabled ?? false, trial_days: config.trial_days ?? 14 },
-    subscribers: subs.data || [],
+    subscribers: ((subs.data as any[]) || []).map((r) => ({
+      ...r,
+      agent_name: nameByAgent.get(r.agent_id) ?? null,
+    })),
     mrr: mrr.data || [],
     error: plans.error?.message,
   };
