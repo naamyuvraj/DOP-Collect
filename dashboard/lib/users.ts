@@ -132,8 +132,21 @@ export async function computeUsers(): Promise<UsersData> {
   const collByDevice = new Map<string, number>();
   for (const e of submits) collByDevice.set(e.device_id, (collByDevice.get(e.device_id) || 0) + (Number(e.props?.amount) || 0));
 
-  const subByAgent = new Map<string, { plan: string | null; status: string | null }>();
-  for (const s of subs) subByAgent.set(s.agent_id, { plan: s.plan_name ?? s.plan_code ?? null, status: s.status ?? null });
+  // `code` is kept alongside the display name because "is this a subscriber?"
+  // cannot be answered from plan_name or status alone — a trial row has
+  // status 'trial', which is not 'expired', so counting non-expired rows counted
+  // trialists as paying customers.
+  const subByAgent = new Map<
+    string,
+    { plan: string | null; code: string | null; status: string | null }
+  >();
+  for (const s of subs) {
+    subByAgent.set(s.agent_id, {
+      plan: s.plan_name ?? s.plan_code ?? null,
+      code: s.plan_code ?? null,
+      status: s.status ?? null,
+    });
+  }
 
   // While `payments_enabled` is OFF, `pay`'s resolve() hands the app a trial but
   // deliberately writes NO subscriptions row (see supabase/functions/pay/index.ts
@@ -153,6 +166,7 @@ export async function computeUsers(): Promise<UsersData> {
   const trialPlan = planRes.data as { name?: string; duration_days?: number } | null;
   const ephemeralTrial = {
     plan: trialPlan?.name ?? "Free trial",
+    code: "trial",
     status: "trial" as const,
   };
 
@@ -312,12 +326,23 @@ export async function computeUsers(): Promise<UsersData> {
     value: rows.reduce((s, r) => s + (r.value || 0), 0),
     collected: rows.reduce((s, r) => s + r.collected, 0),
     lists: submits.length,
-    // Counted off REAL subscription rows, never the derived trial above —
-    // otherwise, with payments off, every agent would read as a subscriber and
-    // this KPI would just restate `agents`.
-    subscribers: rows.filter(
-      (r) => r.agent_id && subByAgent.get(r.agent_id)?.status && subByAgent.get(r.agent_id)!.status !== "expired"
-    ).length,
+    // PAYING subscribers only.
+    //
+    // Two things have to be excluded, and each was counted at some point:
+    //   * the derived trial (read-time, not a row) — otherwise with payments off
+    //     every agent reads as a subscriber and this just restates `agents`;
+    //   * a real TRIAL row, whose status is 'trial'. That is not 'expired', so
+    //     "any non-expired row" counted trialists as customers — the dashboard
+    //     said 1 subscriber when both agents were on a free trial.
+    //
+    // Matches the Plans page, which already filters plan_code !== 'trial' for
+    // its "Paid subscribers" tile.
+    subscribers: rows.filter((r) => {
+      if (!r.agent_id) return false;
+      const sub = subByAgent.get(r.agent_id);
+      if (!sub?.status) return false; // no real row — derived trial at most
+      return sub.status !== "expired" && sub.code !== "trial";
+    }).length,
     ai_queries: (aiRes as any).count ?? 0,
   };
 

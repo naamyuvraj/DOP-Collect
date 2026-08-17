@@ -59,7 +59,9 @@ export default async function Overview() {
 
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 mt-3.5">
         <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} />
-        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} />
+        {/* Paying only — a free trial is not a subscriber. Said out loud because
+            this tile read 1 while both agents were on trial. */}
+        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} sub="paying" />
         <Kpi icon="ai" label="AI" value={num(t.ai_queries)} />
         <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" />
       </div>
