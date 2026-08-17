@@ -38,9 +38,10 @@ function LoginForm() {
         className="card w-full max-w-sm p-7 flex flex-col gap-4"
       >
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-ink text-white grid place-items-center font-extrabold text-lg">
-            ₹
-          </div>
+          {/* Same placeholder as the sidebar had. The login screen is the first
+              thing anyone sees, so it is the last place to leave a stand-in. */}
+          <img src="/logo.png" alt="DOP Collect" width={44} height={44}
+               className="w-11 h-11 rounded-2xl object-cover" />
           <div>
             <div className="font-extrabold text-lg leading-none">
               DOP Collect

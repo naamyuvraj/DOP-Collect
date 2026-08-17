@@ -28,9 +28,12 @@ export default function Sidebar() {
   return (
     <aside className="w-[236px] shrink-0 bg-sidebar text-white h-screen flex flex-col">
       <div className="flex items-center gap-3 px-5 py-5 shrink-0">
-        <div className="w-9 h-9 rounded-xl bg-white/10 grid place-items-center font-extrabold">
-          ₹
-        </div>
+        {/* The real app icon. This was a "₹" glyph in a tinted box — a
+            placeholder that made the admin panel look unrelated to the app it
+            administers. Sized 36px at 2x from a 128px source so it stays crisp
+            on a retina display without shipping the 917KB original. */}
+        <img src="/logo.png" alt="" width={36} height={36}
+             className="w-9 h-9 rounded-xl object-cover shrink-0" />
         <div className="leading-tight">
           <div className="font-extrabold">DOP Collect</div>
           <div className="text-white/50 text-[11px]">Admin</div>

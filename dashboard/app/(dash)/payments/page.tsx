@@ -38,6 +38,13 @@ export default async function Payments() {
       (p) => new Date(p.created_at).getTime() > Date.now() - 30 * 864e5
     )
     .reduce((a, p) => a + Number(p.amount), 0);
+  // REAL subscription rows only — this page is about money that moved, and
+  // getSubscriptions reads v_subscriptions directly.
+  //
+  // That makes these numbers legitimately smaller than the Plans and Overview
+  // tabs, which include the trial `pay` derives at read time without writing a
+  // row. Two tabs quoting different trial counts is not a bug in either, but it
+  // reads as one, so the tile says which it is instead of leaving it implied.
   const active = subs.filter((x) => x.status === "active").length;
   const trialing = subs.filter((x) => x.status === "trial").length;
 
@@ -47,7 +54,8 @@ export default async function Payments() {
       <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
         <Kpi label="Total revenue" value={inr(s.revenue)} focal />
         <Kpi label="Last 30 days" value={inr(mrr)} />
-        <Kpi label="Active subs" value={num(active)} sub={`${num(trialing)} on trial`} />
+        <Kpi label="Paid subs" value={num(active)}
+             sub={`${num(trialing)} trial rows`} />
         <Kpi label="Successful" value={num(ok.length)} />
         <Kpi label="Transactions" value={num(pays.length)} />
       </div>
