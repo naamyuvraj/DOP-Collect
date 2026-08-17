@@ -9,6 +9,7 @@ const NAV = [
   { href: "/regions", label: "Regions", icon: "M12 21s-7-6.5-7-11a7 7 0 0114 0c0 4.5-7 11-7 11zM12 12a2 2 0 100-4 2 2 0 000 4" },
   { href: "/activity", label: "Activity", icon: "M3 12h4l3 8 4-16 3 8h4" },
   { href: "/keys", label: "API Keys", icon: "M15 7a4 4 0 11-4 4h-1l-2 2-2-2H3v-3l6-6a4 4 0 016 5z" },
+  { href: "/otp", label: "OTP & MSG91", icon: "M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2zM9 10h.01M13 10h.01" },
   { href: "/payments", label: "Payments", icon: "M3 7h18v10H3zM3 11h18" },
   { href: "/plans", label: "Plans", icon: "M4 7h16v12H4zM4 7l2-3h12l2 3M9 12h6" },
   { href: "/releases", label: "Releases", icon: "M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" },

@@ -25,8 +25,13 @@ on conflict (key) do nothing;
 -- the edge function started logging them (see the logReq calls on the 429
 -- paths in supabase/functions/otp/index.ts); older days read 0 because nothing
 -- recorded them, not because nothing was blocked.
+--
+-- Days are IST calendar days, not UTC ones. `created_at` is timestamptz, so a
+-- bare date_trunc would bucket on the session timezone — UTC on Supabase — and
+-- put every send between midnight and 5:30am IST on the previous day. The
+-- dashboard's JS fallback shifts by the same +05:30, so the two paths agree.
 create or replace view public.v_otp_daily as
-  select date_trunc('day', created_at)::date as day,
+  select (created_at at time zone 'Asia/Kolkata')::date as day,
          count(*) filter (
            where action in ('send','resend') and status = 'ok')             as sent,
          count(*) filter (
