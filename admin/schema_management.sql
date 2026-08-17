@@ -51,5 +51,11 @@ insert into public.app_config (key, value) values
   ('analytics_default', 'true'::jsonb),
   ('portal_submit',     'true'::jsonb),
   ('announcement',      '{"text":"","enabled":false}'::jsonb),
-  ('force_update',      '{"version":"","message":"","enabled":false}'::jsonb)
+  ('force_update',      '{"version":"","message":"","enabled":false}'::jsonb),
+  -- These two are read by RemoteConfig and were never seeded, so the app fell
+  -- back to its built-in defaults no matter what the RLS policy allowed — a row
+  -- that does not exist cannot be returned. Allowlisting a key is only half of
+  -- making it reachable; it needs a row too.
+  ('self_serve_billing', 'false'::jsonb),
+  ('max_devices',        '3'::jsonb)
 on conflict (key) do nothing;
