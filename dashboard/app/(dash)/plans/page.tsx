@@ -19,7 +19,10 @@ type Sub = {
   plan_name: string;
   agent_name: string | null;
   status: string;
-  days_left: number;
+  /** Null for a derived trial — no stored period to count down from. */
+  days_left: number | null;
+  /** True when a real subscriptions row backs this, not a derived trial. */
+  has_row: boolean;
   current_period_end: string;
 };
 type Data = {
@@ -43,6 +46,10 @@ function Toggle({ on, onChange, tone = "green" }: { on: boolean; onChange: (v: b
 const empty: Plan = { code: "", name: "", price_inr: 0, duration_days: 30, active: true, sort: 99 };
 
 export default function Plans() {
+  /// Which slice of the roster to show. Defaults to everyone — the table used to
+  /// be a roster of one because it only listed real subscription rows.
+  const [subFilter, setSubFilter] =
+      useState<"all" | "paying" | "trial" | "expired">("all");
   const [data, setData] = useState<Data | null>(() => peekCached<Data>("plans"));
   const [rows, setRows] = useState<Plan[]>(() => peekCached<Data>("plans")?.plans || []);
   const [adding, setAdding] = useState<Plan | null>(null);
@@ -188,6 +195,14 @@ export default function Plans() {
   }
 
   const on = data.config.payments_enabled !== false;
+  const shown = data.subscribers.filter((s) =>
+    subFilter === "all"
+      ? true
+      : subFilter === "paying"
+        ? s.plan_code !== "trial" && s.status !== "expired"
+        : subFilter === "trial"
+          ? s.plan_code === "trial" && s.status !== "expired"
+          : s.status === "expired");
   // Anyone whose access has not lapsed — PAID AND TRIAL together. The name
   // matters because `status` has a literal 'active' value distinct from 'trial',
   // so a tile called "Active subscribers" that includes trialists reads as a
@@ -307,18 +322,27 @@ export default function Plans() {
           That is the table being honest about what exists, not a bug — but it
           means this is not a roster of who is using the app. The Users tab is. */}
       <Card title="Subscribers" className="mt-3.5"
-            right={<span className="text-muted text-xs">
-              {data.subscribers.length > 100
-                ? `showing 100 of ${data.subscribers.length} · real rows only`
-                : "real rows only"}
-            </span>}>
+            right={
+              <div className="flex items-center gap-2">
+                {(["all", "paying", "trial", "expired"] as const).map((f) => (
+                  <button key={f}
+                    className={`btn ${subFilter === f ? "" : "btn-ghost"} py-1 px-2 text-xs`}
+                    onClick={() => setSubFilter(f)}>
+                    {f}
+                  </button>
+                ))}
+                <span className="text-muted text-xs">
+                  {shown.length > 100 ? `100 of ${shown.length}` : `${shown.length}`}
+                </span>
+              </div>
+            }>
         <div className="overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead>
               <tr><Th>Agent</Th><Th>Plan</Th><Th>Status</Th><Th>Days left</Th><Th>Renews / ended</Th><Th>Fix access</Th></tr>
             </thead>
             <tbody>
-              {data.subscribers.slice(0, 100).map((s) => (
+              {shown.slice(0, 100).map((s) => (
                 <tr key={s.agent_id}>
                   <Td>
                     <div className="font-semibold">{s.agent_name || "—"}</div>
@@ -328,7 +352,7 @@ export default function Plans() {
                   <Td>
                     <Pill tone={s.status === "active" ? "g" : s.status === "trial" ? "b" : "r"}>{s.status}</Pill>
                   </Td>
-                  <Td>{num(s.days_left)}</Td>
+                  <Td>{s.days_left == null ? <span className="text-muted">—</span> : num(s.days_left)}</Td>
                   <Td className="text-muted text-xs">
                     {s.current_period_end ? new Date(s.current_period_end).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}
                   </Td>

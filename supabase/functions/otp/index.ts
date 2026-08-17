@@ -235,20 +235,36 @@ Deno.serve(async (req) => {
       return json({ ok: false, code: "integrity_required" }, 403);
 
     if (action === "send" || action === "resend") {
-      if (!authkey || !wa.number || !wa.template)
+      if (!authkey || !wa.number || !wa.template) {
+        logReq(deviceId, phoneHash, action, "not_configured");
         return json({ ok: false, code: "not_configured" }, 503);
+      }
       // Abuse/cost guard. Per-phone cooldown + hourly cap, PLUS per-IP and
       // per-device hourly caps across ALL phones — without the latter two, an
       // anon-key holder could enumerate phone numbers and spam paid WhatsApp
       // OTPs to strangers (5/phone/hr each).
-      if ((await bump(`otpcd:${phoneHash}`, cooldown)) > 1)
+      //
+      // Each refusal is logged as well as returned. These rows are how the
+      // dashboard's OTP page can say how many paid WhatsApp messages the limits
+      // stopped — an unlogged 429 is a saving nobody can see, and the caps are
+      // tunable from that same page, so the number is what tells you whether a
+      // cap is set too loose (spend climbing) or too tight (real agents stuck).
+      if ((await bump(`otpcd:${phoneHash}`, cooldown)) > 1) {
+        logReq(deviceId, phoneHash, action, "cooldown");
         return json({ ok: false, code: "cooldown", cooldown }, 429);
-      if ((await bump(`otp:${phoneHash}`, 3600)) > maxSendPerHour)
+      }
+      if ((await bump(`otp:${phoneHash}`, 3600)) > maxSendPerHour) {
+        logReq(deviceId, phoneHash, action, "rate_limited");
         return json({ ok: false, code: "rate_limited" }, 429);
-      if ((await bump(`otpip:${ip}`, 3600)) > maxIpPerHour)
+      }
+      if ((await bump(`otpip:${ip}`, 3600)) > maxIpPerHour) {
+        logReq(deviceId, phoneHash, action, "rate_limited");
         return json({ ok: false, code: "rate_limited" }, 429);
-      if (deviceId && (await bump(`otpdev:${deviceId}`, 3600)) > maxDevicePerHour)
+      }
+      if (deviceId && (await bump(`otpdev:${deviceId}`, 3600)) > maxDevicePerHour) {
+        logReq(deviceId, phoneHash, action, "rate_limited");
         return json({ ok: false, code: "rate_limited" }, 429);
+      }
 
       // Generate + store (SALTED hash only — a leak of otp_codes can't be
       // brute-forced offline), then deliver over WhatsApp.

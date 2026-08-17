@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { computeUsers } from "@/lib/users";
 import { unstable_cache, revalidateTag } from "next/cache";
 import { isAuthed } from "@/lib/auth";
 import { admin } from "@/lib/supabase";
@@ -21,15 +22,42 @@ const loadPlansData = async () => {
   for (const d of (devs.data as any[]) || []) {
     if (d.agent_id && d.agent_name) nameByAgent.set(d.agent_id, d.agent_name);
   }
+
+  // EVERY agent, not just the ones with a subscriptions row.
+  //
+  // While payments_enabled is off, `pay` grants a trial without writing a row,
+  // so v_subscriptions held exactly one agent and this table was a roster of
+  // one — useless for "who is on what". computeUsers already knows the full
+  // agent roster AND applies the same derived trial the app shows, so read the
+  // roster from there and enrich it with the real row where one exists.
+  const realByAgent = new Map<string, any>();
+  for (const r of (subs.data as any[]) || []) realByAgent.set(r.agent_id, r);
+
+  const { rows: agentRows } = await computeUsers();
+  const roster = agentRows
+    .filter((r) => r.agent_id) // access is keyed to the agent id; no id, nothing to grant
+    .map((r) => {
+      const real = realByAgent.get(r.agent_id!);
+      return {
+        agent_id: r.agent_id!,
+        agent_name: r.name ?? nameByAgent.get(r.agent_id!) ?? null,
+        plan_code: real?.plan_code ?? "trial",
+        plan_name: r.plan ?? real?.plan_name ?? null,
+        // computeUsers already resolves real-row-else-derived-trial.
+        status: r.sub_status ?? "none",
+        // Only a real row can say. A derived trial has no stored period, so this
+        // stays null and prints as a dash rather than inventing a number.
+        days_left: real?.days_left ?? null,
+        current_period_end: real?.current_period_end ?? null,
+        has_row: !!real,
+      };
+    });
   const config: Record<string, unknown> = {};
   for (const row of cfg.data || []) config[(row as any).key] = (row as any).value;
   return {
     plans: plans.data || [],
     config: { payments_enabled: config.payments_enabled ?? false, trial_days: config.trial_days ?? 14 },
-    subscribers: ((subs.data as any[]) || []).map((r) => ({
-      ...r,
-      agent_name: nameByAgent.get(r.agent_id) ?? null,
-    })),
+    subscribers: roster,
     mrr: mrr.data || [],
     error: plans.error?.message,
   };
