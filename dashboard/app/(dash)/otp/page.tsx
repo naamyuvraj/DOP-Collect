@@ -74,7 +74,7 @@ function NumField({
         value={Number.isFinite(value) ? value : 0}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      {help && <span className="block text-muted text-[11px] mt-1">{help}</span>}
+      {help && <span className="block text-muted text-micro mt-1">{help}</span>}
     </label>
   );
 }
@@ -130,7 +130,7 @@ export default function Otp() {
     return (
       <>
         <PageHead title="OTP & MSG91" subtitle="Loading verification volume and spend…" />
-        <KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-5" focal />
+        <KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-4" focal />
       </>
     );
   }
@@ -175,7 +175,7 @@ export default function Otp() {
         </div>
       )}
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
         <Kpi
           label="Messages sent · 30d"
           value={num(w.d30.sent)}
@@ -203,13 +203,13 @@ export default function Otp() {
         />
       </div>
 
-      <p className="text-muted text-[11px] mt-2">
+      <p className="text-muted text-micro mt-2">
         Spend is <strong>estimated</strong>: we count messages MSG91 accepted, then multiply by the rate
         you set below. MSG91 never tells us the real per-message price — check the wallet for what you owe.
       </p>
 
-      <div className="grid gap-3.5 lg:grid-cols-[1.4fr_1fr] mt-3.5">
-        <Card title="Messages sent per day" right={<span className="text-muted text-[11px]">last 30 days</span>}>
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr] mt-4">
+        <Card title="Messages sent per day" right={<span className="text-muted text-micro">last 30 days</span>}>
           {chart.some((c) => c.sent > 0) ? (
             <TrendArea data={chart} x="label" y="sent" height={220} />
           ) : (
@@ -219,19 +219,19 @@ export default function Otp() {
           )}
         </Card>
 
-        <div className="grid gap-3.5 content-start">
+        <div className="grid gap-4 content-start">
           <Card title="This month">
             <div className="flex items-end justify-between">
               <div>
-                <div className="text-[26px] font-extrabold leading-none tracking-tight">{money(mtd)}</div>
-                <div className="text-muted text-[12px] font-semibold mt-1.5">
+                <div className="text-[22px] font-semibold leading-none tracking-tight">{money(mtd)}</div>
+                <div className="text-muted text-meta font-semibold mt-1.5">
                   {num(d.mtdSent ?? 0)} messages since the 1st
                 </div>
               </div>
               {budget > 0 && (
                 <div className="text-right">
                   <div className="lbl">of {money(budget)}</div>
-                  <div className={`font-extrabold ${budgetPct > 90 ? "text-red" : "text-green"}`}>
+                  <div className={`font-semibold ${budgetPct > 90 ? "text-red" : "text-green"}`}>
                     {Math.round(budgetPct)}%
                   </div>
                 </div>
@@ -254,11 +254,11 @@ export default function Otp() {
                   {Object.entries(d.balance).map(([k, v]) => (
                     <div key={k} className="rounded-xl bg-canvas p-3">
                       <div className="lbl">{k}</div>
-                      <div className="font-extrabold text-lg mt-1">{v}</div>
+                      <div className="font-semibold text-lg mt-1">{v}</div>
                     </div>
                   ))}
                 </div>
-                <p className="text-muted text-[11px] mt-2.5">
+                <p className="text-muted text-micro mt-2.5">
                   Live from MSG91. This is the authoritative balance; everything else on this page is our own count.
                 </p>
               </>
@@ -274,7 +274,7 @@ export default function Otp() {
       </div>
 
       {/* items-start so a short card doesn't stretch to match a tall neighbour */}
-      <div className="grid gap-3.5 lg:grid-cols-2 items-start mt-3.5">
+      <div className="grid gap-4 lg:grid-cols-2 items-start mt-4">
         <Card title="Where the money goes">
           <Table>
             <tbody>
@@ -287,7 +287,7 @@ export default function Otp() {
               ].map(([label, n, amt, tone]) => (
                 <tr key={label as string}>
                   <Td className="text-muted">{label}</Td>
-                  <Td num className="font-extrabold">{n}</Td>
+                  <Td num className="font-semibold">{n}</Td>
                   <Td num>
                     {amt ? <Pill tone={tone as any}>{amt}</Pill> : null}
                   </Td>
@@ -295,7 +295,7 @@ export default function Otp() {
               ))}
             </tbody>
           </Table>
-          <p className="text-muted text-[11px] mt-2.5">
+          <p className="text-muted text-micro mt-2.5">
             “Sent but never verified” is the wasteful half of the bill — codes delivered to people who
             dropped off. Tightening the cooldown below cuts it directly.
           </p>
@@ -316,7 +316,7 @@ export default function Otp() {
                       {SAVED.has(f.status) && <Pill tone="g">saved</Pill>}
                     </Td>
                     <Td className="text-muted">{f.action}</Td>
-                    <Td num className="font-extrabold">{num(f.n)}</Td>
+                    <Td num className="font-semibold">{num(f.n)}</Td>
                     <Td className="text-muted whitespace-nowrap">{when(f.last_seen)}</Td>
                   </tr>
                 ))}
@@ -330,7 +330,7 @@ export default function Otp() {
         </Card>
       </div>
 
-      <div className="grid gap-3.5 lg:grid-cols-2 items-start mt-3.5">
+      <div className="grid gap-4 lg:grid-cols-2 items-start mt-4">
         <Card title="Price & budget">
           <p className="text-muted text-xs mb-3">
             What MSG91 charges you per WhatsApp template message. Nothing here changes the app — it only
@@ -414,8 +414,8 @@ export default function Otp() {
 
       <Card
         title="Heaviest phones"
-        className="mt-3.5"
-        right={<span className="text-muted text-[11px]">by billable sends</span>}
+        className="mt-4"
+        right={<span className="text-muted text-micro">by billable sends</span>}
       >
         {d.top.length ? (
           <>
@@ -432,7 +432,7 @@ export default function Otp() {
                         {p.phone_hash.slice(0, 10)}…
                         {dud && <Pill tone="r">never verified</Pill>}
                       </Td>
-                      <Td num className="font-extrabold">{num(p.sent)}</Td>
+                      <Td num className="font-semibold">{num(p.sent)}</Td>
                       <Td num>{money(p.sent * rate)}</Td>
                       <Td num>{num(p.verified)}</Td>
                       <Td num className="text-muted">{num(p.blocked)}</Td>
@@ -442,7 +442,7 @@ export default function Otp() {
                 })}
               </tbody>
             </Table>
-            <p className="text-muted text-[11px] mt-2.5">
+            <p className="text-muted text-micro mt-2.5">
               Phone numbers are never stored — only a SHA-256 hash, so these are hash prefixes. A row with
               several sends and no verify is someone pulling paid messages without ever signing in.
             </p>

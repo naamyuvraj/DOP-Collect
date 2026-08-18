@@ -81,7 +81,7 @@ export default function AssistantPage() {
           {!msgs.length ? (
             <div className="h-full flex flex-col items-center justify-center text-center">
               <div className="w-12 h-12 rounded-2xl bg-focal grid place-items-center text-2xl mb-3">✦</div>
-              <div className="font-extrabold text-lg">Ask about your app</div>
+              <div className="font-semibold text-lg">Ask about your app</div>
               <p className="text-muted text-sm mt-1 max-w-md">
                 I read the live analytics — installs, activity, revenue, key usage — and remember what
                 you care about across sessions.
@@ -91,7 +91,7 @@ export default function AssistantPage() {
                   <button
                     key={s}
                     onClick={() => ask(s)}
-                    className="text-[13px] font-semibold rounded-xl border border-line bg-white px-3 py-2 hover:border-green transition"
+                    className="text-body font-semibold rounded-xl border border-line bg-white px-3 py-2 hover:border-green transition"
                   >
                     {s}
                   </button>

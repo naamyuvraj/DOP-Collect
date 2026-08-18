@@ -43,7 +43,7 @@ function LoginForm() {
           <img src="/logo.png" alt="DOP Collect" width={44} height={44}
                className="w-11 h-11 rounded-2xl object-cover" />
           <div>
-            <div className="font-extrabold text-lg leading-none">
+            <div className="font-semibold text-lg leading-none">
               DOP Collect
             </div>
             <div className="text-muted text-xs mt-1">Admin dashboard</div>

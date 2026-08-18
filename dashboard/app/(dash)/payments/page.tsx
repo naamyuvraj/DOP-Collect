@@ -52,8 +52,8 @@ export default async function Payments() {
   return (
     <>
       <PageHead title="Payments" subtitle="Subscriptions, revenue & transactions" />
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-        <Kpi label="Total revenue" value={inr(s.revenue)} sub="all time" focal />
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <Kpi label="Total revenue" value={inr(s.revenue)} sub="all time" focal wide />
         <Kpi label="Last 30 days" value={inr(mrr)} />
         <Kpi label="Paid subs" value={num(active)}
              sub={`${num(trialing)} trial rows`} />
@@ -61,11 +61,11 @@ export default async function Payments() {
         <Kpi label="Transactions" value={num(pays.length)} />
       </div>
 
-      <Card title="Plans" className="mt-3.5">
+      <Card title="Plans" className="mt-4">
         <div className="flex flex-wrap gap-2.5">
           {plans.map((p) => (
             <div key={p.code} className="rounded-xl border border-line px-4 py-3">
-              <div className="font-extrabold text-sm">{p.name}</div>
+              <div className="font-semibold text-sm">{p.name}</div>
               <div className="text-muted text-xs">
                 {p.price_inr > 0 ? inr(p.price_inr) : "Free"} · {p.duration_days}d
                 {p.active ? "" : " · inactive"}
@@ -80,7 +80,7 @@ export default async function Payments() {
         </div>
       </Card>
 
-      <Card title="Subscribers" className="mt-3.5">
+      <Card title="Subscribers" className="mt-4">
         <Table>
           <thead>
             <tr>
@@ -110,7 +110,7 @@ export default async function Payments() {
         )}
       </Card>
 
-      <Card title="Transactions" className="mt-3.5">
+      <Card title="Transactions" className="mt-4">
         <Table>
           <thead>
             <tr>
@@ -133,7 +133,7 @@ export default async function Payments() {
                 <Td className="font-semibold">{p.plan || "—"}</Td>
                 <Td className="text-muted">{p.provider || "—"}</Td>
                 <Td className="font-mono text-xs text-muted">{p.ref || "—"}</Td>
-                <Td num className="font-bold">{inr(p.amount)}</Td>
+                <Td num className="font-semibold">{inr(p.amount)}</Td>
                 <Td>
                   <Pill tone={p.status === "success" ? "g" : p.status === "failed" ? "r" : "a"}>
                     {p.status}

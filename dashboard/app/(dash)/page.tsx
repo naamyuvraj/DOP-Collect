@@ -52,15 +52,15 @@ export default async function Overview() {
       {/* The book leads. Everything on this page is downstream of how much RD
           the agents are carrying, so it is the tile that gets the size — the
           rest of the row qualifies it, and the row below only counts things. */}
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-        <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month" focal />
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+        <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month" focal wide />
         <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} />
         <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
         <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} />
         <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
       </div>
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5 mt-3.5">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-5 mt-4">
         <Kpi icon="installs" label="Installs" value={num(t.installs)} sub="phones" minor />
         <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} minor />
         {/* Paying only — a free trial is not a subscriber. Said out loud because
@@ -70,7 +70,7 @@ export default async function Overview() {
         <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" minor />
       </div>
 
-      <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1.4fr_1fr]">
+      <div className="grid gap-4 mt-4 lg:grid-cols-[1.4fr_1fr]">
         <Card title="Active · daily">
           {dailyView.length ? (
             <TrendArea data={dailyView} x="d" y="dau" />
@@ -91,7 +91,7 @@ export default async function Overview() {
         </Card>
       </div>
 
-      <div className="grid gap-3.5 mt-3.5 lg:grid-cols-2">
+      <div className="grid gap-4 mt-4 lg:grid-cols-2">
         <Card title="Collections · ₹/day">
           {collView.some((c) => c.amount) ? (
             <Bars data={collView} x="d" y="amount" color="#21A06A" />
@@ -112,7 +112,7 @@ export default async function Overview() {
         </Card>
       </div>
 
-      <div className="grid gap-3.5 mt-3.5 lg:grid-cols-2">
+      <div className="grid gap-4 mt-4 lg:grid-cols-2">
         <Card title="Activity">
           {types.length ? (
             <Bars data={types.slice(0, 8)} x="event" y="n" horizontal />
@@ -135,8 +135,8 @@ export default async function Overview() {
 
       <Card
         title="Latest activity"
-        className="mt-3.5"
-        right={<Link className="lnk text-[13px]" href="/activity">All events →</Link>}
+        className="mt-4"
+        right={<Link className="lnk text-body" href="/activity">All events →</Link>}
       >
         <Table>
           <thead>

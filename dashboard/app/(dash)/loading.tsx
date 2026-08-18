@@ -12,7 +12,7 @@ export default function Loading() {
         </div>
       </div>
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} className="card p-[18px]">
             <div className="h-2.5 w-14 rounded bg-line" />
@@ -21,12 +21,12 @@ export default function Loading() {
         ))}
       </div>
 
-      <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1.4fr_1fr]">
+      <div className="grid gap-4 mt-4 lg:grid-cols-[1.4fr_1fr]">
         <div className="card p-[18px] h-[264px]" />
         <div className="card p-[18px] h-[264px]" />
       </div>
 
-      <div className="card p-[18px] mt-3.5 h-[220px]" />
+      <div className="card p-[18px] mt-4 h-[220px]" />
     </div>
   );
 }

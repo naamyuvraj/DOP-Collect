@@ -89,7 +89,7 @@ export default function Releases() {
             {Array.from({ length: 5 }).map((_, i) => <Skel key={i} className="h-8 w-full" />)}
           </div>
         </Card>
-        <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1fr_1fr]">
+        <div className="grid gap-4 mt-4 lg:grid-cols-[1fr_1fr]">
           <Card title="Release log"><Skel className="h-40 w-full" /></Card>
           <Card title="Recent commits"><Skel className="h-40 w-full" /></Card>
         </div>
@@ -149,7 +149,7 @@ export default function Releases() {
           <tbody>
             {shownAdoption.map((a, i) => (
               <tr key={a.app_version}>
-                <Td className="font-mono text-xs font-bold">
+                <Td className="font-mono text-xs font-semibold">
                   {a.app_version} {i === 0 && <Pill tone="g">latest seen</Pill>}
                 </Td>
                 <Td num className="font-semibold">{num(a.devices)}</Td>
@@ -177,7 +177,7 @@ export default function Releases() {
         )}
       </Card>
 
-      <div className="grid gap-3.5 mt-3.5 lg:grid-cols-[1fr_1fr]">
+      <div className="grid gap-4 mt-4 lg:grid-cols-[1fr_1fr]">
         {/* Release log + add form */}
         <Card title="Release log">
           <div id="rel-form" className="rounded-xl border border-line p-3 mb-3">
@@ -203,13 +203,13 @@ export default function Releases() {
               <div key={r.id} className="rounded-xl border border-line p-2.5 flex items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold">{r.version}</span>
+                    <span className="font-mono text-xs font-semibold">{r.version}</span>
                     <Pill tone={r.kind === "release" ? "b" : "g"}>{r.kind}</Pill>
                     {r.shorebird_patch != null && <span className="text-muted text-xs">patch #{r.shorebird_patch}</span>}
                     {r.git_sha && <span className="text-faint text-xs font-mono">{r.git_sha}</span>}
                   </div>
                   {r.notes && <div className="text-muted text-xs mt-1">{r.notes}</div>}
-                  <div className="text-faint text-[11px] mt-1">{when(r.created_at)}</div>
+                  <div className="text-faint text-micro mt-1">{when(r.created_at)}</div>
                 </div>
                 <button className="btn btn-ghost py-1 px-2 text-xs" onClick={() => delRelease(r.id)}>🗑</button>
               </div>
@@ -239,8 +239,8 @@ export default function Releases() {
                 {git.commits.map((c) => (
                   <div key={c.sha} className="rounded-lg hover:bg-canvas/60 p-2 flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="text-[13px] truncate">{c.message}</div>
-                      <div className="text-faint text-[11px]">
+                      <div className="text-body truncate">{c.message}</div>
+                      <div className="text-faint text-micro">
                         <span className="font-mono">{c.short}</span> · {c.author} · {c.date ? when(c.date) : ""}
                       </div>
                     </div>
@@ -259,7 +259,7 @@ export default function Releases() {
       </div>
 
       {/* Update control */}
-      <Card title="Force-update gate" className="mt-3.5">
+      <Card title="Force-update gate" className="mt-4">
         <p className="text-muted text-xs mb-3">
           The real control lever over patches: installs on a version <b>below</b> the minimum get a blocking
           “please update” screen on next launch. The app reads this live — no rebuild needed. (Building/pushing a

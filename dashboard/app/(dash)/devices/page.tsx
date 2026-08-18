@@ -159,10 +159,10 @@ export default function Users() {
       />
 
       {!d ? (
-        <KpiSkeletons n={6} grid="grid-cols-2 md:grid-cols-4 lg:grid-cols-7" focal />
+        <KpiSkeletons n={6} grid="grid-cols-2 md:grid-cols-4 lg:grid-cols-7" focal wide />
       ) : (
-        <div className="grid gap-3.5 grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
-          <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month, across every agent below" focal />
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
+          <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month, across every agent below" focal wide />
           <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} />
           <Kpi icon="verified" label="Verified" value={num(t.verified)} />
           <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
@@ -171,40 +171,48 @@ export default function Users() {
         </div>
       )}
 
-      <Card className="mt-3.5">
+      <Card className="mt-4">
+        {/* Two rows on purpose. Six controls on one line wrapped mid-group and
+            stranded the view switch on a line of its own: search + view above,
+            the three filters below, so a wrap never splits a segmented group. */}
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <input className="input max-w-xs" placeholder="Search name, mobile, agent, ID, region…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <Segmented value={status} onChange={(v) => setStatus(v as any)} options={[["all", "All"], ["active", "Active"], ["inactive", "Inactive"]]} />
-          <Segmented value={plan} onChange={(v) => setPlan(v as any)} options={[["all", "Any plan"], ["subscribed", "Subscribed"], ["none", "No plan"]]} />
-          <Segmented value={verified} onChange={(v) => setVerified(v as any)} options={[["all", "Any"], ["verified", "Verified"], ["unverified", "Unverified"]]} />
           <div className="ml-auto flex items-center gap-2">
             <Segmented value={mode} onChange={(v) => setMode(v as any)} options={[["agents", "Agents"], ["regions", "By region"]]} />
             <button className="btn btn-ghost" onClick={exportCsv} disabled={!view.length}>Export CSV</button>
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-line">
+          <Segmented value={status} onChange={(v) => setStatus(v as any)} options={[["all", "All"], ["active", "Active"], ["inactive", "Inactive"]]} />
+          <Segmented value={plan} onChange={(v) => setPlan(v as any)} options={[["all", "Any plan"], ["subscribed", "Subscribed"], ["none", "No plan"]]} />
+          <Segmented value={verified} onChange={(v) => setVerified(v as any)} options={[["all", "Any"], ["verified", "Verified"], ["unverified", "Unverified"]]} />
+          {filtered && (
+            <button className="lnk text-meta ml-1" onClick={clearFilters}>Clear</button>
+          )}
+        </div>
 
         <div className="overflow-x-auto">
           {mode === "regions" ? (
-            <table className="w-full text-[13px]">
+            <table className="w-full text-body">
               <thead>
                 <tr>
-                  <th className="lbl py-2 px-2 text-left">Region (SOL)</th>
-                  <th className="lbl py-2 px-2 text-left">District</th>
-                  <th className="lbl py-2 px-2 text-right">Agents</th>
-                  <th className="lbl py-2 px-2 text-right">Active</th>
-                  <th className="lbl py-2 px-2 text-right">Accounts</th>
-                  <th className="lbl py-2 px-2 text-right">Collected</th>
-                  <th className="lbl py-2 px-2 text-right">Avg / agent</th>
+                  <th className="thd pb-2.5 px-3 first:pl-0 last:pr-0 text-left">Region (SOL)</th>
+                  <th className="thd pb-2.5 px-3 first:pl-0 last:pr-0 text-left">District</th>
+                  <th className="thd pb-2.5 px-3 last:pr-0 text-right">Agents</th>
+                  <th className="thd pb-2.5 px-3 last:pr-0 text-right">Active</th>
+                  <th className="thd pb-2.5 px-3 last:pr-0 text-right">Accounts</th>
+                  <th className="thd pb-2.5 px-3 last:pr-0 text-right">Collected</th>
+                  <th className="thd pb-2.5 px-3 last:pr-0 text-right">Avg / agent</th>
                 </tr>
               </thead>
               <tbody>
                 {regions.map((g) => (
                   <tr key={g.region} className="border-t border-line hover:bg-canvas/50">
-                    <Cell className="font-mono text-xs font-bold">{g.region}</Cell>
+                    <Cell className="font-mono text-xs font-semibold">{g.region}</Cell>
                     <Cell>
                       {g.region === "—" ? <span className="text-faint">—</span> : (
                         <input
-                          className="input py-1 w-36 text-[13px]"
+                          className="input py-1 w-36 text-body"
                           placeholder="name this district"
                           defaultValue={labels[g.region] || ""}
                           onBlur={(e) => { if ((e.target.value.trim() || "") !== (labels[g.region] || "")) saveLabel(g.region, e.target.value); }}
@@ -221,22 +229,22 @@ export default function Users() {
               </tbody>
             </table>
           ) : (
-            <table className="w-full text-[13px]">
+            <table className="w-full text-body">
               <thead>
                 <tr>
                   {COLS.map((c) => (
                     <th key={c.key} onClick={() => toggleSort(c.key)}
-                      className={`lbl py-2 px-2 whitespace-nowrap cursor-pointer select-none hover:text-ink ${c.num ? "text-right" : "text-left"}`}>
+                      className={`thd pb-2.5 px-3 first:pl-0 whitespace-nowrap cursor-pointer select-none transition-colors hover:text-ink ${c.num ? "text-right" : "text-left"}`}>
                       {c.label}<span className="ml-1 text-faint">{sort.key === c.key ? (sort.dir === 1 ? "▲" : "▼") : ""}</span>
                     </th>
                   ))}
-                  <th className="lbl py-2 px-2 text-left">Status</th>
+                  <th className="thd pb-2.5 px-3 first:pl-0 last:pr-0 text-left">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {!d
                   ? Array.from({ length: 6 }).map((_, i) => (
-                      <tr key={i}><td colSpan={9} className="py-2 px-2"><Skel className="h-6 w-full" /></td></tr>
+                      <tr key={i}><td colSpan={11} className="py-3"><Skel className="h-6 w-full" /></td></tr>
                     ))
                   : view.map((r) => (
                       <tr key={r.device_id} onClick={() => setOpen(r)} className="border-t border-line hover:bg-focal/20 cursor-pointer">
@@ -435,7 +443,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
       <aside className="relative w-full max-w-[440px] bg-canvas h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-sidebar text-white px-5 py-4 flex items-start justify-between">
           <div>
-            <div className="font-extrabold text-lg leading-tight">{form.name || "Agent"}</div>
+            <div className="font-semibold text-lg leading-tight">{form.name || "Agent"}</div>
             <div className="text-white/60 text-xs mt-0.5">
               {form.mobile ? `+91 ${form.mobile} · ` : ""}{form.sol_id ? `SOL ${form.sol_id}${district ? ` · ${district}` : ""}` : "region unknown"}
             </div>
@@ -443,7 +451,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
           <button onClick={onClose} className="text-white/70 hover:text-white text-xl leading-none">✕</button>
         </div>
 
-        <div className="p-5 flex flex-col gap-3.5">
+        <div className="p-5 flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-3">
             <MiniStat label="Accounts maintained" value={row.accounts != null ? num(row.accounts) : "—"} />
             <MiniStat label="Monthly book ₹" value={row.value != null ? inr(row.value) : "—"} focal />
@@ -466,7 +474,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
               <Field label="Region (SOL)" value={form.sol_id} mono
                 onChange={(v) => setForm({ ...form, sol_id: v })} />
             </div>
-            <div className="flex items-center gap-2.5 mt-3.5">
+            <div className="flex items-center gap-2.5 mt-4">
               <button className="btn" disabled={!dirty || saving || mobileBad} onClick={save}>
                 {saving ? "Saving…" : "Save changes"}
               </button>
@@ -475,16 +483,16 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
                   Reset
                 </button>
               )}
-              {msg && <span className="text-[12px] text-muted">{msg}</span>}
+              {msg && <span className="text-meta text-muted">{msg}</span>}
             </div>
-            <p className="text-[11.5px] text-faint mt-2.5">
+            <p className="text-micro text-faint mt-2.5">
               Applies to {row.devices === 1 ? "this phone" : `all ${row.devices} of this agent's phones`}.
               The app overwrites these on its next check-in, so an edit here is a
               correction, not a permanent override.
             </p>
           </div>
 
-          <div className="card p-4 text-[13px]">
+          <div className="card p-4 text-body">
             <Row k="Phone verified" v={row.phone_verified ? "yes" : "no"} />
             <Row k="Signed in on" v={`${row.signed_in} of ${row.devices} phone${row.devices === 1 ? "" : "s"}`} />
             <Row k="First seen" v={row.first_seen ? when(row.first_seen) : "—"} />
@@ -500,12 +508,12 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
               <div className="lbl mb-2.5">Phones</div>
               <div className="flex flex-col gap-2.5">
                 {row.phones.map((p) => (
-                  <div key={p.id} className="flex items-baseline gap-2 text-[12.5px]">
+                  <div key={p.id} className="flex items-baseline gap-2 text-meta">
                     <Pill tone={p.signed_in ? "g" : undefined}>
                       {p.signed_in ? "signed in" : "signed out"}
                     </Pill>
                     <span className="font-semibold">{p.model || "Unknown phone"}</span>
-                    <span className="text-muted font-mono text-[11.5px]">
+                    <span className="text-muted font-mono text-micro">
                       {p.app_version || "—"}
                     </span>
                     <span className="ml-auto text-faint">
@@ -514,7 +522,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
                   </div>
                 ))}
               </div>
-              <p className="text-[11.5px] text-faint mt-2.5">
+              <p className="text-micro text-faint mt-2.5">
                 Only the signed-in ones count against his limit. A signed-out row
                 is an old install, a replaced or reset phone, or a build signed
                 with a different key — it costs him nothing.
@@ -529,7 +537,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
             ) : det.events.length ? (
               <div className="flex flex-col gap-1.5 max-h-[46vh] overflow-y-auto">
                 {det.events.map((e, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2 text-[12.5px]">
+                  <div key={i} className="flex items-center justify-between gap-2 text-meta">
                     <Pill>{e.event}</Pill>
                     <span className="text-faint truncate flex-1">
                       {Object.entries(e.props || {}).map(([k, v]) => `${k}:${v}`).join(" · ")}
@@ -551,14 +559,14 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
           <div className="card p-4">
             <div className="lbl mb-2">Access</div>
             {!row.agent_id ? (
-              <p className="text-[12.5px] text-muted">
+              <p className="text-meta text-muted">
                 No Agent ID yet — access is keyed to it, so there is nothing to
                 grant until they finish signing in.
               </p>
             ) : (
               <>
                 <div className="flex items-baseline gap-2 mb-1">
-                  <span className="text-[15px] font-extrabold">
+                  <span className="text-lead font-semibold">
                     {row.sub_status === "active" ? "Active"
                       : row.sub_status === "trial" ? "On trial"
                       : row.sub_status === "expired" ? "Ended"
@@ -566,7 +574,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
                   </span>
                   {row.plan && <Pill>{row.plan}</Pill>}
                 </div>
-                <p className="text-[12px] text-faint mb-3">
+                <p className="text-meta text-faint mb-3">
                   Adding days stacks on whatever is left, exactly like a real
                   purchase — time already given is never burned.
                 </p>
@@ -590,7 +598,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
                   </button>
                 </div>
                 {grantMsg && (
-                  <p className="text-[12px] text-muted mt-2.5">{grantMsg}</p>
+                  <p className="text-meta text-muted mt-2.5">{grantMsg}</p>
                 )}
               </>
             )}
@@ -601,25 +609,25 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
               anything else. */}
           <div className="card p-4">
             {!danger ? (
-              <button className="text-[12.5px] font-bold text-red hover:underline"
+              <button className="text-meta font-semibold text-red hover:underline"
                 onClick={() => setDanger(true)}>
                 Remove this agent…
               </button>
             ) : (
               <div className="flex flex-col gap-2.5">
                 <div className="lbl">Remove agent</div>
-                <p className="text-[12.5px] text-muted leading-relaxed">
+                <p className="text-meta text-muted leading-relaxed">
                   Deletes {row.devices === 1 ? "this install" : `all ${row.devices} installs`},
                   their activity history, and their sign-in sessions — the agent
                   is signed out everywhere and their phone number and Agent ID
                   are freed for reuse.
                 </p>
-                <p className="text-[12.5px] text-muted leading-relaxed">
+                <p className="text-meta text-muted leading-relaxed">
                   <b>Payments and subscriptions are kept.</b> Those are accounting
                   records; if this agent signs up again their entitlement is
                   still theirs.
                 </p>
-                <p className="text-[12.5px] text-muted">
+                <p className="text-meta text-muted">
                   Their own customer data was never on our servers, so it is
                   untouched — it lives only on their phone.
                 </p>
@@ -667,7 +675,7 @@ function Field({ label, value, onChange, placeholder, mono, prefix, inputMode, e
     <label className="block">
       <span className="lbl">{label}</span>
       <span className="flex items-center gap-2 mt-1">
-        {prefix && <span className="text-[13px] text-muted font-bold">{prefix}</span>}
+        {prefix && <span className="text-body text-muted font-semibold">{prefix}</span>}
         <input
           className={`input ${mono ? "font-mono" : ""} ${error ? "!border-red" : ""}`}
           value={value}
@@ -676,7 +684,7 @@ function Field({ label, value, onChange, placeholder, mono, prefix, inputMode, e
           onChange={(e) => onChange(e.target.value)}
         />
       </span>
-      {error && <span className="text-[11.5px] text-red mt-1 block">{error}</span>}
+      {error && <span className="text-micro text-red mt-1 block">{error}</span>}
     </label>
   );
 }
@@ -685,7 +693,7 @@ function MiniStat({ label, value, focal }: { label: string; value: React.ReactNo
   return (
     <div className={`card p-3.5 ${focal ? "!bg-focal" : ""}`}>
       <div className="lbl">{label}</div>
-      <div className="text-[22px] font-extrabold leading-none mt-1.5">{value}</div>
+      <div className="text-[22px] font-semibold leading-none mt-1.5">{value}</div>
     </div>
   );
 }
@@ -701,14 +709,14 @@ function Row({ k, v, mono, last }: { k: string; v: React.ReactNode; mono?: boole
 function Cell({ children, right, className = "" }: { children: React.ReactNode; right?: boolean; className?: string }) {
   // `right` also means "this is a number" — tabular figures so digits line up
   // by place value down the column, matching <Td num> everywhere else.
-  return <td className={`py-2.5 px-2 ${right ? "text-right tabular-nums" : ""} ${className}`}>{children}</td>;
+  return <td className={`py-3 px-3 first:pl-0 last:pr-0 ${right ? "text-right tabular-nums" : ""} ${className}`}>{children}</td>;
 }
 function Segmented({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
   return (
-    <div className="inline-flex rounded-xl border border-line overflow-hidden">
+    <div className="inline-flex rounded-lg border border-line overflow-hidden">
       {options.map(([v, label]) => (
         <button key={v} onClick={() => onChange(v)}
-          className={`text-xs font-semibold px-3 py-2 transition ${value === v ? "bg-ink text-white" : "bg-white text-muted hover:bg-canvas"}`}>
+          className={`text-meta px-3 py-2 transition ${value === v ? "bg-ink text-white font-medium" : "bg-white text-muted font-normal hover:bg-canvas hover:text-ink"}`}>
           {label}
         </button>
       ))}

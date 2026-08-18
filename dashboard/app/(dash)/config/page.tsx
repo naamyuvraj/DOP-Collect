@@ -53,7 +53,7 @@ export default function Config() {
         subtitle="Remote controls read by every install (no app update needed)"
       />
 
-      <div className="grid gap-3.5 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Feature flags">
           {[
             ["assistant_cloud", "AI cloud tier", "Master switch for the Groq assistant. Off = every install stays offline-only."],
@@ -107,7 +107,7 @@ export default function Config() {
         </Card>
       </div>
 
-      <Card title="Announcement banner" className="mt-3.5">
+      <Card title="Announcement banner" className="mt-4">
         <p className="text-muted text-xs mb-3">
           Shown at the top of the app’s home screen.
         </p>

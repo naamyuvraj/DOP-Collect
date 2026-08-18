@@ -26,31 +26,33 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-[236px] shrink-0 bg-sidebar text-white h-screen flex flex-col">
-      <div className="flex items-center gap-3 px-5 py-5 shrink-0">
+    <aside className="w-[232px] shrink-0 bg-sidebar text-white h-screen flex flex-col">
+      <div className="flex items-center gap-3 px-4 py-5 shrink-0">
         {/* The real app icon. This was a "₹" glyph in a tinted box — a
             placeholder that made the admin panel look unrelated to the app it
             administers. Sized 36px at 2x from a 128px source so it stays crisp
             on a retina display without shipping the 917KB original. */}
         <img src="/logo.png" alt="" width={36} height={36}
-             className="w-9 h-9 rounded-xl object-cover shrink-0" />
+             className="w-8 h-8 rounded-lg object-cover shrink-0" />
         <div className="leading-tight">
-          <div className="font-extrabold">DOP Collect</div>
-          <div className="text-white/50 text-[11px]">Admin</div>
+          <div className="text-base font-semibold tracking-[-0.01em]">DOP Collect</div>
+          <div className="text-white/45 text-micro mt-0.5">Admin</div>
         </div>
       </div>
-      <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-2 flex flex-col gap-1">
+      <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-1 flex flex-col gap-0.5">
         {NAV.map((n) => {
           const active = n.href === "/" ? path === "/" : path.startsWith(n.href);
           return (
             <Link
               key={n.href}
               href={n.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
-                active ? "bg-white text-ink" : "text-white/70 hover:bg-white/10"
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-body transition ${
+                active
+                  ? "bg-white text-ink font-semibold"
+                  : "text-white/65 font-medium hover:bg-white/[.07] hover:text-white"
               }`}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                 stroke="currentColor" strokeWidth="2" strokeLinecap="round"
                 strokeLinejoin="round">
                 <path d={n.icon} />
@@ -62,7 +64,7 @@ export default function Sidebar() {
       </nav>
       <button
         onClick={logout}
-        className="m-3 shrink-0 px-3 py-2.5 rounded-xl text-sm font-semibold text-white/70 hover:bg-white/10 text-left"
+        className="m-3 shrink-0 px-3 py-2 rounded-lg text-body font-medium text-white/50 hover:bg-white/[.07] hover:text-white transition text-left"
       >
         Sign out
       </button>

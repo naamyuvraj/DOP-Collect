@@ -7,8 +7,17 @@
 body {
   background: #E7F0E9;
   color: #14201A;
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* cv11 = single-storey l/1, so agent ids and versions can't be misread.
+     ss01 tidies the disambiguated punctuation Inter ships by default. */
+  font-feature-settings: "cv11", "ss01";
 }
+
+/* Every figure on this panel is meant to be compared down a column, so lining
+   figures are the default and `tabular-nums` stays for the ones in tables. */
+table, .tnum { font-variant-numeric: tabular-nums; }
 
 /* thin scrollbars */
 * { scrollbar-width: thin; scrollbar-color: #C7D6CC transparent; }
@@ -16,22 +25,33 @@ body {
 *::-webkit-scrollbar-thumb { background: #C7D6CC; border-radius: 8px; }
 
 @layer components {
-  .card { @apply bg-card rounded-xl2 shadow-card; }
-  .lbl  { @apply text-[11px] uppercase tracking-wider font-bold text-faint; }
-  .pill { @apply inline-block px-2.5 py-0.5 rounded-lg text-[11px] font-bold; }
-  .btn  { @apply rounded-xl font-bold text-[13px] px-4 py-2.5 bg-ink text-white
-           disabled:opacity-50 transition; }
-  .btn-ghost { @apply bg-white text-ink border border-line; }
-  .input { @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5
-            text-sm outline-none focus:border-green; }
+  /* A hairline plus a close shadow. At a 14px radius the edge has to be drawn,
+     or a white card on the mint canvas loses its corners. */
+  .card { @apply bg-card rounded-xl2 border border-line/80 shadow-elev; }
+
+  /* Two label roles, previously one doing both jobs badly.
+     .lbl — the uppercase micro-label over a KPI figure.
+     .thd — a table column header. Sentence case, because eleven shouting
+            uppercase headers across a wide table is noise, not structure. */
+  .lbl { @apply text-micro uppercase font-semibold tracking-[0.07em] text-faint; }
+  .thd { @apply text-meta font-medium text-muted; }
+
+  .pill { @apply inline-flex items-center px-2 py-0.5 rounded-md text-micro
+           font-semibold; }
+  .btn  { @apply rounded-lg font-medium text-body px-3.5 py-2 bg-ink text-white
+           disabled:opacity-50 transition hover:bg-ink/90; }
+  .btn-ghost { @apply bg-white text-ink border border-line hover:bg-canvas; }
+  .input { @apply w-full rounded-lg border border-line bg-white px-3 py-2
+            text-body outline-none transition
+            focus:border-green focus:ring-2 focus:ring-green/15; }
 
   /* Every table rendered through <Table>. One row height, one hover, so a row
      can be tracked across a wide table with the eye instead of a finger. */
-  .tbl { @apply w-full text-[13px]; }
+  .tbl { @apply w-full text-body; }
   .tbl tbody tr { @apply transition-colors; }
-  .tbl tbody tr:hover { @apply bg-canvas/60; }
+  .tbl tbody tr:hover { @apply bg-canvas/50; }
 
   /* The next step in an empty state — a real target, not a sentence about it. */
-  .lnk { @apply font-semibold text-green underline underline-offset-2
+  .lnk { @apply font-medium text-green underline underline-offset-2
           decoration-green/40 hover:decoration-green transition-colors; }
 }

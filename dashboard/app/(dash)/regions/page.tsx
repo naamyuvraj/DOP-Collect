@@ -37,8 +37,8 @@ export default function Regions() {
     return (
       <>
         <PageHead title="Regions" subtitle="Where the app is used — installs & agents by post-office branch (SOL ID)" />
-        <KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-5" focal />
-        <Card title="Branches / regions" className="mt-3.5"><Skel className="h-40 w-full" /></Card>
+        <KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-4" focal />
+        <Card title="Branches / regions" className="mt-4"><Skel className="h-40 w-full" /></Card>
       </>
     );
   }
@@ -56,7 +56,7 @@ export default function Regions() {
       {!d.device_region_ready && (
         <Card className="!bg-focal/40 mb-3.5">
           <div className="text-sm font-semibold">Install-level regions need the app update</div>
-          <div className="text-muted text-[13px] mt-0.5">
+          <div className="text-muted text-body mt-0.5">
             Regions below are derived from <b>subscribers</b> (their agent id carries the SOL ID). To map{" "}
             <b>every install</b> to a branch, the app must send its SOL ID with telemetry — run{" "}
             <code>admin/schema_regions.sql</code> and ship the app update that attaches it.
@@ -64,14 +64,14 @@ export default function Regions() {
         </Card>
       )}
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
         <Kpi label="Regions (SOL IDs)" value={num(t.regions)} sub="post-office branches using the app" focal />
         <Kpi label="Installs mapped" value={num(t.installs_with_region)} sub={`${num(t.anonymous_installs)} anonymous`} />
         <Kpi label="Subscribers" value={num(t.subscribers)} />
         <Kpi label="Invalid IDs" value={num(t.invalid_ids)} />
       </div>
 
-      <Card title="Branches / regions" className="mt-3.5">
+      <Card title="Branches / regions" className="mt-4">
         <Table>
           <thead>
             <tr>
@@ -87,14 +87,14 @@ export default function Regions() {
           <tbody>
             {d.regions.map((r) => (
               <tr key={r.sol_id}>
-                <Td className="font-mono text-xs font-bold">{r.sol_id}</Td>
+                <Td className="font-mono text-xs font-semibold">{r.sol_id}</Td>
                 <Td num className="font-semibold">{num(r.installs)}</Td>
                 <Td num className="text-muted">{num(r.active_installs)}</Td>
                 <Td num>{r.subscribers ? <Pill tone="g">{num(r.subscribers)}</Pill> : <span className="text-faint">0</span>}</Td>
                 <Td num className="text-muted">{num(r.agents)}</Td>
                 <Td>
                   <div className="h-2 rounded-full bg-line w-28 overflow-hidden">
-                    <div className="h-full bg-blue rounded-full" style={{ width: `${((r.installs + r.subscribers) / maxUse) * 100}%` }} />
+                    <div className="h-full bg-green rounded-full" style={{ width: `${((r.installs + r.subscribers) / maxUse) * 100}%` }} />
                   </div>
                 </Td>
                 <Td className="text-muted text-xs whitespace-nowrap">{r.last_seen ? when(r.last_seen) : "—"}</Td>

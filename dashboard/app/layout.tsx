@@ -1,11 +1,23 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const jakarta = Plus_Jakarta_Sans({
+/**
+ * Inter over Plus Jakarta Sans: this is a dense numeric panel, and it wants a
+ * neutral face that disappears, not a geometric one with personality. `cv11`
+ * gives the single-storey `l`/`1` that keeps agent ids and versions readable.
+ */
+const inter = Inter({
   subsets: ["latin"],
-  weight: ["400", "600", "700", "800"],
-  variable: "--font-jakarta",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-inter",
+});
+
+/** Agent ids, phone hashes, versions, provider references. */
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-mono",
 });
 
 export const metadata: Metadata = {
@@ -19,7 +31,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={jakarta.variable}>
+    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
       <body className="font-sans">{children}</body>
     </html>
   );

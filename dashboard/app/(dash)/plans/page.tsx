@@ -188,8 +188,8 @@ export default function Plans() {
       <>
         <PageHead title="Plans & Subscriptions" subtitle="Edit pricing and roll plans out to every install — no app update needed" />
         <Card><Skel className="h-16 w-full" /></Card>
-        <div className="mt-3.5"><KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-5" focal /></div>
-        <Card title="Plans" className="mt-3.5"><Skel className="h-40 w-full" /></Card>
+        <div className="mt-4"><KpiSkeletons n={4} grid="grid-cols-2 md:grid-cols-4" focal /></div>
+        <Card title="Plans" className="mt-4"><Skel className="h-40 w-full" /></Card>
       </>
     );
   }
@@ -226,10 +226,10 @@ export default function Plans() {
       <Card className={on ? "!bg-greenSoft" : ""}>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="font-extrabold text-[15px]">
+            <div className="font-semibold text-lead">
               Paywall {on ? "is LIVE" : "is OFF"}
             </div>
-            <div className="text-muted text-[13px] mt-0.5 max-w-xl">
+            <div className="text-muted text-body mt-0.5 max-w-xl">
               {on
                 ? "Agents whose subscription has expired are gated to the paywall. Turning this off instantly gives every install full access."
                 : "Master switch is off — every install has full access regardless of plan. Turn on only once Razorpay + the native checkout ship in a release build."}
@@ -239,7 +239,7 @@ export default function Plans() {
         </div>
       </Card>
 
-      <div className="grid gap-3.5 grid-cols-2 md:grid-cols-5 mt-3.5">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-4 mt-4">
         <Kpi label="Paying" value={num(paidSubs.length)} sub="excl. trials" focal />
         <Kpi label="With access" value={num(withAccess.length)} sub="incl. trials" />
         <Kpi label="Plans offered" value={num(rows.filter((r) => r.active).length)} sub={`${num(rows.length)} total`} />
@@ -247,7 +247,7 @@ export default function Plans() {
       </div>
 
       {/* Plan editor */}
-      <Card title="Plans" className="mt-3.5" right={
+      <Card title="Plans" className="mt-4" right={
         <button className="btn btn-ghost" onClick={() => setAdding({ ...empty })}>+ Add plan</button>
       }>
         <Table>
@@ -323,7 +323,7 @@ export default function Plans() {
           writing a row, so most agents on a trial do not appear here at all.
           That is the table being honest about what exists, not a bug — but it
           means this is not a roster of who is using the app. The Users tab is. */}
-      <Card title="Subscribers" className="mt-3.5"
+      <Card title="Subscribers" className="mt-4"
             right={
               <div className="flex items-center gap-2">
                 {(["all", "paying", "trial", "expired"] as const).map((f) => (
@@ -347,7 +347,7 @@ export default function Plans() {
               <tr key={s.agent_id}>
                 <Td>
                   <div className="font-semibold">{s.agent_name || "—"}</div>
-                  <div className="font-mono text-[11px] text-muted">{s.agent_id}</div>
+                  <div className="font-mono text-micro text-muted">{s.agent_id}</div>
                 </Td>
                 <Td>{s.plan_name || s.plan_code}</Td>
                 <Td>

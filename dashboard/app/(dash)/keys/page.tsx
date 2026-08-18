@@ -68,7 +68,7 @@ export default function Keys() {
         subtitle="Groq key health from live usage, plus a managed key store"
       />
 
-      <div className="grid gap-3.5 lg:grid-cols-[1.3fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
         <Card title="Calls per key">
           {usageView.length ? (
             <Bars data={usageView} x="name" y="calls" horizontal height={200} />
@@ -109,7 +109,7 @@ export default function Keys() {
         </Card>
       </div>
 
-      <Card title="Managed keys" className="mt-3.5">
+      <Card title="Managed keys" className="mt-4">
         <p className="text-muted text-xs mb-3">
           Stored server-side (service role only). These feed a future LLM proxy so
           you can rotate keys without shipping an app update.
@@ -167,7 +167,7 @@ export default function Keys() {
                   <Td>
                     <button
                       onClick={() => remove(k.id)}
-                      className="text-red font-bold text-xs"
+                      className="text-red font-semibold text-xs"
                     >
                       Delete
                     </button>
