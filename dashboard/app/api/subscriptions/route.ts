@@ -67,7 +67,14 @@ export async function PATCH(req: NextRequest) {
   const base = Math.max(Date.now(), current);
   const end = endNow ? new Date() : new Date(base + addDays * 86400_000);
 
-  const planCode = b.planCode ? String(b.planCode) : sub?.plan_code ?? null;
+  // A grant for an agent with no row left plan_code NULL, and every "is this a
+  // trial?" check tested `plan_code !== 'trial'` — so a ₹0 goodwill grant read
+  // as a paying customer on Overview. Counting is decided on plan price now
+  // (lib/subs.ts), which classifies NULL correctly, but leaving it null also
+  // means the row cannot say what it is. Fall back to the free tier: a manual
+  // grant is access nobody paid for, which is exactly what `trial` means here.
+  // Pass planCode explicitly when repairing a real stranded purchase.
+  const planCode = b.planCode ? String(b.planCode) : sub?.plan_code ?? "trial";
   const { error } = await sb.from("subscriptions").upsert({
     agent_id: agentId,
     plan_code: planCode,

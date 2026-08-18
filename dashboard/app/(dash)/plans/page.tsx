@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Table, Td, Th } from "@/components/ui";
 import { inr, num } from "@/lib/format";
+import { hasAccess, isFreeAccess, isPaying, paidPlanCodes, planLabel } from "@/lib/subs";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Plan = {
@@ -195,20 +196,24 @@ export default function Plans() {
   }
 
   const on = data.config.payments_enabled !== false;
+  // This tab happened to be right while the others were wrong, but only because
+  // /api/plans coerces a null plan_code to "trial" on the way out. Use the same
+  // price rule as everywhere else so it is right on purpose — see lib/subs.ts.
+  const paidCodes = paidPlanCodes(rows);
   const shown = data.subscribers.filter((s) =>
     subFilter === "all"
       ? true
       : subFilter === "paying"
-        ? s.plan_code !== "trial" && s.status !== "expired"
+        ? isPaying(s, paidCodes)
         : subFilter === "trial"
-          ? s.plan_code === "trial" && s.status !== "expired"
-          : s.status === "expired");
-  // Anyone whose access has not lapsed — PAID AND TRIAL together. The name
-  // matters because `status` has a literal 'active' value distinct from 'trial',
-  // so a tile called "Active subscribers" that includes trialists reads as a
+          ? isFreeAccess(s, paidCodes)
+          : !hasAccess(s));
+  // Anyone whose access has not lapsed — PAID AND FREE together. The name
+  // matters because `status` reads 'active' on a free trial too, so a tile
+  // called "Active subscribers" that includes trialists reads as a
   // contradiction of the data. Labelled "With access" below instead.
-  const withAccess = data.subscribers.filter((s) => s.status !== "expired");
-  const paidSubs = withAccess.filter((s) => s.plan_code !== "trial");
+  const withAccess = data.subscribers.filter(hasAccess);
+  const paidSubs = withAccess.filter((s) => isPaying(s, paidCodes));
   // v_mrr is every successful Razorpay payment grouped by day, with no date
   // window — so summing it is revenue ALL TIME, not a monthly recurring figure,
   // whatever the view is called.
@@ -349,7 +354,7 @@ export default function Plans() {
                   <div className="font-semibold">{s.agent_name || "—"}</div>
                   <div className="font-mono text-micro text-muted">{s.agent_id}</div>
                 </Td>
-                <Td>{s.plan_name || s.plan_code}</Td>
+                <Td>{planLabel(s, rows)}</Td>
                 <Td>
                   <Pill tone={s.status === "active" ? "g" : s.status === "trial" ? "b" : "r"}>{s.status}</Pill>
                 </Td>

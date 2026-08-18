@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import { isAuthed } from "@/lib/auth";
 import { admin, dbConfigured } from "@/lib/supabase";
 import { parseAgentId } from "@/lib/agentId";
+import { isPaying, paidPlanCodes, type PlanLike } from "@/lib/subs";
 
 export const dynamic = "force-dynamic";
 
@@ -27,12 +28,17 @@ const readRegions = unstable_cache(
   async () => {
     const sb = admin();
     // select("*") on devices so missing agent_id/sol_id columns don't error.
-    const [devRes, subRes] = await Promise.all([
+    const [devRes, subRes, planRes] = await Promise.all([
       sb.from("devices").select("*"),
-      sb.from("subscriptions").select("agent_id,status,current_period_end"),
+      sb.from("subscriptions").select("agent_id,plan_code,status,current_period_end"),
+      sb.from("plans").select("code,price_inr"),
     ]);
     const devices = (devRes.data as any[]) || [];
     const subs = (subRes.data as any[]) || [];
+    // This counted every subscriptions row, so a free trial and a ₹0 manual
+    // grant both read as "subscribers" here while Overview called them 0.
+    // Price decides it now, same as every other tab — see lib/subs.ts.
+    const paidCodes = paidPlanCodes((planRes.data as PlanLike[]) || []);
 
     const map = new Map<string, Region & { _agents: Set<string> }>();
     const bump = (sol: string) => {
@@ -74,7 +80,9 @@ const readRegions = unstable_cache(
         continue;
       }
       const r = bump(p.solId);
-      r.subscribers++;
+      if (isPaying(s, paidCodes)) r.subscribers++;
+      // Still an agent of this branch even on a free trial — only the paying
+      // count is narrowed.
       r._agents.add(s.agent_id);
     }
 
@@ -89,7 +97,9 @@ const readRegions = unstable_cache(
         installs: devices.length,
         installs_with_region: devices.length - anonymousInstalls,
         anonymous_installs: anonymousInstalls,
-        subscribers: subs.length,
+        // Paying rows, not every row — this said 2 while Overview said 0 for
+        // the same two agents, both of whom were on a free trial.
+        subscribers: subs.filter((s) => isPaying(s, paidCodes)).length,
         invalid_ids: invalidIds,
       },
       // True once devices carry sol_id/agent_id (app updated). Drives the hint.

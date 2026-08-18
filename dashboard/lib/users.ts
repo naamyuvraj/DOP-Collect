@@ -1,5 +1,6 @@
 import { admin, dbConfigured } from "./supabase";
 import { solOf } from "./agentId";
+import { isPaying, paidPlanCodes, type PlanLike } from "./subs";
 
 // Single source of truth for AGENT-LEVEL metrics. Both the Users tab and the
 // Overview read this, so every number agrees. The unit is the AGENT (a real DOP
@@ -92,7 +93,9 @@ export async function computeUsers(): Promise<UsersData> {
     sb.from("accounts").select("id,agent_id"),
     sb.from("events").select("id", { count: "exact", head: true }).eq("event", "assistant_query"),
     sb.from("app_config").select("key,value").in("key", ["payments_enabled", "trial_days"]),
-    sb.from("plans").select("code,name,duration_days").eq("code", "trial").maybeSingle(),
+    // Every plan, not just the trial: `subscribers` is decided on price now, so
+    // it needs to know which codes actually charge.
+    sb.from("plans").select("code,name,price_inr,duration_days"),
   ]);
 
   const base = (baseRes.error ? (devRes.data as any[]) : (baseRes.data as any[])) || [];
@@ -132,22 +135,6 @@ export async function computeUsers(): Promise<UsersData> {
   const collByDevice = new Map<string, number>();
   for (const e of submits) collByDevice.set(e.device_id, (collByDevice.get(e.device_id) || 0) + (Number(e.props?.amount) || 0));
 
-  // `code` is kept alongside the display name because "is this a subscriber?"
-  // cannot be answered from plan_name or status alone — a trial row has
-  // status 'trial', which is not 'expired', so counting non-expired rows counted
-  // trialists as paying customers.
-  const subByAgent = new Map<
-    string,
-    { plan: string | null; code: string | null; status: string | null }
-  >();
-  for (const s of subs) {
-    subByAgent.set(s.agent_id, {
-      plan: s.plan_name ?? s.plan_code ?? null,
-      code: s.plan_code ?? null,
-      status: s.status ?? null,
-    });
-  }
-
   // While `payments_enabled` is OFF, `pay`'s resolve() hands the app a trial but
   // deliberately writes NO subscriptions row (see supabase/functions/pay/index.ts
   // and admin/backfill_trials.sql — a row per agent id that ever opens the app
@@ -163,9 +150,38 @@ export async function computeUsers(): Promise<UsersData> {
     ((payCfgRes.data as any[]) || []).map((r) => [r.key, r.value])
   );
   const paymentsEnabled = payCfg.get("payments_enabled") === true;
-  const trialPlan = planRes.data as { name?: string; duration_days?: number } | null;
+  const allPlans = ((planRes.data as PlanLike[]) || []);
+  const paidCodes = paidPlanCodes(allPlans);
+  const trialPlan =
+    (allPlans as { code: string; name?: string; duration_days?: number }[])
+      .find((p) => p.code === "trial") ?? null;
+  const trialName = trialPlan?.name ?? "Free trial";
+
+  // `code` is kept alongside the display name because "is this a subscriber?"
+  // cannot be answered from plan_name or status alone — a live trial is stored
+  // status 'active', so counting non-expired rows counted trialists as paying.
+  //
+  // A row with NO plan_code resolves to the trial too. Such a row is written by
+  // the Fix-access grants (app/api/subscriptions/route.ts), and reading it
+  // literally showed an agent with 60 days of access as plan "—" — the one
+  // agent on this dashboard who looked like they had no trial was on one.
+  // An agent with no row at all already falls through to `ephemeralTrial`
+  // below, so both shapes of "free access" now say the same thing.
+  const subByAgent = new Map<
+    string,
+    { plan: string | null; code: string | null; status: string | null }
+  >();
+  for (const s of subs) {
+    const code = s.plan_code ?? "trial";
+    subByAgent.set(s.agent_id, {
+      plan: s.plan_name ?? (code === "trial" ? trialName : code),
+      code,
+      status: s.status ?? null,
+    });
+  }
+
   const ephemeralTrial = {
-    plan: trialPlan?.name ?? "Free trial",
+    plan: trialName,
     code: "trial",
     status: "trial" as const,
   };
@@ -326,22 +342,16 @@ export async function computeUsers(): Promise<UsersData> {
     value: rows.reduce((s, r) => s + (r.value || 0), 0),
     collected: rows.reduce((s, r) => s + r.collected, 0),
     lists: submits.length,
-    // PAYING subscribers only.
-    //
-    // Two things have to be excluded, and each was counted at some point:
-    //   * the derived trial (read-time, not a row) — otherwise with payments off
-    //     every agent reads as a subscriber and this just restates `agents`;
-    //   * a real TRIAL row, whose status is 'trial'. That is not 'expired', so
-    //     "any non-expired row" counted trialists as customers — the dashboard
-    //     said 1 subscriber when both agents were on a free trial.
-    //
-    // Matches the Plans page, which already filters plan_code !== 'trial' for
-    // its "Paid subscribers" tile.
+    // PAYING subscribers only — see lib/subs.ts for why this is decided on the
+    // plan's PRICE and not on `status` or the string 'trial'. Excluding the
+    // derived trial stays important too: it is a read-time value with no row, so
+    // counting it would make this tile just restate `agents` while payments are
+    // off.
     subscribers: rows.filter((r) => {
       if (!r.agent_id) return false;
       const sub = subByAgent.get(r.agent_id);
       if (!sub?.status) return false; // no real row — derived trial at most
-      return sub.status !== "expired" && sub.code !== "trial";
+      return isPaying({ plan_code: sub.code, status: sub.status }, paidCodes);
     }).length,
     ai_queries: (aiRes as any).count ?? 0,
   };

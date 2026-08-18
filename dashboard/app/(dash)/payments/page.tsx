@@ -3,6 +3,7 @@ import PageHead from "@/components/PageHead";
 import { Card, Empty, Kpi, Pill, Table, Td, Th } from "@/components/ui";
 import { getPlans, getSubscriptions, getSummary, recent } from "@/lib/data";
 import { inr, num, when } from "@/lib/format";
+import { isFreeAccess, isPaying, paidPlanCodes, planLabel } from "@/lib/subs";
 
 export const revalidate = 60; // ISR: instant repeat loads, data ≤60s stale.
 
@@ -46,8 +47,14 @@ export default async function Payments() {
   // tabs, which include the trial `pay` derives at read time without writing a
   // row. Two tabs quoting different trial counts is not a bug in either, but it
   // reads as one, so the tile says which it is instead of leaving it implied.
-  const active = subs.filter((x) => x.status === "active").length;
-  const trialing = subs.filter((x) => x.status === "trial").length;
+  //
+  // What WAS a bug: this counted `status === 'active'` as paid and
+  // `status === 'trial'` as trialing. A live trial is stored `status: 'active'`,
+  // so both trials landed in "Paid subs" and the trial tile read 0 beside them.
+  // Price decides it now — see lib/subs.ts.
+  const paidCodes = paidPlanCodes(plans);
+  const active = subs.filter((x) => isPaying(x, paidCodes)).length;
+  const trialing = subs.filter((x) => isFreeAccess(x, paidCodes)).length;
 
   return (
     <>
@@ -56,7 +63,7 @@ export default async function Payments() {
         <Kpi label="Total revenue" value={inr(s.revenue)} sub="all time" focal wide />
         <Kpi label="Last 30 days" value={inr(mrr)} />
         <Kpi label="Paid subs" value={num(active)}
-             sub={`${num(trialing)} trial rows`} />
+             sub={`${num(trialing)} free (trial or granted)`} />
         <Kpi label="Successful" value={num(ok.length)} />
         <Kpi label="Transactions" value={num(pays.length)} />
       </div>
@@ -95,7 +102,7 @@ export default async function Payments() {
             {subs.map((x) => (
               <tr key={x.agent_id}>
                 <Td className="font-mono text-xs">{x.agent_id}</Td>
-                <Td className="font-semibold">{x.plan_name || x.plan_code || "—"}</Td>
+                <Td className="font-semibold">{planLabel(x, plans)}</Td>
                 <Td><Pill tone={tone(x.status)}>{x.status}</Pill></Td>
                 <Td num className="font-semibold">{num(x.days_left)}</Td>
                 <Td className="text-muted whitespace-nowrap">{when(x.current_period_end)}</Td>
