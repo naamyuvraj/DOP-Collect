@@ -93,6 +93,38 @@ class Analytics {
     });
   }
 
+  /// Report a failure so it shows up on the dashboard's Errors tab.
+  ///
+  /// Rides the existing `event` path rather than a new table or endpoint: the
+  /// admin panel already reads `events`, and adding a table would mean another
+  /// schema_*.sql for someone to remember to run before the feature works.
+  ///
+  /// [kind] groups them ('sync', 'portal', 'backup', 'uncaught', …); [message]
+  /// is the one-line summary shown in the list; [detail] is the stack or
+  /// response body, clipped so a runaway trace can't bloat a row.
+  static Future<void> error(
+    String kind,
+    String message, {
+    String? detail,
+    String? screen,
+  }) async {
+    // Never let the reporter throw — it runs inside error handlers, and an
+    // exception here would replace the original failure with its own.
+    try {
+      await track('app_error', <String, Object?>{
+        'kind': kind,
+        'message': _clip(message, 300),
+        if (detail != null && detail.isNotEmpty) 'detail': _clip(detail, 1200),
+        if (screen != null && screen.isNotEmpty) 'screen': screen,
+      });
+    } catch (_) {
+      /* reporting is best-effort by definition */
+    }
+  }
+
+  static String _clip(String s, int n) =>
+      s.length <= n ? s : '${s.substring(0, n)}…';
+
   /// Which Groq key/model was used and whether it succeeded (key rotation view).
   static Future<void> keyUsage(int keyIndex, String model, bool ok) async {
     if (!_live) return;

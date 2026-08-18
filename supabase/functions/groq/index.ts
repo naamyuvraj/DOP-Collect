@@ -54,6 +54,9 @@ const FALLBACK_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
  */
 let modelCache: { at: number; models: string[] } | null = null;
 
+/** Round-robin start, seeded per instance so cold starts don't all pick key 0. */
+let keyCursor = Math.floor(Math.random() * 1000);
+
 async function loadModels(
   sb: ReturnType<typeof createClient>,
 ): Promise<string[]> {
@@ -230,7 +233,12 @@ Deno.serve(async (req) => {
 
     const errors: string[] = [];
     for (const model of modelList) {
-      for (let i = 0; i < keys.length; i++) {
+      // Spread the load. Starting at 0 every time meant key #0 absorbed every
+      // request and the other three sat idle — and Groq's free-tier limit is per
+      // key, so that rate-limited four times sooner than necessary.
+      const start = keyCursor++ % keys.length;
+      for (let n = 0; n < keys.length; n++) {
+        const i = (start + n) % keys.length;
         let resp: Response;
         try {
           resp = await fetch(

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
@@ -29,6 +31,26 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Anything Flutter catches during build/layout/paint. Without this the app
+  // reported nothing but success — every event type it emitted was a
+  // happy-path one, so the dashboard could never show a failure.
+  final void Function(FlutterErrorDetails)? priorOnError = FlutterError.onError;
+  FlutterError.onError = (FlutterErrorDetails details) {
+    priorOnError?.call(details);
+    Analytics.error(
+      'flutter',
+      details.exceptionAsString(),
+      detail: details.stack?.toString(),
+      screen: details.library,
+    );
+  };
+
+  // Errors thrown outside the framework's own zone — async gaps, isolates.
+  PlatformDispatcher.instance.onError = (Object e, StackTrace st) {
+    Analytics.error('uncaught', e.toString(), detail: st.toString());
+    return false; // keep the default logging as well
+  };
 
   const bool web = kIsWeb;
   final AccountRepository repo = web
