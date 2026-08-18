@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
 import { Bars } from "@/components/LazyCharts";
-import { Card, Empty, Pill, Table, Td, Th } from "@/components/ui";
+import { Card, Empty, Pill, Skel, Table, Td, Th } from "@/components/ui";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Key = {
@@ -13,12 +13,67 @@ type Key = {
   enabled: boolean;
 };
 type Usage = { key_index: number; calls: number; ok_calls: number; ok_pct: number };
+type ModelInfo = { id: string; context_window?: number; owned_by?: string };
+type ModelsData = {
+  selected: string[];
+  available: ModelInfo[];
+  defaults: string[];
+  retired: string[];
+  listError?: string | null;
+};
 
 export default function Keys() {
   const [keys, setKeys] = useState<Key[]>(() => peekCached<any>("keys")?.keys || []);
   const [usage, setUsage] = useState<Usage[]>(() => peekCached<any>("keys")?.usage || []);
   const [form, setForm] = useState({ provider: "groq", label: "", key: "" });
   const [busy, setBusy] = useState(false);
+  const [md, setMd] = useState<ModelsData | null>(null);
+  const [pick, setPick] = useState("");
+  const [custom, setCustom] = useState("");
+  const [note, setNote] = useState("");
+
+  async function loadModels() {
+    const r = await fetch("/api/models", { cache: "no-store" }).then((r) => r.json());
+    setMd(r);
+    setPick("");
+  }
+  useEffect(() => { loadModels(); }, []);
+
+  function say(m: string) {
+    setNote(m);
+    setTimeout(() => setNote(""), 2200);
+  }
+
+  /** One writer for the list, so ordering, adding and removing can't disagree. */
+  async function saveModels(models: string[], what: string) {
+    const r = await fetch("/api/models", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ models }),
+    }).then((r) => r.json());
+    if (!r.ok) return say(r.error || "could not save");
+    await loadModels();
+    say(what);
+  }
+
+  const models = md?.selected ?? [];
+  const addModel = (id: string) => {
+    const v = id.trim();
+    if (!v) return;
+    if (models.includes(v)) return say(`${v} is already in the list`);
+    saveModels([...models, v], `added ${v}`);
+  };
+  const removeModel = (id: string) =>
+    models.length <= 1
+      ? say("keep at least one — an empty list turns the assistant off")
+      : saveModels(models.filter((m) => m !== id), `removed ${id}`);
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= models.length) return;
+    const next = [...models];
+    [next[i], next[j]] = [next[j], next[i]];
+    saveModels(next, "order saved");
+  };
 
   async function load() {
     const r = await fetch("/api/keys").then((r) => r.json());
@@ -108,6 +163,100 @@ export default function Keys() {
           )}
         </Card>
       </div>
+
+      {/* Models. Kept next to the keys because they fail the same way: the
+          assistant stops answering and the cause is a string somewhere. */}
+      <Card
+        title="Assistant models"
+        className="mt-4"
+        right={<span className="text-muted text-micro">tried top to bottom</span>}
+      >
+        <p className="text-muted text-xs mb-3">
+          The fallback chain, strongest first. Both the dashboard assistant and the
+          app&rsquo;s <code className="font-mono">groq</code> edge function read this list live, so a
+          decommissioned model is fixed here — no redeploy, no app update. Groq retired{" "}
+          <code className="font-mono">llama-3.3-70b-versatile</code> on 16 Aug 2026 and it now
+          returns a hard 404; that outage is why this is a setting.
+        </p>
+
+        {md?.retired?.length ? (
+          <div className="mb-3 rounded-lg border border-red/30 bg-red/[.14] px-3 py-2 text-body">
+            <b>Not served by Groq any more:</b>{" "}
+            <span className="font-mono">{md.retired.join(", ")}</span>. Remove them — every call
+            to one is a wasted round trip before the fallback runs.
+          </div>
+        ) : null}
+        {md?.listError ? (
+          <div className="mb-3 text-amber text-xs font-medium">{md.listError}</div>
+        ) : null}
+
+        {!md ? (
+          <div className="flex flex-col gap-2">{[0, 1].map((i) => <Skel key={i} className="h-10 w-full" />)}</div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {models.map((m, i) => {
+              const info = md.available.find((a) => a.id === m);
+              const gone = md.retired.includes(m);
+              return (
+                <div key={m} className="flex items-center gap-2 rounded-lg border border-line px-3 py-2">
+                  <span className="text-faint text-micro w-4 tabular-nums">{i + 1}</span>
+                  <span className={`font-mono text-body ${gone ? "line-through text-muted" : ""}`}>{m}</span>
+                  {i === 0 && !gone && <Pill tone="g">primary</Pill>}
+                  {gone && <Pill tone="r">retired</Pill>}
+                  {info?.context_window ? (
+                    <span className="text-faint text-micro">
+                      {Math.round(info.context_window / 1024)}k ctx
+                      {info.owned_by ? ` · ${info.owned_by}` : ""}
+                    </span>
+                  ) : null}
+                  <div className="ml-auto flex items-center gap-1">
+                    <button className="btn btn-ghost py-1 px-2 text-xs" title="Try earlier"
+                      disabled={i === 0} onClick={() => move(i, -1)}>&uarr;</button>
+                    <button className="btn btn-ghost py-1 px-2 text-xs" title="Try later"
+                      disabled={i === models.length - 1} onClick={() => move(i, 1)}>&darr;</button>
+                    <button className="btn btn-ghost py-1 px-2 text-xs text-red" title="Remove"
+                      onClick={() => removeModel(m)}>Remove</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-line">
+          <select className="input max-w-[290px]" value={pick} onChange={(e) => setPick(e.target.value)}>
+            <option value="">Add from Groq&rsquo;s live list…</option>
+            {(md?.available || [])
+              .filter((a) => !models.includes(a.id))
+              .map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.id}
+                  {a.context_window ? ` (${Math.round(a.context_window / 1024)}k)` : ""}
+                </option>
+              ))}
+          </select>
+          <button className="btn" disabled={!pick} onClick={() => addModel(pick)}>Add</button>
+
+          {/* Free text as well: a model can be announced before it appears on
+              /models, and this page should never be the thing blocking a fix. */}
+          <input
+            className="input max-w-[240px] font-mono"
+            placeholder="or type an id…"
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { addModel(custom); setCustom(""); } }}
+          />
+          <button className="btn btn-ghost" disabled={!custom.trim()}
+            onClick={() => { addModel(custom); setCustom(""); }}>Add id</button>
+
+          {md && JSON.stringify(models) !== JSON.stringify(md.defaults) && (
+            <button className="btn btn-ghost ml-auto"
+              title={md.defaults.join(" → ")}
+              onClick={() => saveModels(md.defaults, "reset to defaults")}>Reset to defaults</button>
+          )}
+        </div>
+        {note && <div className="text-green text-xs font-medium mt-2">{note}</div>}
+      </Card>
 
       <Card title="Managed keys" className="mt-4">
         <p className="text-muted text-xs mb-3">

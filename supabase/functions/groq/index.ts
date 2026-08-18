@@ -40,11 +40,41 @@ async function sha256(s: string): Promise<string> {
  * anything else is dropped rather than rejected, so an app build that learns a
  * new model id degrades to the default instead of breaking.
  */
-const ALLOWED_MODELS = new Set([
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-]);
-const DEFAULT_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+const FALLBACK_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
+
+/**
+ * The allow-list is DATA, read from `app_config.groq_models` and managed on the
+ * dashboard's API Keys page. Hardcoding it here is what turned Groq's retirement
+ * of llama-3.3-70b-versatile into an outage: the id 404'd and could only be
+ * changed by redeploying this function and shipping an app update.
+ *
+ * Cached in module scope, which on Deno Deploy means per warm instance — a
+ * change is picked up within a minute or so without a deploy. FALLBACK_MODELS
+ * covers a cold start racing the config read, or the key being absent.
+ */
+let modelCache: { at: number; models: string[] } | null = null;
+
+async function loadModels(
+  sb: ReturnType<typeof createClient>,
+): Promise<string[]> {
+  if (modelCache && Date.now() - modelCache.at < 60_000) return modelCache.models;
+  try {
+    const { data } = await sb
+      .from("app_config").select("value").eq("key", "groq_models").maybeSingle();
+    const v = (data as { value?: unknown } | null)?.value;
+    const list = Array.isArray(v)
+      ? v
+      : Array.isArray((v as { models?: unknown[] } | null)?.models)
+      ? (v as { models: unknown[] }).models
+      : null;
+    const clean = (list || []).map((m) => String(m).trim()).filter(Boolean);
+    const models = clean.length ? clean : FALLBACK_MODELS;
+    modelCache = { at: Date.now(), models };
+    return models;
+  } catch {
+    return FALLBACK_MODELS;
+  }
+}
 
 /** Ceilings on one call, so a single request can't be made arbitrarily costly. */
 const MAX_OUTPUT_TOKENS = 1024; // the app's largest real ask is 700
@@ -70,7 +100,9 @@ Deno.serve(async (req) => {
     const user = String(body.user ?? "").slice(0, MAX_USER_CHARS);
     const maxTokens = Math.min(
       MAX_OUTPUT_TOKENS,
-      Math.max(1, Number(body.maxTokens) || 512),
+      // Floor of 256: gpt-oss are reasoning models and spend part of the
+      // budget thinking, so a tiny ceiling returns empty content, not an error.
+      Math.max(256, Number(body.maxTokens) || 512),
     );
     if (!system || !user) return json({ error: "empty prompt" }, 400);
 
@@ -188,10 +220,13 @@ Deno.serve(async (req) => {
     const keys: string[] = (rows || []).map((r: { key: string }) => r.key);
     if (!keys.length) return json({ error: "no active keys" }, 503);
 
-    // Honour the client's ordering, but only across models we allow.
+    // Honour the client's ordering, but only across models we allow. The
+    // allow-list comes from app_config, so an app build that still names a
+    // retired id degrades to the configured default instead of 404-ing.
+    const allowed = await loadModels(sb);
     const asked: string[] = Array.isArray(models) ? models.map(String) : [];
-    const permitted = asked.filter((m) => ALLOWED_MODELS.has(m));
-    const modelList: string[] = permitted.length ? permitted : DEFAULT_MODELS;
+    const permitted = asked.filter((m) => allowed.includes(m));
+    const modelList: string[] = permitted.length ? permitted : allowed;
 
     const errors: string[] = [];
     for (const model of modelList) {

@@ -20,10 +20,19 @@ class AssistantConfig {
       'https://api.groq.com/openai/v1/chat/completions';
 
   /// Tried in order per key round: strongest text-to-SQL model first, a fast
-  /// cheap one as fallback. Update if Groq deprecates a model id.
+  /// cheap one as fallback.
+  ///
+  /// This is only a PREFERENCE. The `groq` edge function keeps the real
+  /// allow-list in `app_config.groq_models` (edited on the dashboard's API Keys
+  /// page) and drops anything not on it, so a retired id here degrades to the
+  /// configured default rather than failing — which is why a model change needs
+  /// no app update. Kept current so the preference still means something.
+  ///
+  /// Both are reasoning models: they spend part of the token budget thinking, so
+  /// do not lower maxTokens below ~256 or the reply comes back empty.
   static const List<String> groqModels = <String>[
-    'llama-3.3-70b-versatile',
-    'llama-3.1-8b-instant',
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
   ];
 
   static const Duration requestTimeout = Duration(seconds: 20);

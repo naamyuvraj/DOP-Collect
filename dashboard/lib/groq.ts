@@ -10,7 +10,45 @@
 import { admin, dbConfigured } from "./supabase";
 
 const API = "https://api.groq.com/openai/v1/chat/completions";
-export const MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+/**
+ * Fallback order, used only when `app_config.groq_models` is unset.
+ *
+ * The list lives in app_config so a decommission is a dashboard edit rather
+ * than a redeploy — which is the lesson from llama-3.3-70b-versatile, whose
+ * retirement returned a hard 404 and took the assistant down with it. Manage it
+ * on the API Keys page.
+ *
+ * Strongest first, fast one as the fallback. Both are reasoning models: they
+ * spend part of the token budget thinking, so a small max_tokens comes back
+ * with empty content rather than an error.
+ */
+export const DEFAULT_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
+
+export const MODELS_CONFIG_KEY = "groq_models";
+
+let modelCache: { at: number; models: string[] } | null = null;
+
+/** Configured preference order, cached briefly so a chat turn isn't N queries. */
+export async function loadModels(): Promise<string[]> {
+  if (modelCache && Date.now() - modelCache.at < 30_000) return modelCache.models;
+  let models = DEFAULT_MODELS;
+  if (dbConfigured()) {
+    const { data } = await admin()
+      .from("app_config")
+      .select("value")
+      .eq("key", MODELS_CONFIG_KEY)
+      .maybeSingle();
+    const v = data?.value;
+    const list = Array.isArray(v) ? v : Array.isArray(v?.models) ? v.models : null;
+    const clean = (list || []).map((m: unknown) => String(m).trim()).filter(Boolean);
+    if (clean.length) models = clean;
+  }
+  modelCache = { at: Date.now(), models };
+  return models;
+}
+
+/** Drop the cache after a write, so a saved change takes effect immediately. */
+export const clearModelCache = () => { modelCache = null; };
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -71,7 +109,7 @@ export async function groqChat(
   if (!keys.length) return { error: "no active Groq keys" };
   const errors: string[] = [];
 
-  for (const model of MODELS) {
+  for (const model of await loadModels()) {
     for (let i = 0; i < keys.length; i++) {
       let resp: Response;
       // Hard per-call timeout so one slow/hung key can't run us into a platform

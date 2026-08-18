@@ -114,7 +114,7 @@ Deno.test("S3: an off-menu model is refused, not relayed", async () => {
   assertEquals(fetchCalls.length, 1);
   const sent = fetchCalls[0].body as { model: string };
   assert(
-    sent.model === "llama-3.3-70b-versatile",
+    sent.model === "openai/gpt-oss-120b",
     `fell back to the default, got ${sent.model}`,
   );
 });
@@ -123,9 +123,9 @@ Deno.test("S3: a permitted model preference is still honoured", async () => {
   const db = withKeys(await seeded());
   begin(db, { env: BASE_ENV, reply: groqReply });
 
-  await post(groq, ask({ token: TOKEN, models: ["llama-3.1-8b-instant"] }));
+  await post(groq, ask({ token: TOKEN, models: ["openai/gpt-oss-20b"] }));
 
-  assertEquals((fetchCalls[0].body as { model: string }).model, "llama-3.1-8b-instant");
+  assertEquals((fetchCalls[0].body as { model: string }).model, "openai/gpt-oss-20b");
 });
 
 Deno.test("S3: output length is capped no matter what is asked for", async () => {
