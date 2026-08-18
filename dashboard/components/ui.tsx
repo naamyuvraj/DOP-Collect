@@ -1,10 +1,13 @@
 import { ReactNode } from "react";
 import Link from "next/link";
+import CountUp from "./CountUp";
 import { Icon } from "./icons";
 
 /** Literal names on purpose — a `card-${tone}` template hides them from
  *  Tailwind's content scanner, which then strips the rules. */
-const TONE = { g: "card-g", b: "card-b", a: "card-a" } as const;
+/** Surfaces. `accent` is the neon block — at most one per row, on the number
+ *  that is actually moving. Everything else is a plain white card. */
+const TONE = { accent: "card-accent" } as const;
 
 /**
  * Three deliberate weights. A row where every tile is the same size is a wall
@@ -43,30 +46,31 @@ export function Kpi({
   /** Where this number lives in full. Makes the tile a link. */
   href?: string;
   /** Palette tint: g green, b blue, a amber. Omit for plain glass. */
-  tone?: "g" | "b" | "a";
+  tone?: "accent";
 }) {
   const pad = `${focal ? "p-5" : minor ? "p-4" : "p-[18px]"} ${wide ? "col-span-2" : ""}`;
   // Size and colour carry the hierarchy. Weight stays at 600 — 700 only for the
   // hero — because a panel where everything is 800 has no emphasis left to give.
+  // Weight AND size separate the tiers, so the hero still leads once every
+  // figure is heavier. 700 / 600 / 500 against 42 / 28 / 21 — two axes of
+  // difference, which survives being read at a glance across a wide row.
   const size = focal
-    ? "text-[30px] font-bold"
+    ? "text-[42px] font-bold"
     : minor
-      ? "text-[17px] font-semibold"
-      : "text-[22px] font-semibold";
+      ? "text-[21px] font-medium"
+      : "text-[28px] font-semibold";
   // A tile that names a metric should take you to it. The lift and the arrow are
   // there so you can tell which ones will, before you click.
   const cls = `card group relative block ${pad} ${
-    focal ? "card-ink text-white" : tone ? TONE[tone] : ""
-  }`;
+    focal ? "card-ink" : tone ? TONE[tone] : ""
+  } ${href ? "hover:border-ink/40" : ""}`;
 
   const body = (
     <>
       {icon && (
         <span
-          className={`absolute grid place-items-center rounded-lg ${
-            focal
-              ? "top-4 right-4 w-7 h-7 bg-white/10 text-white/60"
-              : "top-3.5 right-3.5 w-6 h-6 bg-canvas text-faint"
+          className={`absolute top-4 right-4 grid place-items-center ${
+            focal ? "text-faint" : "text-faint"
           }`}
         >
           <Icon name={icon} />
@@ -74,14 +78,15 @@ export function Kpi({
       )}
       {/* pr- clears the absolutely-positioned icon. Without it a long label
           ("Cost per verified agent") runs under the badge and is clipped. */}
-      <div className={`lbl ${icon ? "pr-8" : ""} ${focal ? "!text-white/45" : ""}`}>
+      <div className={`lbl ${icon ? "pr-8" : ""}`}>
         {label}
       </div>
-      <div className={`${size} leading-none tracking-[-0.02em] tabular-nums mt-2.5`}>
-        {value}
+      <div className={`font-display ${size} leading-none tracking-[-0.03em] tabular-nums mt-3`}>
+        {/* Only strings roll — a node value is passed straight through. */}
+        {typeof value === "string" ? <CountUp>{value}</CountUp> : value}
       </div>
       {sub && (
-        <div className={`text-meta mt-2 ${focal ? "text-white/50" : "text-muted"}`}>
+        <div className="text-meta mt-2 text-muted">
           {sub}
         </div>
       )}
@@ -90,7 +95,7 @@ export function Kpi({
           aria-hidden
           className={`absolute bottom-3.5 right-3.5 text-body opacity-0 -translate-x-1
             transition duration-200 group-hover:opacity-100 group-hover:translate-x-0
-            ${focal ? "text-white/60" : "text-faint"}`}
+            text-faint`}
         >
           &rarr;
         </span>
@@ -118,14 +123,14 @@ export function Card({
   right?: ReactNode;
   children: ReactNode;
   className?: string;
-  tone?: "g" | "b" | "a";
+  tone?: "accent";
 }) {
   return (
-    <div className={`card reveal p-5 ${tone ? TONE[tone] : ""} ${className}`} data-tilt>
+    <div className={`card reveal p-5 ${tone ? TONE[tone] : ""} ${className}`}>
       {(title || right) && (
         <div className="flex items-center justify-between gap-3 mb-4">
           {title && (
-            <h2 className="text-base font-semibold tracking-[-0.01em]">{title}</h2>
+            <h2 className="font-display text-base font-medium tracking-[-0.015em]">{title}</h2>
           )}
           {right}
         </div>
@@ -135,15 +140,55 @@ export function Card({
   );
 }
 
+/**
+ * The one switch. Was copy-pasted into four pages, each with a white knob —
+ * which on the neon accent track is about 1.2:1 and reads as "off" whichever
+ * way it is set. The knob is charcoal when on, so the state is legible at a
+ * glance, and the track carries the colour.
+ */
+export function Toggle({
+  on,
+  onChange,
+  tone = "accent",
+  label,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  tone?: "accent" | "red";
+  label?: string;
+}) {
+  const track = on ? (tone === "red" ? "bg-red" : "bg-accent") : "bg-line";
+  const knob = on && tone === "accent" ? "bg-ink" : "bg-card";
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => onChange(!on)}
+      className={`relative shrink-0 w-12 h-7 rounded-full transition-colors ${track}
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink/30`}
+    >
+      <span
+        className={`absolute top-1 w-5 h-5 rounded-full transition-all duration-200 ${knob}
+          ${on ? "left-6" : "left-1"}`}
+        style={{ boxShadow: "0 1px 2px rgb(23 28 34 / .28)" }}
+      />
+    </button>
+  );
+}
+
 export function Pill({ children, tone = "b" }: { children: ReactNode; tone?: "g" | "b" | "r" | "a" }) {
   // Dark-native: the old pale chips carried dark text, which is unreadable once
   // the card behind them went dark. A translucent wash of the hue with a light
   // foreground keeps the colour coding and the legibility.
+  // Flat and square. Positive states take the accent fill with charcoal type
+  // (14.7:1); everything else is a quiet grey so the neon stays meaningful.
   const map = {
-    g: "bg-green/[.18] text-[#6FD6A6]",
-    b: "bg-blue/[.30] text-[#AEBAF7]",
-    r: "bg-red/[.20] text-[#F3A5A5]",
-    a: "bg-amber/[.22] text-[#EDC96F]",
+    g: "bg-accent text-ink",
+    b: "bg-canvas text-muted",
+    r: "bg-redSoft text-red",
+    a: "bg-amberSoft text-amber",
   };
   return <span className={`pill ${map[tone]}`}>{children}</span>;
 }
@@ -249,9 +294,9 @@ export function KpiSkeletons({
               hero && wide ? "col-span-2" : ""
             }`}
           >
-            <Skel className={`h-2.5 w-14 ${hero ? "!bg-white/15" : ""}`} />
+            <Skel className={`h-2.5 w-14 ${hero ? "!bg-white/12" : ""}`} />
             <Skel
-              className={`${hero ? "h-[30px] w-28 !bg-white/15" : "h-[22px] w-20"} mt-2.5`}
+              className={`${hero ? "h-[34px] w-32 !bg-white/12" : "h-[24px] w-20"} mt-3`}
             />
           </div>
         );

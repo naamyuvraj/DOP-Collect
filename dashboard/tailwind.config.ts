@@ -1,72 +1,71 @@
 import type { Config } from "tailwindcss";
 
-// Mirrors the DOP Collect app's Soft-UI FinTech palette.
+/**
+ * Three-tone system: stark white ground, charcoal for type and structural
+ * blocks, one neon lime for active states and positive movement. Nothing else
+ * earns a colour, which is what keeps a dense panel calm.
+ *
+ * Replaces the Soft-UI mint/glass palette. That one leaned on tint, blur and
+ * shadow to separate things; this one separates with whitespace and hard edges.
+ */
 const config: Config = {
-  content: [
-    "./app/**/*.{ts,tsx}",
-    "./components/**/*.{ts,tsx}",
-  ],
+  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        /**
-         * Driven by CSS variables so a surface can restate what "muted" means
-         * for whatever it is sitting on. `.card` is dark, and redefining these
-         * four inside it flips ~150 existing text-muted / border-line usages at
-         * once instead of hunting each one down and hardcoding a second colour.
-         */
+        /** Semantic tokens stay variable-driven so a dark block can restate
+         *  what "muted" means for its own inside. */
         canvas: "rgb(var(--c-canvas) / <alpha-value>)",
         card: "rgb(var(--c-card) / <alpha-value>)",
         ink: "rgb(var(--c-ink) / <alpha-value>)",
         muted: "rgb(var(--c-muted) / <alpha-value>)",
         faint: "rgb(var(--c-faint) / <alpha-value>)",
         line: "rgb(var(--c-line) / <alpha-value>)",
-        green: "#21A06A",
-        greenSoft: "#DCF0E5",
-        yellow: "#EFE94C",
-        focal: "#F0EE8F",
-        red: "#E15B5B",
-        redSoft: "#FBE3E3",
-        blue: "#2E3A8C",
-        blueSoft: "#E1E6FA",
-        amber: "#9A6E00",
-        // The soft partner the other tones already had. `focal` (#F0EE8F) is a
-        // saturated highlighter — fine as a 4px accent, wrong as a fill behind text.
+
+        /**
+         * Sampled from the reference itself rather than guessed: #EDF751, a
+         * yellow-lime, with highlights running to #FAFF59. A FILL colour only —
+         * on white it is ~1.2:1. Charcoal on it measures 14.7:1, which is the
+         * pairing the reference uses everywhere.
+         */
+        accent: "#EDF751",
+        accentDim: "#E2ED3C",
+        /** Positive movement as TEXT, where the neon cannot go. */
+        positive: "#5C7A00",
+
+        /** Kept for states the three-tone palette genuinely cannot express. */
+        red: "#D64545",
+        redSoft: "#FBE9E9",
+        amber: "#8A6100",
         amberSoft: "#FBF1D2",
-        sidebar: "#14201A",
+        sidebar: "#FFFFFF",
+        /** The reference's secondary dark, for nested blocks on charcoal. */
+        inkSoft: "#292C2F",
       },
       fontFamily: {
+        /** Geometric for display and figures; Inter for dense table body, which
+         *  is where a geometric face gets tiring at 13px. */
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "var(--font-inter)", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
-      /**
-       * One scale, named by role. Sizes were nine unrelated arbitrary values
-       * before, so nothing lined up and every new element invented its own.
-       * Line heights ride along, because a size without one is half a decision.
-       */
       fontSize: {
-        micro: ["11px", { lineHeight: "1.4" }],
-        meta: ["12px", { lineHeight: "1.45" }],
-        body: ["13px", { lineHeight: "1.5" }],
-        base: ["14px", { lineHeight: "1.5" }],
-        lead: ["15px", { lineHeight: "1.45" }],
-        h1: ["20px", { lineHeight: "1.2", letterSpacing: "-0.02em" }],
+        /* Bumped a step across the board. The panel is read at arm's length on
+           a desktop, and 11/12px was pushing legibility for no gain. */
+        micro: ["12px", { lineHeight: "1.4" }],
+        meta: ["13px", { lineHeight: "1.45" }],
+        body: ["14px", { lineHeight: "1.55" }],
+        base: ["15px", { lineHeight: "1.5" }],
+        lead: ["17px", { lineHeight: "1.45" }],
+        h1: ["28px", { lineHeight: "1.1", letterSpacing: "-0.03em" }],
       },
-      /**
-       * NOT named `card`. `colors.card` is #FFFFFF, and `shadow-card` matches a
-       * shadow *colour* too — Tailwind emitted both and the colour won, so every
-       * card has been drawing a white shadow (i.e. none) since the palette was
-       * written. Any key here must stay clear of the colour names above.
-       *
-       * Tight and close rather than a wide soft bloom: a crisp surface, not a
-       * floating pillow.
-       */
+      /** Flat UI: no elevation. Kept only for overlays that must float. */
       boxShadow: {
-        elev: "0 1px 2px rgba(16,27,18,.04), 0 6px 16px -6px rgba(16,27,18,.08)",
-        elevHover: "0 1px 2px rgba(16,27,18,.05), 0 10px 24px -8px rgba(16,27,18,.13)",
+        pop: "0 8px 28px -10px rgba(16,18,15,.22)",
       },
       borderRadius: {
-        xl2: "18px",
+        /** Hard-edged. The accent block on the active nav item is square. */
+        xl2: "4px",
       },
     },
   },

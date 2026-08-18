@@ -4,6 +4,8 @@ import PageHead from "@/components/PageHead";
 import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel } from "@/components/ui";
 import { inr, num, when } from "@/lib/format";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
+import { usePersisted } from "@/lib/uiState";
+import ReloadButton from "@/components/ReloadButton";
 
 type UserRow = {
   device_id: string;
@@ -47,12 +49,14 @@ const COLS: { key: SortKey; label: string; num?: boolean }[] = [
 export default function Users() {
   const [d, setD] = useState<Data | null>(() => peekCached<Data>("users"));
   const [labels, setLabels] = useState<Labels>(() => peekCached<Data>("users")?.region_labels || {});
-  const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"all" | "active" | "inactive">("all");
-  const [plan, setPlan] = useState<"all" | "subscribed" | "none">("all");
-  const [verified, setVerified] = useState<"all" | "verified" | "unverified">("all");
-  const [mode, setMode] = useState<"agents" | "regions">("agents");
-  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "last_seen", dir: -1 });
+  // Persisted: opening an agent and coming back used to wipe whatever you had
+  // narrowed the roster down to.
+  const [q, setQ] = usePersisted("users.q", "");
+  const [status, setStatus] = usePersisted<"all" | "active" | "inactive">("users.status", "all");
+  const [plan, setPlan] = usePersisted<"all" | "subscribed" | "none">("users.plan", "all");
+  const [verified, setVerified] = usePersisted<"all" | "verified" | "unverified">("users.verified", "all");
+  const [mode, setMode] = usePersisted<"agents" | "regions">("users.mode", "agents");
+  const [sort, setSort] = usePersisted<{ key: SortKey; dir: 1 | -1 }>("users.sort", { key: "last_seen", dir: -1 });
   const [open, setOpen] = useState<UserRow | null>(null);
 
   // Offered from the empty state: "no rows" is nearly always over-filtering,
@@ -67,7 +71,7 @@ export default function Users() {
 
   useEffect(() => {
     if (isFresh("users")) return; // shown from cache; still fresh — no refetch
-    fetch("/api/users").then((r) => r.json()).then((data: Data) => { setCached("users", data); setD(data); setLabels(data.region_labels || {}); }).catch(() => { if (!peekCached("users")) setD({ rows: [], totals: {} }); });
+    fetch("/api/users", { cache: "no-store" }).then((r) => r.json()).then((data: Data) => { setCached("users", data); setD(data); setLabels(data.region_labels || {}); }).catch(() => { if (!peekCached("users")) setD({ rows: [], totals: {} }); });
   }, []);
 
   const regionOf = (sol: string | null) => (sol ? labels[sol] || null : null);
@@ -123,7 +127,7 @@ export default function Users() {
   }, [view]);
 
   function toggleSort(key: SortKey) {
-    setSort((s) => (s.key === key ? { key, dir: (s.dir * -1) as 1 | -1 } : { key, dir: key === "accounts" || key === "collected" ? -1 : 1 }));
+    setSort(sort.key === key ? { key, dir: (sort.dir * -1) as 1 | -1 } : { key, dir: key === "accounts" || key === "collected" ? -1 : 1 });
   }
 
   async function saveLabel(sol: string, name: string) {
@@ -155,7 +159,12 @@ export default function Users() {
       <PageHead
         title="Users"
         subtitle="Every agent using the app — their book size, collections & plan"
-        right={<span className="text-muted text-xs">{d ? `${view.length} of ${d.rows.length}` : ""}</span>}
+        right={
+          <div className="flex items-center gap-3">
+            <span className="text-muted text-meta tabular-nums">{d ? `${view.length} of ${d.rows.length}` : ""}</span>
+            <ReloadButton onReload={reload} />
+          </div>
+        }
       />
 
       {!d ? (
@@ -163,11 +172,11 @@ export default function Users() {
       ) : (
         <div className="grid gap-4 grid-cols-2 md:grid-cols-4 lg:grid-cols-8 stagger">
           <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month, across every agent below" focal wide />
-          <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} tone="b" />
-          <Kpi icon="verified" label="Verified" value={num(t.verified)} tone="b" />
-          <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" tone="b" />
-          <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} tone="a" />
-          <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} tone="g" wide />
+          <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`}  />
+          <Kpi icon="verified" label="Verified" value={num(t.verified)}  />
+          <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days"  />
+          <Kpi icon="accounts" label="Accounts" value={num(t.accounts)}  />
+          <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} tone="accent" wide />
         </div>
       )}
 
@@ -441,7 +450,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-ink/20" />
       <aside className="relative w-full max-w-[440px] bg-canvas h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-sidebar text-white px-5 py-4 flex items-start justify-between">
+        <div className="sticky top-0 bg-ink text-card px-5 py-4 flex items-start justify-between">
           <div>
             <div className="font-semibold text-lg leading-tight">{form.name || "Agent"}</div>
             <div className="text-white/60 text-xs mt-0.5">
@@ -461,7 +470,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
           </div>
 
           <div className="card p-4">
-            <div className="lbl mb-2.5">Details</div>
+            <div className="lbl !text-micro mb-2.5">Details</div>
             <div className="flex flex-col gap-2.5">
               <Field label="Agent name" value={form.name}
                 onChange={(v) => setForm({ ...form, name: v })} placeholder="As it appears on his lists" />
@@ -505,7 +514,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
               was not necessarily the version on the phone he was calling about. */}
           {!!row.phones?.length && (
             <div className="card p-4">
-              <div className="lbl mb-2.5">Phones</div>
+              <div className="lbl !text-micro mb-2.5">Phones</div>
               <div className="flex flex-col gap-2.5">
                 {row.phones.map((p) => (
                   <div key={p.id} className="flex items-baseline gap-2 text-meta">
@@ -531,7 +540,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
           )}
 
           <div className="card p-4">
-            <div className="lbl mb-2">Recent activity {det?.stats ? `· ${num(det.stats.events)} events` : ""}</div>
+            <div className="lbl !text-micro mb-2">Recent activity {det?.stats ? `· ${num(det.stats.events)} events` : ""}</div>
             {!det ? (
               <div className="flex flex-col gap-1.5">{Array.from({ length: 6 }).map((_, i) => <Skel key={i} className="h-6 w-full" />)}</div>
             ) : det.events.length ? (
@@ -557,7 +566,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
               from their book size and usage, so this is the control that
               actually decides whether they can work. */}
           <div className="card p-4">
-            <div className="lbl mb-2">Access</div>
+            <div className="lbl !text-micro mb-2">Access</div>
             {!row.agent_id ? (
               <p className="text-meta text-muted">
                 No Agent ID yet — access is keyed to it, so there is nothing to
@@ -615,7 +624,7 @@ function AgentDrawer({ row, district, onClose, onChanged, onRemoved }: {
               </button>
             ) : (
               <div className="flex flex-col gap-2.5">
-                <div className="lbl">Remove agent</div>
+                <div className="lbl !text-micro">Remove agent</div>
                 <p className="text-meta text-muted leading-relaxed">
                   Deletes {row.devices === 1 ? "this install" : `all ${row.devices} installs`},
                   their activity history, and their sign-in sessions — the agent
@@ -691,9 +700,9 @@ function Field({ label, value, onChange, placeholder, mono, prefix, inputMode, e
 
 function MiniStat({ label, value, focal }: { label: string; value: React.ReactNode; focal?: boolean }) {
   return (
-    <div className={`card p-3.5 ${focal ? "!bg-focal" : ""}`}>
-      <div className="lbl">{label}</div>
-      <div className="text-[22px] font-semibold leading-none mt-1.5">{value}</div>
+    <div className={`card p-3 ${focal ? "!bg-accent" : ""}`}>
+      <div className="lbl !text-micro">{label}</div>
+      <div className="text-[19px] font-semibold leading-none mt-1.5">{value}</div>
     </div>
   );
 }

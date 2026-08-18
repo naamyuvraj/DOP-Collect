@@ -1,6 +1,6 @@
 import Link from "next/link";
 import PageHead from "@/components/PageHead";
-import { Bars, Donut, TrendArea } from "@/components/LazyCharts";
+import { Bars3D, Donut3D, TrendArea } from "@/components/LazyCharts";
 import { Card, Empty, Kpi, Pill, Table, Td, Th } from "@/components/ui";
 import {
   getCollections,
@@ -54,20 +54,20 @@ export default async function Overview() {
           rest of the row qualifies it, and the row below only counts things. */}
       <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-7 stagger">
         <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month" focal wide href="/devices" />
-        <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} tone="b" href="/devices" />
-        <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" tone="b" href="/activity" />
-        <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} tone="a" href="/devices" />
-        <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} tone="g" wide href="/devices" />
+        <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`}  href="/devices" />
+        <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days"  href="/activity" />
+        <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`}  href="/devices" />
+        <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} tone="accent" wide href="/devices" />
       </div>
 
       <div className="grid gap-4 grid-cols-2 md:grid-cols-5 mt-4 stagger">
         <Kpi icon="installs" label="Installs" value={num(t.installs)} sub="phones" minor href="/releases" />
-        <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} minor tone="g" href="/payments" />
+        <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} minor  href="/payments" />
         {/* Paying only — a free trial is not a subscriber. Said out loud because
             this tile read 1 while both agents were on trial. */}
-        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} sub="paying" minor tone="g" href="/plans" />
-        <Kpi icon="ai" label="AI" value={num(t.ai_queries)} minor tone="b" href="/assistant" />
-        <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" minor tone="a" href="/keys" />
+        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} sub="paying" minor  href="/plans" />
+        <Kpi icon="ai" label="AI" value={num(t.ai_queries)} minor  href="/assistant" />
+        <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" minor  href="/keys" />
       </div>
 
       <div className="grid gap-4 mt-4 lg:grid-cols-[1.4fr_1fr]">
@@ -82,7 +82,7 @@ export default async function Overview() {
         </Card>
         <Card title="Key usage">
           {keyView.length ? (
-            <Donut data={keyView} nameKey="name" valueKey="calls" />
+            <Donut3D data={keyView} nameKey="name" valueKey="calls" />
           ) : (
             <Empty action={<>Add a Groq key on <Link className="lnk" href="/keys">API Keys</Link>, then ask the Assistant something.</>}>
               No key calls yet
@@ -94,7 +94,7 @@ export default async function Overview() {
       <div className="grid gap-4 mt-4 lg:grid-cols-2">
         <Card title="Collections · ₹/day">
           {collView.some((c) => c.amount) ? (
-            <Bars data={collView} x="d" y="amount" color="#21A06A" />
+            <Bars3D data={collView} x="d" series={[{ key: "amount", color: "#EDF751", label: "Collected" }]} />
           ) : (
             <Empty action="Ask an agent to submit a list on the portal — the amount is stamped as it goes.">
               Nothing collected yet
@@ -115,7 +115,13 @@ export default async function Overview() {
       <div className="grid gap-4 mt-4 lg:grid-cols-2">
         <Card title="Activity">
           {types.length ? (
-            <Bars data={types.slice(0, 8)} x="event" y="n" horizontal />
+            <Bars3D
+              data={types.slice(0, 8)}
+              x="event"
+              horizontal
+              colorByPoint
+              series={[{ key: "n", color: "#171C22", label: "Events" }]}
+            />
           ) : (
             <Empty action={<>Check a handset is signed in — see <Link className="lnk" href="/devices">Users</Link>.</>}>
               No events recorded
@@ -124,7 +130,7 @@ export default async function Overview() {
         </Card>
         <Card title="Revenue">
           {revView.some((r) => r.revenue) ? (
-            <Bars data={revView} x="d" y="revenue" color="#EFE94C" />
+            <Bars3D data={revView} x="d" series={[{ key: "revenue", color: "#171C22", label: "Revenue" }]} />
           ) : (
             <Empty action={<>Price a tier on <Link className="lnk" href="/plans">Plans</Link>, then switch payments on there.</>}>
               Nothing sold yet

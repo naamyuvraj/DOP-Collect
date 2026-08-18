@@ -94,6 +94,20 @@ export const groqConfigured = async () => (await loadKeys()).length > 0;
 
 export type GroqResult = { message?: ChatMessage; error?: string };
 
+/**
+ * Round-robin cursor.
+ *
+ * The loop used to start at index 0 every time, so key #0 served every request
+ * and only ever handed over once it failed — key_usage showed 23 calls, all on
+ * key 0, with three keys idle. On Groq's free tier the limit is PER KEY, so
+ * that threw away three quarters of the available quota and rate-limited four
+ * times sooner than it needed to.
+ *
+ * Seeded at random because each serverless instance has its own module scope: a
+ * fixed start would just make every cold instance pick key 0 again.
+ */
+let cursor = Math.floor(Math.random() * 1000);
+
 /** One chat-completions round trip, rotating keys/models on failure. */
 export async function groqChat(
   messages: ChatMessage[],
@@ -110,7 +124,9 @@ export async function groqChat(
   const errors: string[] = [];
 
   for (const model of await loadModels()) {
-    for (let i = 0; i < keys.length; i++) {
+    const start = cursor++ % keys.length;
+    for (let n = 0; n < keys.length; n++) {
+      const i = (start + n) % keys.length;
       let resp: Response;
       // Hard per-call timeout so one slow/hung key can't run us into a platform
       // request timeout (which would return HTML and read as a "network error").

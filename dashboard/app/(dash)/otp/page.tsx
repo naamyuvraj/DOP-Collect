@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { TrendArea } from "@/components/LazyCharts";
-import { Card, Empty, Kpi, KpiSkeletons, Pill, Table, Td, Th } from "@/components/ui";
+import { Bars3D, TrendArea } from "@/components/LazyCharts";
+import { Card, Empty, Kpi, KpiSkeletons, Pill, Table, Td, Th, Toggle } from "@/components/ui";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 import { day, num, when } from "@/lib/format";
 
@@ -46,16 +46,6 @@ const STATUS_LABEL: Record<string, string> = {
 const COSTLY = new Set(["provider_error"]);
 const SAVED = new Set(["cooldown", "rate_limited"]);
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={() => onChange(!on)}
-      className={`w-12 h-7 rounded-full transition relative shrink-0 ${on ? "bg-green" : "bg-line"}`}
-    >
-      <span className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? "left-6" : "left-1"}`} />
-    </button>
-  );
-}
 
 function NumField({
   label, help, value, step = 1, onChange,
@@ -103,11 +93,23 @@ export default function Otp() {
     });
   }
 
+  const [refreshing, setRefreshing] = useState(false);
+
+  /**
+   * `no-store` matters: the plain fetch was served from the browser's HTTP
+   * cache, so pressing Refresh re-rendered the same payload and looked broken.
+   * The route is already force-dynamic — the staleness was entirely client-side.
+   */
   async function load() {
-    const r: Payload = await fetch("/api/otp").then((r) => r.json());
-    setCached("otp", r);
-    setD(r);
-    seed(r);
+    setRefreshing(true);
+    try {
+      const r: Payload = await fetch("/api/otp", { cache: "no-store" }).then((x) => x.json());
+      setCached("otp", r);
+      setD(r);
+      seed(r);
+    } finally {
+      setRefreshing(false);
+    }
   }
   useEffect(() => {
     const c = peekCached<Payload>("otp");
@@ -150,9 +152,14 @@ export default function Otp() {
   // Sends that never became a verify: the wasted half of the bill.
   const wasted = Math.max(0, w.all.sent - w.all.verified);
 
+  // Three parts of one whole, which is the only thing a stack may show:
+  // every send either earned a verify or did not, and refusals never went out
+  // at all. `unverified` is derived so the layers sum to what was attempted
+  // rather than double-counting `sent`.
   const chart = d.daily.slice(-30).map((r) => ({
     ...r,
     label: day(r.day),
+    unverified: Math.max(0, Number(r.sent) - Number(r.verified)),
     spend: Math.round(Number(r.sent) * rate * 100) / 100,
   }));
 
@@ -164,7 +171,9 @@ export default function Otp() {
         right={
           <div className="flex items-center gap-2">
             <Pill tone={otpOn ? "g" : "a"}>{otpOn ? "Verification ON" : "Verification OFF"}</Pill>
-            <button className="btn" onClick={load}>Refresh</button>
+            <button className="btn" onClick={load} disabled={refreshing}>
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
           </div>
         }
       />
@@ -210,8 +219,17 @@ export default function Otp() {
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr] mt-4">
         <Card title="Messages sent per day" right={<span className="text-muted text-micro">last 30 days</span>}>
-          {chart.some((c) => c.sent > 0) ? (
-            <TrendArea data={chart} x="label" y="sent" height={220} />
+          {chart.some((c) => c.sent > 0 || c.blocked > 0) ? (
+            <Bars3D
+              data={chart}
+              x="label"
+              height={220}
+              series={[
+                { key: "verified", color: "#EDF751", label: "Led to a verified sign-in" },
+                { key: "unverified", color: "#171C22", label: "Sent, never verified" },
+                { key: "blocked", color: "#C9CDD3", label: "Refused by limits (never sent)" },
+              ]}
+            />
           ) : (
             <Empty action="Nothing has been billed. Turn on “Require phone verification” below to start sending.">
               No OTPs sent in the last 30 days
@@ -231,7 +249,7 @@ export default function Otp() {
               {budget > 0 && (
                 <div className="text-right">
                   <div className="lbl">of {money(budget)}</div>
-                  <div className={`font-semibold ${budgetPct > 90 ? "text-red" : "text-green"}`}>
+                  <div className={`font-semibold ${budgetPct > 90 ? "text-red" : "text-positive"}`}>
                     {Math.round(budgetPct)}%
                   </div>
                 </div>
@@ -240,7 +258,7 @@ export default function Otp() {
             {budget > 0 && (
               <div className="h-2 rounded-full bg-line mt-3 overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${budgetPct > 90 ? "bg-red" : "bg-green"}`}
+                  className={`h-full rounded-full ${budgetPct > 90 ? "bg-red" : "bg-accent"}`}
                   style={{ width: `${budgetPct}%` }}
                 />
               </div>
@@ -455,7 +473,7 @@ export default function Otp() {
       </Card>
 
       {saved && (
-        <div className="fixed bottom-5 right-5 card px-4 py-2.5 text-green text-sm font-semibold shadow-lg">
+        <div className="fixed bottom-5 right-5 card px-4 py-2.5 text-positive text-sm font-semibold shadow-lg">
           Saved {saved}.
         </div>
       )}

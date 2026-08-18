@@ -10,9 +10,12 @@ function Skeleton() {
 }
 
 // Prop shapes mirror components/charts.tsx.
-type TrendAreaProps = { data: any[]; x: string; y: string; color?: string; height?: number };
+type TrendAreaProps = { data: any[]; x: string; y: string; color?: string; height?: number; depth?: number };
 type BarsProps = { data: any[]; x: string; y: string; color?: string; horizontal?: boolean; height?: number };
 type DonutProps = { data: any[]; nameKey: string; valueKey: string; height?: number };
+type Series = { key: string; color: string; label: string };
+type Donut3DProps = { data: any[]; nameKey: string; valueKey: string; height?: number; depth?: number; squash?: number };
+type Bars3DProps = { data: any[]; x: string; series: Series[]; height?: number; depth?: number; legend?: boolean; horizontal?: boolean; colorByPoint?: boolean };
 
 // NOTE: next/dynamic options must be an inline object literal (SWC requirement).
 export const TrendArea = dynamic<TrendAreaProps>(
@@ -25,5 +28,13 @@ export const Bars = dynamic<BarsProps>(
 );
 export const Donut = dynamic<DonutProps>(
   () => import("./charts").then((m) => m.Donut),
+  { ssr: false, loading: () => <Skeleton /> }
+);
+export const Bars3D = dynamic<Bars3DProps>(
+  () => import("./charts").then((m) => m.Bars3D),
+  { ssr: false, loading: () => <Skeleton /> }
+);
+export const Donut3D = dynamic<Donut3DProps>(
+  () => import("./charts").then((m) => m.Donut3D),
   { ssr: false, loading: () => <Skeleton /> }
 );

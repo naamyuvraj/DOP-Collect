@@ -2,193 +2,261 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Three-tone, flat. Separation comes from whitespace and hairlines — no glass,
+   no gradient ground, no elevation. */
 :root {
   color-scheme: light;
-  /* Page-level meaning of the semantic tokens: dark text on a light page. */
-  --c-canvas: 231 240 233;
+  /* Sampled from the reference: pure white ground, #F4F5F9 nested panel,
+     #171C22 charcoal. Cool-toned throughout — the old palette was green-tinted
+     and reads muddy next to this accent. */
+  --c-canvas: 244 245 249;
   --c-card:   255 255 255;
-  --c-ink:     20  32  26;
-  --c-muted:   91 107  98;
-  --c-faint:  149 166 156;
-  --c-line:   227 236 229;
+  --c-ink:     23  28  34;
+  --c-muted:   88  96 106;
+  --c-faint:  124 132 142;
+  --c-line:   232 234 239;
 }
 
-/* Frosted glass needs something behind it to refract, or it reads as the flat
-   colour it is sitting on. Three soft brand-tinted pools, fixed so they don't
-   slide under the scrolling content. */
 body {
-  background:
-    radial-gradient(52rem 34rem at 8% -6%, rgba(46,58,140,.13), transparent 62%),
-    radial-gradient(56rem 38rem at 98% 12%, rgba(33,160,106,.20), transparent 62%),
-    radial-gradient(50rem 34rem at 62% 104%, rgba(240,238,143,.26), transparent 62%),
-    linear-gradient(158deg, #EAF1F7 0%, #E7F0E9 48%, #E1EEE7 100%);
-  background-attachment: fixed;
-  color: #14201A;
+  background: #FFFFFF;
+  color: rgb(var(--c-ink));
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* cv11 = single-storey l/1, so agent ids and versions can't be misread.
-     ss01 tidies the disambiguated punctuation Inter ships by default. */
   font-feature-settings: "cv11", "ss01";
 }
 
-/* Every figure on this panel is meant to be compared down a column, so lining
-   figures are the default and `tabular-nums` stays for the ones in tables. */
+/* Every figure is meant to be compared down a column. */
 table, .tnum { font-variant-numeric: tabular-nums; }
 
-/* thin scrollbars */
-* { scrollbar-width: thin; scrollbar-color: #C7D6CC transparent; }
+* { scrollbar-width: thin; scrollbar-color: #D8DCD6 transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: #C7D6CC; border-radius: 8px; }
+*::-webkit-scrollbar-thumb { background: #D8DCD6; border-radius: 8px; }
 
 @layer components {
-  /* Frosted, not solid: a blurred, saturated sample of the backdrop with a
-     bright top edge so the card catches light along its upper lip the way real
-     glass does. The inset highlight is what sells the thickness — without it
-     this is just a translucent rectangle. */
+  /* Extruded, not floating. The depth is a HARD offset face in charcoal — no
+     blur — which is the same 3D language as the reference's isometric chart and
+     stays honest to a flat system. A blurred drop shadow would drag the whole
+     panel back to the glass look this replaced. */
   .card {
-    @apply rounded-xl2;
-    /* Inside a dark card these four mean the opposite of what they mean on the
-       page. Every text-muted / text-faint / border-line in the tree follows. */
-    --c-ink:    233 242 236;
-    --c-muted:  164 184 172;
-    --c-faint:  142 163 151;
-    --c-line:    52  71  60;
-    --c-canvas:  30  44  36;
-    --c-card:    38  54  45;
-    color: rgb(var(--c-ink));
-    background: linear-gradient(150deg, rgba(29,45,37,.90) 0%, rgba(19,30,24,.94) 100%);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
-    backdrop-filter: blur(16px) saturate(140%);
-    border: 1px solid rgba(255,255,255,.09);
-    box-shadow:
-      0 1px 2px rgba(9,15,12,.20),
-      0 16px 38px -14px rgba(9,15,12,.55),
-      inset 0 1px 0 rgba(255,255,255,.10);
+    @apply bg-card rounded-xl2 border border-line;
+    box-shadow: var(--ex, 4px) var(--ey, 4px) 0 -1px rgb(23 28 34 / .07),
+                var(--ex, 4px) var(--ey, 4px) 0 0 rgb(23 28 34 / .05);
   }
 
-  /* The palette's accents were picked to sit on white. On a dark card they are
-     all too dark to read, so each is brightened for that context only — scoped
-     to .card, so the login page and anything else on the light page is
-     untouched. Measured: every one clears WCAG AA at body size. */
-  .card .text-green { color: #5ED3A0; }
-  .card .text-red   { color: #F09A9A; }
-  .card .text-amber { color: #E8C267; }
-  .card .text-blue  { color: #A9B6F5; }
-
-  /* The hero tile. Dark glass rather than solid ink, so it belongs to the same
-     material as everything else instead of looking like a hole in the page. */
+  /* A charcoal structural block: the hero figure, and anything that should read
+     as a solid object rather than a container. Restates the semantic tokens for
+     its own inside, so text-muted and border-line under it stay legible. */
   .card-ink {
-    background: linear-gradient(145deg, #1E5340 0%, #14201A 62%) !important;
-    border-color: rgba(255,255,255,.12) !important;
-    box-shadow:
-      0 1px 2px rgba(16,27,18,.10),
-      0 16px 38px -14px rgba(16,27,18,.50),
-      inset 0 1px 0 rgba(255,255,255,.16) !important;
+    --c-ink:    248 249 251;
+    --c-muted:  160 168 178;
+    --c-faint:  128 136 146;
+    --c-line:    41  44  47;
+    --c-canvas:  41  44  47;
+    --c-card:    41  44  47;
+    background: rgb(23 28 34) !important;
+    border-color: rgb(23 28 34) !important;
+    color: rgb(var(--c-ink));
+    /* The solid block casts a deeper face than a white card would. */
+    box-shadow: var(--ex, 5px) var(--ey, 5px) 0 -1px rgb(23 28 34 / .22),
+                var(--ex, 5px) var(--ey, 5px) 0 0 rgb(23 28 34 / .14);
   }
 
-  /* Two label roles, previously one doing both jobs badly.
-     .lbl — the uppercase micro-label over a KPI figure.
-     .thd — a table column header. Sentence case, because eleven shouting
-            uppercase headers across a wide table is noise, not structure. */
-  .lbl { @apply text-micro uppercase font-semibold tracking-[0.07em] text-faint; }
-  .thd { @apply text-meta font-medium text-muted; }
+  /* The accent block. Neon fill, charcoal type — the only way this green is
+     allowed to carry text. One per row at most, on the number that is moving. */
+  .card-accent {
+    --c-muted:   72  82  22;
+    --c-faint:   98 110  34;
+    --c-line:   198 210  62;
+    background: theme(colors.accent) !important;
+    border-color: theme(colors.accent) !important;
+    color: rgb(23 28 34);
+    /* Its own face, in the accent's shadow rather than grey, so the neon block
+       reads as one extruded solid instead of a sticker on a grey slab. */
+    box-shadow: var(--ex, 5px) var(--ey, 5px) 0 -1px rgb(150 168 20 / .55),
+                var(--ex, 5px) var(--ey, 5px) 0 0 rgb(150 168 20 / .35);
+  }
 
-  .pill { @apply inline-flex items-center px-2 py-0.5 rounded-md text-micro
-           font-semibold; }
-  .btn  { @apply rounded-lg font-medium text-body px-3.5 py-2 bg-ink text-canvas
-           disabled:opacity-50 transition hover:bg-ink/90
-           active:scale-[.97] disabled:active:scale-100
-           focus-visible:outline-none focus-visible:ring-2
-           focus-visible:ring-green/40 focus-visible:ring-offset-1; }
-  .btn-ghost { @apply bg-card text-ink border border-line hover:bg-canvas
-                hover:border-line; }
-  .input { @apply w-full rounded-lg border border-line bg-card px-3 py-2
+  .lbl { @apply text-meta uppercase font-medium tracking-[0.06em] text-muted; }
+  .thd { @apply text-body font-medium text-muted; }
+
+  /* Square, flat, no shadow. */
+  .pill { @apply inline-flex items-center px-2 py-[3px] rounded-[3px] text-meta
+           font-medium; }
+
+  .btn  { @apply rounded-[4px] font-medium text-body px-4 py-2 bg-ink text-card
+           transition disabled:opacity-40
+           hover:bg-ink/90 active:translate-y-px
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+  /* Primary action in the accent, per the spec: neon fill, charcoal label. */
+  .btn-accent { @apply bg-accent text-ink hover:bg-accentDim; }
+  .btn-ghost { @apply bg-card text-ink border border-line hover:border-ink/40 hover:bg-transparent; }
+
+  .input { @apply w-full rounded-[4px] border border-line bg-card px-3 py-2
             text-body outline-none transition
-            focus:border-green focus:ring-2 focus:ring-green/15; }
+            placeholder:text-faint
+            focus:border-ink focus:ring-0; }
 
-  /* Every table rendered through <Table>. One row height, one hover, so a row
-     can be tracked across a wide table with the eye instead of a finger. */
   .tbl { @apply w-full text-body; }
   .tbl tbody tr { @apply transition-colors; }
-  .tbl tbody tr:hover { @apply bg-canvas/50; }
+  .tbl tbody tr:hover { @apply bg-canvas; }
 
-  /* The next step in an empty state — a real target, not a sentence about it. */
-  .lnk { @apply font-medium text-green underline underline-offset-2
-          decoration-green/40 hover:decoration-green transition-colors; }
+  /* Underline in the accent, text in charcoal — the neon can't carry text. */
+  .lnk { @apply font-medium text-ink underline underline-offset-[3px]
+          decoration-2 decoration-accent hover:decoration-ink transition-colors; }
+
+  /* A nested well: flat tint, no border. */
+  .panel { @apply rounded-[4px] bg-canvas; }
 }
 
-/* --- Motion ---------------------------------------------------------------
-   Enough to make the panel feel alive on arrival, not enough to make it a
-   showreel: one 8px rise, ~40ms apart across a row, and never again after the
-   first paint. Anyone who has asked their OS to calm down gets none of it. */
-
-@keyframes rise {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: none; }
-}
-
-.reveal { animation: rise .42s cubic-bezier(.22,.7,.3,1) both; }
-
-/* Stagger a row of tiles by position. Capped at 8 — past that the last tile
-   waits long enough to read as a bug rather than as choreography. */
-.stagger > *              { animation: rise .42s cubic-bezier(.22,.7,.3,1) both; }
-.stagger > *:nth-child(1) { animation-delay: 0ms }
-.stagger > *:nth-child(2) { animation-delay: 40ms }
-.stagger > *:nth-child(3) { animation-delay: 80ms }
-.stagger > *:nth-child(4) { animation-delay: 120ms }
-.stagger > *:nth-child(5) { animation-delay: 160ms }
-.stagger > *:nth-child(6) { animation-delay: 200ms }
-.stagger > *:nth-child(7) { animation-delay: 240ms }
-.stagger > *:nth-child(n+8) { animation-delay: 280ms }
-
-@media (prefers-reduced-motion: reduce) {
-  .reveal,
-  .stagger > * { animation: none; }
-  * { transition-duration: .01ms !important; scroll-behavior: auto !important; }
-}
-
-/* --- 3D tilt --------------------------------------------------------------
-   The rotation is driven by CSS variables that TiltLayer writes on hover, so
-   the transform lives in one place and Tailwind's translate utilities never
-   fight it for the `transform` property. */
+/* --- Depth & motion -------------------------------------------------------
+   Every transform on a card is composed HERE, from variables. TiltLayer writes
+   --rx/--ry/--ex/--ey; hover sets --tx/--ty. Nothing else may touch `transform`
+   on these elements — a stray Tailwind `-translate-y` silently wins the whole
+   property and the tilt stops working. */
 
 [data-tilt] {
   transform:
     perspective(900px)
     rotateX(var(--rx, 0deg))
     rotateY(var(--ry, 0deg))
-    translateY(var(--ty, 0));
+    translate3d(var(--tx, 0), var(--ty, 0), 0);
   transform-style: preserve-3d;
-  transition: transform .22s cubic-bezier(.22,.7,.3,1), box-shadow .22s ease;
+  transition: transform .2s cubic-bezier(.22,.7,.3,1), box-shadow .2s ease;
   will-change: transform;
 }
-[data-tilt]:hover { --ty: -3px; }
+/* Pressed toward the light: the card moves up-left as its face deepens. */
+[data-tilt]:hover { --ex: 8px; --ey: 8px; }
+[data-tilt]:active { --ex: 2px; --ey: 2px; transition-duration: .07s; }
 
 @media (prefers-reduced-motion: reduce) {
   [data-tilt] { transform: none; transition: none; }
-  [data-tilt]:hover { --ty: 0; }
+  [data-tilt]:hover, [data-tilt]:active { --ex: 4px; --ey: 4px; }
 }
 
-/* --- Card tints -----------------------------------------------------------
-   Deliberately OUTSIDE @layer components. Rules in that layer are tree-shaken
-   against the source text, and these are applied via a lookup rather than as
-   literal class strings, so Tailwind dropped them and every tinted card came
-   out plain white. Sitting after the layer also means they win over `.card`'s
-   own background without needing !important.
+/* Figures roll up on arrival. */
+@keyframes countIn { from { opacity: .35 } to { opacity: 1 } }
+.counting { animation: countIn .5s ease both; }
 
-   A panel of identically white cards is a spreadsheet. Giving a card the
-   colour of what it is about is what makes the grid read as designed. Both
-   stops stay inside the colour family — falling off to white is what made the
-   first attempt invisible. */
+/* --- Reveal ---------------------------------------------------------------- */
 
-.card-g { background: linear-gradient(150deg, rgba(26,74,57,.92) 0%, rgba(17,36,28,.95) 100%); }
-.card-b { background: linear-gradient(150deg, rgba(36,45,92,.92) 0%, rgba(19,24,44,.95) 100%); }
-.card-a { background: linear-gradient(150deg, rgba(72,56,22,.92) 0%, rgba(34,27,13,.95) 100%); }
+/* `to` deliberately does NOT set transform. An animation's final keyframe wins
+   over normal declarations for as long as it is filled, so `transform: none`
+   here — with fill-mode `both` — permanently beat the tilt's transform and the
+   cards sat flat no matter what the variables said. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; }
+}
 
-/* A nested well inside a card — chart beds, grouped stats. */
-.panel {
-  border-radius: 12px;
-  background: rgba(255,255,255,.05);
-  border: 1px solid rgba(255,255,255,.08);
+.reveal { animation: rise .34s cubic-bezier(.22,.7,.3,1) backwards; }
+
+.stagger > *              { animation: rise .34s cubic-bezier(.22,.7,.3,1) backwards; }
+.stagger > *:nth-child(1) { animation-delay: 0ms }
+.stagger > *:nth-child(2) { animation-delay: 35ms }
+.stagger > *:nth-child(3) { animation-delay: 70ms }
+.stagger > *:nth-child(4) { animation-delay: 105ms }
+.stagger > *:nth-child(5) { animation-delay: 140ms }
+.stagger > *:nth-child(6) { animation-delay: 175ms }
+.stagger > *:nth-child(7) { animation-delay: 210ms }
+.stagger > *:nth-child(n+8) { animation-delay: 245ms }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .stagger > * { animation: none; }
+  * { transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
+/* The area chart's extrusion targets the filled region only. Applying the
+   filter to the whole <Area> also duplicated its stroke, which drew a second
+   curve running parallel to the real one. */
+.iso-area .recharts-area-area { filter: var(--iso-filter); }
+.iso-dau  { --iso-filter: url("#x-dau"); }
+.iso-lists { --iso-filter: url("#x-lists"); }
+.iso-sent { --iso-filter: url("#x-sent"); }
+
+/* --- Paper notes -----------------------------------------------------------
+   A sticky note reads as paper because of three things, none of which is a
+   drop shadow on its own:
+     1. it is never pinned straight,
+     2. its bottom corners lift off the board, so the shadow is deeper there
+        than under the middle,
+     3. light rakes across the surface instead of filling it flatly.
+   The hard-offset extrusion used elsewhere is wrong here — that says "solid
+   block", and paper is thin and slightly warped. */
+
+.note-paper {
+  transform: rotate(var(--rot, 0deg));
+  transition: transform .18s cubic-bezier(.22,.7,.3,1), box-shadow .18s ease;
+  box-shadow:
+    0 1px 1px rgb(23 28 34 / .11),
+    0 5px 9px -4px rgb(23 28 34 / .16),
+    0 14px 22px -12px rgb(23 28 34 / .20);
+}
+
+/* NOTE: the classic "lifted corners" trick — two skewed shadow patches behind
+   the lower edge — was removed. It leaves a gap between the two patches, which
+   renders as a dark double-bump seam across the bottom of every sheet. Reported
+   as weird texture at the bottom, and it was. The layered box-shadow above
+   already carries the weight; paper does not need the gimmick. */
+
+/* Light raking from the top-left, plus the faintest fibre tint. */
+.note-grain {
+  background-image:
+    linear-gradient(150deg, rgb(255 255 255 / .55) 0%, rgb(255 255 255 / 0) 42%),
+    linear-gradient(330deg, rgb(23 28 34 / .07) 0%, rgb(23 28 34 / 0) 38%);
+}
+.note-ink .note-grain {
+  background-image:
+    linear-gradient(150deg, rgb(255 255 255 / .10) 0%, rgb(255 255 255 / 0) 45%),
+    linear-gradient(330deg, rgb(0 0 0 / .22) 0%, rgb(0 0 0 / 0) 40%);
+}
+
+/* Dog-eared corner: a lifted triangle with its own cast shadow. */
+.note-fold {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 26px;
+  height: 26px;
+  border-bottom-right-radius: 4px;
+  background: linear-gradient(315deg, rgb(23 28 34 / .15) 0%, rgb(23 28 34 / .05) 42%, transparent 60%);
+}
+
+/* Straightens and rises when you reach for it. */
+.note-paper:hover {
+  transform: rotate(calc(var(--rot, 0deg) * .35)) translateY(-2px);
+  box-shadow:
+    0 2px 2px rgb(23 28 34 / .12),
+    0 10px 16px -6px rgb(23 28 34 / .20),
+    0 24px 34px -16px rgb(23 28 34 / .26);
+}
+/* Picked up: straight, larger, and casting further. */
+.note-lift {
+  transform: rotate(calc(var(--rot, 0deg) * .2)) scale(1.035) !important;
+  box-shadow:
+    0 3px 3px rgb(23 28 34 / .12),
+    0 18px 28px -8px rgb(23 28 34 / .28),
+    0 40px 52px -22px rgb(23 28 34 / .30) !important;
+  cursor: grabbing;
+}
+
+/* Thumbtack. A dome with a highlight and a short cast shadow, sat over the
+   note's top edge the way a real pin punches through the sheet. */
+.note-pin {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  margin-left: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 34% 30%, #fff 0%, rgb(255 255 255 / .65) 12%, transparent 42%),
+    radial-gradient(circle at 62% 72%, rgb(0 0 0 / .34) 0%, transparent 58%),
+    #D64545;
+  box-shadow: 0 2px 3px rgb(23 28 34 / .40), inset 0 -1px 2px rgb(0 0 0 / .30);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note-paper, .note-paper:hover { transition: none; }
 }

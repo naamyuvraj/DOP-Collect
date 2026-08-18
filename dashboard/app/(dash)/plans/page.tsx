@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Table, Td, Th } from "@/components/ui";
+import { Card, Empty, Kpi, KpiSkeletons, Pill, Skel, Table, Td, Th, Toggle } from "@/components/ui";
 import { inr, num } from "@/lib/format";
 import { hasAccess, isFreeAccess, isPaying, paidPlanCodes, planLabel } from "@/lib/subs";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
@@ -33,16 +33,6 @@ type Data = {
   mrr: { day: string; revenue: number; payments: number }[];
 };
 
-function Toggle({ on, onChange, tone = "green" }: { on: boolean; onChange: (v: boolean) => void; tone?: "green" | "red" }) {
-  return (
-    <button
-      onClick={() => onChange(!on)}
-      className={`w-12 h-7 rounded-full transition relative shrink-0 ${on ? (tone === "red" ? "bg-red" : "bg-green") : "bg-line"}`}
-    >
-      <span className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? "left-6" : "left-1"}`} />
-    </button>
-  );
-}
 
 const empty: Plan = { code: "", name: "", price_inr: 0, duration_days: 30, active: true, sort: 99 };
 
@@ -228,7 +218,7 @@ export default function Plans() {
       />
 
       {/* Master rollout switch */}
-      <Card tone={on ? "g" : undefined}>
+      <Card tone={on ? "accent" : undefined}>
         <div className="flex items-center justify-between gap-4">
           <div>
             <div className="font-semibold text-lead">
@@ -240,7 +230,7 @@ export default function Plans() {
                 : "Master switch is off — every install has full access regardless of plan. Turn on only once Razorpay + the native checkout ship in a release build."}
             </div>
           </div>
-          <Toggle on={on} tone={on ? "green" : "red"} onChange={(v) => setConfig("payments_enabled", v)} />
+          <Toggle on={on} tone={on ? "accent" : "red"} onChange={(v) => setConfig("payments_enabled", v)} />
         </div>
       </Card>
 
@@ -266,7 +256,7 @@ export default function Plans() {
             {/* Important, so the shared .tbl row hover doesn't wash the
                 half-typed plan back to the ordinary row colour. */}
             {adding && (
-              <tr className="!bg-focal/30">
+              <tr className="!bg-accent/25">
                 <Td><input className="input py-1.5 w-24" placeholder="code" value={adding.code} onChange={(e) => setAdding({ ...adding, code: e.target.value })} /></Td>
                 <Td><input className="input py-1.5 w-32" placeholder="name" value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} /></Td>
                 <Td><input type="number" className="input py-1.5 w-24" value={adding.price_inr} onChange={(e) => setAdding({ ...adding, price_inr: Number(e.target.value) })} /></Td>

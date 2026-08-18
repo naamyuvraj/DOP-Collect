@@ -1,5 +1,7 @@
 import Link from "next/link";
 import PageHead from "@/components/PageHead";
+import ReloadButton from "@/components/ReloadButton";
+import Transactions, { type Payment } from "./Transactions";
 import { Card, Empty, Kpi, Pill, Table, Td, Th } from "@/components/ui";
 import { getPlans, getSubscriptions, getSummary, recent } from "@/lib/data";
 import { inr, num, when } from "@/lib/format";
@@ -7,30 +9,12 @@ import { isFreeAccess, isPaying, paidPlanCodes, planLabel } from "@/lib/subs";
 
 export const revalidate = 60; // ISR: instant repeat loads, data ≤60s stale.
 
-type Payment = {
-  id: number;
-  device_id: string;
-  amount: number;
-  currency: string;
-  plan: string | null;
-  provider: string | null;
-  status: string;
-  created_at: string;
-  /**
-   * Who paid, and the provider's reference. `pay` has always written both, and
-   * the query already selects *, but neither was rendered — so an agent ringing
-   * about a charge could not be matched to a row without opening the database.
-   */
-  agent_id: string | null;
-  ref: string | null;
-};
-
 const tone = (s: string) => (s === "active" ? "g" : s === "trial" ? "b" : "r");
 
 export default async function Payments() {
   const [s, pays, subs, plans] = await Promise.all([
     getSummary(),
-    recent<Payment>("payments", "*", 100),
+    recent<Payment>("payments", "*", 200),
     getSubscriptions(),
     getPlans(),
   ]);
@@ -58,7 +42,11 @@ export default async function Payments() {
 
   return (
     <>
-      <PageHead title="Payments" subtitle="Subscriptions, revenue & transactions" />
+      <PageHead
+        title="Payments"
+        subtitle="Subscriptions, revenue & transactions"
+        right={<ReloadButton path="/payments" />}
+      />
       <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6 stagger">
         <Kpi label="Total revenue" value={inr(s.revenue)} sub="all time" focal wide />
         <Kpi label="Last 30 days" value={inr(mrr)} />
@@ -118,44 +106,9 @@ export default async function Payments() {
       </Card>
 
       <Card title="Transactions" className="mt-4">
-        <Table>
-          <thead>
-            <tr>
-              <Th>When</Th>
-              <Th>Agent ID</Th>
-              <Th>Plan</Th>
-              <Th>Provider</Th>
-              <Th>Reference</Th>
-              <Th num>Amount</Th>
-              <Th>Status</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {pays.map((p) => (
-              <tr key={p.id}>
-                <Td className="text-muted whitespace-nowrap">{when(p.created_at)}</Td>
-                {/* The two columns support actually needs: who paid, and the
-                    reference to quote back to the provider. */}
-                <Td className="font-mono text-xs">{p.agent_id || "—"}</Td>
-                <Td className="font-semibold">{p.plan || "—"}</Td>
-                <Td className="text-muted">{p.provider || "—"}</Td>
-                <Td className="font-mono text-xs text-muted">{p.ref || "—"}</Td>
-                <Td num className="font-semibold">{inr(p.amount)}</Td>
-                <Td>
-                  <Pill tone={p.status === "success" ? "g" : p.status === "failed" ? "r" : "a"}>
-                    {p.status}
-                  </Pill>
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-        {!pays.length && (
-          <Empty action={<>Wire a payment provider, then switch payments on under <Link className="lnk" href="/plans">Plans</Link>.</>}>
-            Nothing has been charged yet
-          </Empty>
-        )}
+        <Transactions pays={pays} />
       </Card>
+
     </>
   );
 }

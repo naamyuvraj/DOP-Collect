@@ -40,8 +40,8 @@ function LoginForm() {
         <div className="flex items-center gap-3">
           {/* Same placeholder as the sidebar had. The login screen is the first
               thing anyone sees, so it is the last place to leave a stand-in. */}
-          <img src="/logo.png" alt="DOP Collect" width={44} height={44}
-               className="w-11 h-11 rounded-2xl object-cover" />
+          <img src="/logo.png" alt="DOP Collect" width={80} height={80}
+               className="w-20 h-20 rounded-[8px] object-contain" />
           <div>
             <div className="font-semibold text-lg leading-none">
               DOP Collect

@@ -8,9 +8,9 @@ export default function PageHead({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-end justify-between gap-4 mb-6">
+    <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 mb-6">
       <div className="min-w-0">
-        <h1 className="text-h1 font-semibold">{title}</h1>
+        <h1 className="font-display text-h1 font-medium">{title}</h1>
         {subtitle && <p className="text-muted text-body mt-1">{subtitle}</p>}
       </div>
       {right}

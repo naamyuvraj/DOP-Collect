@@ -31,7 +31,7 @@ export default function Regions() {
   const [d, setD] = useState<Data | null>(() => peekCached<Data>("regions"));
   useEffect(() => {
     if (isFresh("regions")) return;
-    fetch("/api/regions").then((r) => r.json()).then((x) => { setCached("regions", x); setD(x); });
+    fetch("/api/regions", { cache: "no-store" }).then((r) => r.json()).then((x) => { setCached("regions", x); setD(x); });
   }, []);
   if (!d) {
     return (
@@ -54,7 +54,7 @@ export default function Regions() {
       />
 
       {!d.device_region_ready && (
-        <Card className="!bg-focal/40 mb-3.5">
+        <Card className="!bg-canvas mb-3.5">
           <div className="text-sm font-semibold">Install-level regions need the app update</div>
           <div className="text-muted text-body mt-0.5">
             Regions below are derived from <b>subscribers</b> (their agent id carries the SOL ID). To map{" "}
@@ -94,7 +94,7 @@ export default function Regions() {
                 <Td num className="text-muted">{num(r.agents)}</Td>
                 <Td>
                   <div className="h-2 rounded-full bg-line w-28 overflow-hidden">
-                    <div className="h-full bg-green rounded-full" style={{ width: `${((r.installs + r.subscribers) / maxUse) * 100}%` }} />
+                    <div className="h-full bg-accent rounded-full" style={{ width: `${((r.installs + r.subscribers) / maxUse) * 100}%` }} />
                   </div>
                 </Td>
                 <Td className="text-muted text-xs whitespace-nowrap">{r.last_seen ? when(r.last_seen) : "—"}</Td>

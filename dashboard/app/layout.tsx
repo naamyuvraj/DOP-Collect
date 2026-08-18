@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
 /**
@@ -11,6 +11,18 @@ const inter = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-inter",
+});
+
+/**
+ * The geometric face, for display: headings, KPI figures, nav, card titles.
+ * Inter stays for table and body text, where a geometric face gets tiring at
+ * 13px across a dense grid — the reference's own body copy is far sparser than
+ * this panel's.
+ */
+const display = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-display",
 });
 
 /** Agent ids, phone hashes, versions, provider references. */
@@ -31,7 +43,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+    <html lang="en" className={`${inter.variable} ${display.variable} ${mono.variable}`}>
       <body className="font-sans">{children}</body>
     </html>
   );

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Card, Empty, Pill, Skel, Table, Td, Th } from "@/components/ui";
+import { Card, Empty, Pill, Skel, Table, Td, Th, Toggle } from "@/components/ui";
 import { num, when } from "@/lib/format";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
@@ -29,13 +29,6 @@ function verGte(a: string, b: string) {
   return true;
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button onClick={() => onChange(!on)} className={`w-12 h-7 rounded-full transition relative shrink-0 ${on ? "bg-red" : "bg-line"}`}>
-      <span className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? "left-6" : "left-1"}`} />
-    </button>
-  );
-}
 
 export default function Releases() {
   const [d, setD] = useState<Data | null>(() => peekCached<Data>("releases"));
@@ -45,13 +38,13 @@ export default function Releases() {
   const [showAll, setShowAll] = useState(false); // reveal versions below the baseline
 
   async function load() {
-    const data = await fetch("/api/releases").then((r) => r.json());
+    const data = await fetch("/api/releases", { cache: "no-store" }).then((r) => r.json());
     setCached("releases", data);
     setD(data);
   }
   useEffect(() => {
     if (!isFresh("releases")) load();
-    if (!isFresh("git")) fetch("/api/git").then((r) => r.json()).then((g) => { setCached("git", g); setGit(g); }).catch(() => setGit({ commits: [], gitError: "git unavailable", repo: "" }));
+    if (!isFresh("git")) fetch("/api/git", { cache: "no-store" }).then((r) => r.json()).then((g) => { setCached("git", g); setGit(g); }).catch(() => setGit({ commits: [], gitError: "git unavailable", repo: "" }));
   }, []);
   function say(m: string) { setFlash(m); setTimeout(() => setFlash(""), 2000); }
 
@@ -156,7 +149,7 @@ export default function Releases() {
                 <Td num className="text-muted">{num(a.events)}</Td>
                 <Td>
                   <div className="h-2 rounded-full bg-line w-32 overflow-hidden">
-                    <div className="h-full bg-green rounded-full" style={{ width: `${(a.devices / maxDevices) * 100}%` }} />
+                    <div className="h-full bg-accent rounded-full" style={{ width: `${(a.devices / maxDevices) * 100}%` }} />
                   </div>
                 </Td>
                 <Td className="text-muted text-xs whitespace-nowrap">{a.last_seen ? when(a.last_seen) : "—"}</Td>

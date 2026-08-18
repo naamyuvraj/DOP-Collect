@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Bars } from "@/components/LazyCharts";
+import { Bars3D } from "@/components/LazyCharts";
 import { Card, Empty, Pill, Skel, Table, Td, Th } from "@/components/ui";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
@@ -76,7 +76,7 @@ export default function Keys() {
   };
 
   async function load() {
-    const r = await fetch("/api/keys").then((r) => r.json());
+    const r = await fetch("/api/keys", { cache: "no-store" }).then((r) => r.json());
     setCached("keys", r);
     setKeys(r.keys || []);
     setUsage(r.usage || []);
@@ -126,7 +126,14 @@ export default function Keys() {
       <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
         <Card title="Calls per key">
           {usageView.length ? (
-            <Bars data={usageView} x="name" y="calls" horizontal height={200} />
+            <Bars3D
+              data={usageView}
+              x="name"
+              horizontal
+              colorByPoint
+              height={200}
+              series={[{ key: "calls", color: "#171C22", label: "Calls" }]}
+            />
           ) : (
             <Empty action="Add a key below, then ask the Assistant something — calls show up within the minute.">
               No key calls yet
@@ -255,7 +262,7 @@ export default function Keys() {
               onClick={() => saveModels(md.defaults, "reset to defaults")}>Reset to defaults</button>
           )}
         </div>
-        {note && <div className="text-green text-xs font-medium mt-2">{note}</div>}
+        {note && <div className="text-positive text-xs font-medium mt-2">{note}</div>}
       </Card>
 
       <Card title="Managed keys" className="mt-4">
@@ -308,7 +315,7 @@ export default function Keys() {
                   <Td>
                     <button
                       onClick={() => toggle(k.id, !k.enabled)}
-                      className={`pill ${k.enabled ? "bg-green/[.18] text-[#6FD6A6]" : "bg-red/[.20] text-[#F3A5A5]"}`}
+                      className={`pill ${k.enabled ? "bg-accent text-ink" : "bg-redSoft text-red"}`}
                     >
                       {k.enabled ? "enabled" : "disabled"}
                     </button>

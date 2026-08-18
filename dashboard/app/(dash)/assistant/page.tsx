@@ -80,7 +80,7 @@ export default function AssistantPage() {
         <div className="flex-1 overflow-y-auto px-5 py-5">
           {!msgs.length ? (
             <div className="h-full flex flex-col items-center justify-center text-center">
-              <div className="w-12 h-12 rounded-2xl bg-focal grid place-items-center text-2xl mb-3">✦</div>
+              <div className="w-12 h-12 rounded-2xl bg-accent grid place-items-center text-2xl mb-3">✦</div>
               <div className="font-semibold text-lg">Ask about your app</div>
               <p className="text-muted text-sm mt-1 max-w-md">
                 I read the live analytics — installs, activity, revenue, key usage — and remember what
@@ -91,7 +91,7 @@ export default function AssistantPage() {
                   <button
                     key={s}
                     onClick={() => ask(s)}
-                    className="text-body font-semibold rounded-xl border border-line bg-card px-3 py-2 hover:border-green transition"
+                    className="text-body font-semibold rounded-xl border border-line bg-card px-3 py-2 hover:border-ink transition"
                   >
                     {s}
                   </button>
@@ -156,7 +156,7 @@ function Bubble({ m }: { m: Msg }) {
     <div className="self-start max-w-[85%]">
       <div
         className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed border ${
-          m.error ? "bg-red/[.20] border-red/30 text-[#F3A5A5]" : "bg-card border-line"
+          m.error ? "bg-redSoft border-redSoft text-red" : "bg-card border-line"
         }`}
       >
         {m.text || "…"}

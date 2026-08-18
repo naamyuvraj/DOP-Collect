@@ -1,30 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Card } from "@/components/ui";
+import { Card, Toggle } from "@/components/ui";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 
 type Cfg = Record<string, any>;
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={() => onChange(!on)}
-      className={`w-12 h-7 rounded-full transition relative ${on ? "bg-green" : "bg-line"}`}
-    >
-      <span
-        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow transition-all ${on ? "left-6" : "left-1"}`}
-      />
-    </button>
-  );
-}
 
 export default function Config() {
   const [cfg, setCfg] = useState<Cfg>(() => peekCached<Cfg>("config") || {});
   const [saved, setSaved] = useState("");
 
   async function load() {
-    const c = await fetch("/api/config").then((r) => r.json());
+    const c = await fetch("/api/config", { cache: "no-store" }).then((r) => r.json());
     setCached("config", c);
     setCfg(c);
   }
@@ -73,7 +61,7 @@ export default function Config() {
               />
             </div>
           ))}
-          {saved && <div className="text-green text-xs font-semibold mt-2">Saved “{saved}”.</div>}
+          {saved && <div className="text-positive text-xs font-semibold mt-2">Saved “{saved}”.</div>}
         </Card>
 
         <Card title="Force update">
