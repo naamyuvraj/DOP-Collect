@@ -247,7 +247,7 @@ export default function Users() {
                       <tr key={i}><td colSpan={11} className="py-3"><Skel className="h-6 w-full" /></td></tr>
                     ))
                   : view.map((r) => (
-                      <tr key={r.device_id} onClick={() => setOpen(r)} className="border-t border-line cursor-pointer transition-colors hover:bg-greenSoft/50 active:bg-greenSoft">
+                      <tr key={r.device_id} onClick={() => setOpen(r)} className="border-t border-line cursor-pointer transition-colors hover:bg-white/[.06] active:bg-white/[.10]">
                         <Cell className="font-semibold">{r.name || <span className="text-faint">—</span>}</Cell>
                         <Cell className="font-mono text-xs">{r.mobile || <span className="text-faint">—</span>}</Cell>
                         <Cell right>{r.devices > 1 ? <Pill tone="a">{r.devices}</Pill> : <span className="text-muted">{r.devices}</span>}</Cell>
@@ -716,7 +716,7 @@ function Segmented({ value, onChange, options }: { value: string; onChange: (v: 
     <div className="inline-flex rounded-lg border border-line overflow-hidden">
       {options.map(([v, label]) => (
         <button key={v} onClick={() => onChange(v)}
-          className={`text-meta px-3 py-2 transition ${value === v ? "bg-ink text-white font-medium" : "bg-white text-muted font-normal hover:bg-canvas hover:text-ink"}`}>
+          className={`text-meta px-3 py-2 transition ${value === v ? "bg-ink text-canvas font-medium" : "bg-card text-muted font-normal hover:bg-canvas hover:text-ink"}`}>
           {label}
         </button>
       ))}

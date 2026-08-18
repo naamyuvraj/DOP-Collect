@@ -136,11 +136,14 @@ export function Card({
 }
 
 export function Pill({ children, tone = "b" }: { children: ReactNode; tone?: "g" | "b" | "r" | "a" }) {
+  // Dark-native: the old pale chips carried dark text, which is unreadable once
+  // the card behind them went dark. A translucent wash of the hue with a light
+  // foreground keeps the colour coding and the legibility.
   const map = {
-    g: "bg-greenSoft text-green",
-    b: "bg-blueSoft text-blue",
-    r: "bg-redSoft text-red",
-    a: "bg-amberSoft text-amber",
+    g: "bg-green/[.18] text-[#6FD6A6]",
+    b: "bg-blue/[.30] text-[#AEBAF7]",
+    r: "bg-red/[.20] text-[#F3A5A5]",
+    a: "bg-amber/[.22] text-[#EDC96F]",
   };
   return <span className={`pill ${map[tone]}`}>{children}</span>;
 }

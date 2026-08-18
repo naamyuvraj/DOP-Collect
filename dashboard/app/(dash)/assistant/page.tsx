@@ -91,7 +91,7 @@ export default function AssistantPage() {
                   <button
                     key={s}
                     onClick={() => ask(s)}
-                    className="text-body font-semibold rounded-xl border border-line bg-white px-3 py-2 hover:border-green transition"
+                    className="text-body font-semibold rounded-xl border border-line bg-card px-3 py-2 hover:border-green transition"
                   >
                     {s}
                   </button>
@@ -105,7 +105,7 @@ export default function AssistantPage() {
               ))}
               {busy && (
                 <div className="self-start">
-                  <div className="bg-white border border-line rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-muted">
+                  <div className="bg-card border border-line rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-muted">
                     <span className="inline-flex gap-1">
                       <Dot /> <Dot d={0.15} /> <Dot d={0.3} />
                     </span>
@@ -146,7 +146,7 @@ function Bubble({ m }: { m: Msg }) {
   if (m.role === "user") {
     return (
       <div className="self-end max-w-[85%]">
-        <div className="bg-ink text-white rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap">
+        <div className="bg-ink text-canvas rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm whitespace-pre-wrap">
           {m.text}
         </div>
       </div>
@@ -156,7 +156,7 @@ function Bubble({ m }: { m: Msg }) {
     <div className="self-start max-w-[85%]">
       <div
         className={`rounded-2xl rounded-tl-sm px-4 py-3 text-sm whitespace-pre-wrap leading-relaxed border ${
-          m.error ? "bg-redSoft border-redSoft text-red" : "bg-white border-line"
+          m.error ? "bg-red/[.20] border-red/30 text-[#F3A5A5]" : "bg-card border-line"
         }`}
       >
         {m.text || "…"}

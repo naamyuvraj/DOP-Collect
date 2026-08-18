@@ -9,12 +9,18 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        canvas: "#E7F0E9",
-        card: "#FFFFFF",
-        ink: "#14201A",
-        muted: "#5B6B62",
-        faint: "#95A69C",
-        line: "#E3ECE5",
+        /**
+         * Driven by CSS variables so a surface can restate what "muted" means
+         * for whatever it is sitting on. `.card` is dark, and redefining these
+         * four inside it flips ~150 existing text-muted / border-line usages at
+         * once instead of hunting each one down and hardcoding a second colour.
+         */
+        canvas: "rgb(var(--c-canvas) / <alpha-value>)",
+        card: "rgb(var(--c-card) / <alpha-value>)",
+        ink: "rgb(var(--c-ink) / <alpha-value>)",
+        muted: "rgb(var(--c-muted) / <alpha-value>)",
+        faint: "rgb(var(--c-faint) / <alpha-value>)",
+        line: "rgb(var(--c-line) / <alpha-value>)",
         green: "#21A06A",
         greenSoft: "#DCF0E5",
         yellow: "#EFE94C",

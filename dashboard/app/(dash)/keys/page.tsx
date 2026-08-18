@@ -159,7 +159,7 @@ export default function Keys() {
                   <Td>
                     <button
                       onClick={() => toggle(k.id, !k.enabled)}
-                      className={`pill ${k.enabled ? "bg-greenSoft text-green" : "bg-redSoft text-red"}`}
+                      className={`pill ${k.enabled ? "bg-green/[.18] text-[#6FD6A6]" : "bg-red/[.20] text-[#F3A5A5]"}`}
                     >
                       {k.enabled ? "enabled" : "disabled"}
                     </button>

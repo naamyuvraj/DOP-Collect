@@ -13,16 +13,20 @@ import {
   YAxis,
 } from "recharts";
 
-const AXIS = { fontSize: 11, fill: "#95A69C", fontFamily: "inherit" };
+const AXIS = { fontSize: 11, fill: "#7E8F85", fontFamily: "inherit" };
 const tip = {
+  // Charts sit inside dark cards, so a default white tooltip flashes.
   contentStyle: {
     borderRadius: 10,
-    border: "1px solid #E3ECE5",
-    boxShadow: "0 6px 16px -6px rgba(16,27,18,.14)",
+    background: "rgba(24,38,30,.96)",
+    border: "1px solid rgba(255,255,255,.12)",
+    boxShadow: "0 10px 24px -8px rgba(9,15,12,.6)",
+    color: "#E9F2EC",
     fontSize: 12,
     fontFamily: "inherit",
   },
-  labelStyle: { color: "#5B6B62", fontSize: 11, marginBottom: 2 },
+  labelStyle: { color: "#9EB2A6", fontSize: 11, marginBottom: 2 },
+  itemStyle: { color: "#E9F2EC" },
 };
 
 /**
@@ -129,7 +133,7 @@ export function Bars({
             />
           </>
         )}
-        <Tooltip {...tip} cursor={{ fill: "#EEF3EF" }} formatter={full} />
+        <Tooltip {...tip} cursor={{ fill: "rgba(255,255,255,.06)" }} formatter={full} />
         {/* Capped, or a single day of data renders as a slab the width of the card. */}
         <Bar
           dataKey={y}

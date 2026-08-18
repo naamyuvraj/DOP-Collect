@@ -228,7 +228,7 @@ export default function Plans() {
       />
 
       {/* Master rollout switch */}
-      <Card className={on ? "!bg-greenSoft" : ""}>
+      <Card tone={on ? "g" : undefined}>
         <div className="flex items-center justify-between gap-4">
           <div>
             <div className="font-semibold text-lead">

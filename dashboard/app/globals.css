@@ -2,7 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light; }
+:root {
+  color-scheme: light;
+  /* Page-level meaning of the semantic tokens: dark text on a light page. */
+  --c-canvas: 231 240 233;
+  --c-card:   255 255 255;
+  --c-ink:     20  32  26;
+  --c-muted:   91 107  98;
+  --c-faint:  149 166 156;
+  --c-line:   227 236 229;
+}
 
 /* Frosted glass needs something behind it to refract, or it reads as the flat
    colour it is sitting on. Three soft brand-tinted pools, fixed so they don't
@@ -39,15 +48,33 @@ table, .tnum { font-variant-numeric: tabular-nums; }
      this is just a translucent rectangle. */
   .card {
     @apply rounded-xl2;
-    background: linear-gradient(145deg, rgba(255,255,255,.86) 0%, rgba(247,252,249,.66) 100%);
-    -webkit-backdrop-filter: blur(16px) saturate(150%);
-    backdrop-filter: blur(16px) saturate(150%);
-    border: 1px solid rgba(255,255,255,.65);
+    /* Inside a dark card these four mean the opposite of what they mean on the
+       page. Every text-muted / text-faint / border-line in the tree follows. */
+    --c-ink:    233 242 236;
+    --c-muted:  164 184 172;
+    --c-faint:  142 163 151;
+    --c-line:    52  71  60;
+    --c-canvas:  30  44  36;
+    --c-card:    38  54  45;
+    color: rgb(var(--c-ink));
+    background: linear-gradient(150deg, rgba(29,45,37,.90) 0%, rgba(19,30,24,.94) 100%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid rgba(255,255,255,.09);
     box-shadow:
-      0 1px 2px rgba(16,27,18,.04),
-      0 12px 32px -12px rgba(16,27,18,.16),
-      inset 0 1px 0 rgba(255,255,255,.9);
+      0 1px 2px rgba(9,15,12,.20),
+      0 16px 38px -14px rgba(9,15,12,.55),
+      inset 0 1px 0 rgba(255,255,255,.10);
   }
+
+  /* The palette's accents were picked to sit on white. On a dark card they are
+     all too dark to read, so each is brightened for that context only — scoped
+     to .card, so the login page and anything else on the light page is
+     untouched. Measured: every one clears WCAG AA at body size. */
+  .card .text-green { color: #5ED3A0; }
+  .card .text-red   { color: #F09A9A; }
+  .card .text-amber { color: #E8C267; }
+  .card .text-blue  { color: #A9B6F5; }
 
   /* The hero tile. Dark glass rather than solid ink, so it belongs to the same
      material as everything else instead of looking like a hole in the page. */
@@ -69,14 +96,14 @@ table, .tnum { font-variant-numeric: tabular-nums; }
 
   .pill { @apply inline-flex items-center px-2 py-0.5 rounded-md text-micro
            font-semibold; }
-  .btn  { @apply rounded-lg font-medium text-body px-3.5 py-2 bg-ink text-white
+  .btn  { @apply rounded-lg font-medium text-body px-3.5 py-2 bg-ink text-canvas
            disabled:opacity-50 transition hover:bg-ink/90
            active:scale-[.97] disabled:active:scale-100
            focus-visible:outline-none focus-visible:ring-2
            focus-visible:ring-green/40 focus-visible:ring-offset-1; }
-  .btn-ghost { @apply bg-white text-ink border border-line hover:bg-canvas
+  .btn-ghost { @apply bg-card text-ink border border-line hover:bg-canvas
                 hover:border-line; }
-  .input { @apply w-full rounded-lg border border-line bg-white px-3 py-2
+  .input { @apply w-full rounded-lg border border-line bg-card px-3 py-2
             text-body outline-none transition
             focus:border-green focus:ring-2 focus:ring-green/15; }
 
@@ -155,13 +182,13 @@ table, .tnum { font-variant-numeric: tabular-nums; }
    stops stay inside the colour family — falling off to white is what made the
    first attempt invisible. */
 
-.card-g { background: linear-gradient(150deg, rgba(193,233,213,.95) 0%, rgba(228,246,237,.88) 100%); }
-.card-b { background: linear-gradient(150deg, rgba(205,215,249,.95) 0%, rgba(231,237,252,.88) 100%); }
-.card-a { background: linear-gradient(150deg, rgba(249,231,182,.95) 0%, rgba(252,244,222,.88) 100%); }
+.card-g { background: linear-gradient(150deg, rgba(26,74,57,.92) 0%, rgba(17,36,28,.95) 100%); }
+.card-b { background: linear-gradient(150deg, rgba(36,45,92,.92) 0%, rgba(19,24,44,.95) 100%); }
+.card-a { background: linear-gradient(150deg, rgba(72,56,22,.92) 0%, rgba(34,27,13,.95) 100%); }
 
 /* A nested well inside a card — chart beds, grouped stats. */
 .panel {
   border-radius: 12px;
-  background: linear-gradient(145deg, rgba(231,240,233,.75) 0%, rgba(255,255,255,.35) 100%);
-  border: 1px solid rgba(255,255,255,.6);
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.08);
 }
