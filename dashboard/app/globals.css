@@ -4,8 +4,16 @@
 
 :root { color-scheme: light; }
 
+/* Frosted glass needs something behind it to refract, or it reads as the flat
+   colour it is sitting on. Three soft brand-tinted pools, fixed so they don't
+   slide under the scrolling content. */
 body {
-  background: #E7F0E9;
+  background:
+    radial-gradient(52rem 34rem at 8% -6%, rgba(46,58,140,.13), transparent 62%),
+    radial-gradient(56rem 38rem at 98% 12%, rgba(33,160,106,.20), transparent 62%),
+    radial-gradient(50rem 34rem at 62% 104%, rgba(240,238,143,.26), transparent 62%),
+    linear-gradient(158deg, #EAF1F7 0%, #E7F0E9 48%, #E1EEE7 100%);
+  background-attachment: fixed;
   color: #14201A;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
@@ -25,9 +33,32 @@ table, .tnum { font-variant-numeric: tabular-nums; }
 *::-webkit-scrollbar-thumb { background: #C7D6CC; border-radius: 8px; }
 
 @layer components {
-  /* A hairline plus a close shadow. At a 14px radius the edge has to be drawn,
-     or a white card on the mint canvas loses its corners. */
-  .card { @apply bg-card rounded-xl2 border border-line/80 shadow-elev; }
+  /* Frosted, not solid: a blurred, saturated sample of the backdrop with a
+     bright top edge so the card catches light along its upper lip the way real
+     glass does. The inset highlight is what sells the thickness — without it
+     this is just a translucent rectangle. */
+  .card {
+    @apply rounded-xl2;
+    background: linear-gradient(145deg, rgba(255,255,255,.86) 0%, rgba(247,252,249,.66) 100%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    backdrop-filter: blur(16px) saturate(150%);
+    border: 1px solid rgba(255,255,255,.65);
+    box-shadow:
+      0 1px 2px rgba(16,27,18,.04),
+      0 12px 32px -12px rgba(16,27,18,.16),
+      inset 0 1px 0 rgba(255,255,255,.9);
+  }
+
+  /* The hero tile. Dark glass rather than solid ink, so it belongs to the same
+     material as everything else instead of looking like a hole in the page. */
+  .card-ink {
+    background: linear-gradient(145deg, #1E5340 0%, #14201A 62%) !important;
+    border-color: rgba(255,255,255,.12) !important;
+    box-shadow:
+      0 1px 2px rgba(16,27,18,.10),
+      0 16px 38px -14px rgba(16,27,18,.50),
+      inset 0 1px 0 rgba(255,255,255,.16) !important;
+  }
 
   /* Two label roles, previously one doing both jobs badly.
      .lbl — the uppercase micro-label over a KPI figure.
@@ -88,4 +119,49 @@ table, .tnum { font-variant-numeric: tabular-nums; }
   .reveal,
   .stagger > * { animation: none; }
   * { transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
+/* --- 3D tilt --------------------------------------------------------------
+   The rotation is driven by CSS variables that TiltLayer writes on hover, so
+   the transform lives in one place and Tailwind's translate utilities never
+   fight it for the `transform` property. */
+
+[data-tilt] {
+  transform:
+    perspective(900px)
+    rotateX(var(--rx, 0deg))
+    rotateY(var(--ry, 0deg))
+    translateY(var(--ty, 0));
+  transform-style: preserve-3d;
+  transition: transform .22s cubic-bezier(.22,.7,.3,1), box-shadow .22s ease;
+  will-change: transform;
+}
+[data-tilt]:hover { --ty: -3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-tilt] { transform: none; transition: none; }
+  [data-tilt]:hover { --ty: 0; }
+}
+
+/* --- Card tints -----------------------------------------------------------
+   Deliberately OUTSIDE @layer components. Rules in that layer are tree-shaken
+   against the source text, and these are applied via a lookup rather than as
+   literal class strings, so Tailwind dropped them and every tinted card came
+   out plain white. Sitting after the layer also means they win over `.card`'s
+   own background without needing !important.
+
+   A panel of identically white cards is a spreadsheet. Giving a card the
+   colour of what it is about is what makes the grid read as designed. Both
+   stops stay inside the colour family — falling off to white is what made the
+   first attempt invisible. */
+
+.card-g { background: linear-gradient(150deg, rgba(193,233,213,.95) 0%, rgba(228,246,237,.88) 100%); }
+.card-b { background: linear-gradient(150deg, rgba(205,215,249,.95) 0%, rgba(231,237,252,.88) 100%); }
+.card-a { background: linear-gradient(150deg, rgba(249,231,182,.95) 0%, rgba(252,244,222,.88) 100%); }
+
+/* A nested well inside a card — chart beds, grouped stats. */
+.panel {
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(231,240,233,.75) 0%, rgba(255,255,255,.35) 100%);
+  border: 1px solid rgba(255,255,255,.6);
 }

@@ -60,7 +60,7 @@ const config: Config = {
         elevHover: "0 1px 2px rgba(16,27,18,.05), 0 10px 24px -8px rgba(16,27,18,.13)",
       },
       borderRadius: {
-        xl2: "14px",
+        xl2: "18px",
       },
     },
   },

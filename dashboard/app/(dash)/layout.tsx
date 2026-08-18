@@ -1,4 +1,5 @@
 import Sidebar from "@/components/Sidebar";
+import TiltLayer from "@/components/TiltLayer";
 import { dbConfigured } from "@/lib/supabase";
 
 export default function DashLayout({
@@ -10,6 +11,7 @@ export default function DashLayout({
     // App shell: full viewport height, no page scroll. The sidebar stays frozen
     // and ONLY the <main> content area scrolls.
     <div className="flex h-screen overflow-hidden">
+      <TiltLayer />
       <Sidebar />
       <main className="flex-1 min-w-0 h-screen overflow-y-auto">
         {!dbConfigured() && (

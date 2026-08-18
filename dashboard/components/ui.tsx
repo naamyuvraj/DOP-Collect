@@ -2,6 +2,10 @@ import { ReactNode } from "react";
 import Link from "next/link";
 import { Icon } from "./icons";
 
+/** Literal names on purpose — a `card-${tone}` template hides them from
+ *  Tailwind's content scanner, which then strips the rules. */
+const TONE = { g: "card-g", b: "card-b", a: "card-a" } as const;
+
 /**
  * Three deliberate weights. A row where every tile is the same size is a wall
  * of numbers with no answer in it — you read all six and still don't know what
@@ -27,6 +31,7 @@ export function Kpi({
   minor,
   icon,
   href,
+  tone,
 }: {
   label: string;
   value: ReactNode;
@@ -37,6 +42,8 @@ export function Kpi({
   icon?: string;
   /** Where this number lives in full. Makes the tile a link. */
   href?: string;
+  /** Palette tint: g green, b blue, a amber. Omit for plain glass. */
+  tone?: "g" | "b" | "a";
 }) {
   const pad = `${focal ? "p-5" : minor ? "p-4" : "p-[18px]"} ${wide ? "col-span-2" : ""}`;
   // Size and colour carry the hierarchy. Weight stays at 600 — 700 only for the
@@ -48,9 +55,9 @@ export function Kpi({
       : "text-[22px] font-semibold";
   // A tile that names a metric should take you to it. The lift and the arrow are
   // there so you can tell which ones will, before you click.
-  const cls = `card group relative block transition duration-200 hover:shadow-elevHover ${pad} ${
-    focal ? "!bg-ink !border-ink text-white" : ""
-  } ${href ? "hover:-translate-y-0.5" : ""}`;
+  const cls = `card group relative block ${pad} ${
+    focal ? "card-ink text-white" : tone ? TONE[tone] : ""
+  }`;
 
   const body = (
     <>
@@ -92,11 +99,11 @@ export function Kpi({
   );
 
   return href ? (
-    <Link href={href} className={cls}>
+    <Link href={href} className={cls} data-tilt>
       {body}
     </Link>
   ) : (
-    <div className={cls}>{body}</div>
+    <div className={cls} data-tilt>{body}</div>
   );
 }
 
@@ -105,14 +112,16 @@ export function Card({
   right,
   children,
   className = "",
+  tone,
 }: {
   title?: string;
   right?: ReactNode;
   children: ReactNode;
   className?: string;
+  tone?: "g" | "b" | "a";
 }) {
   return (
-    <div className={`card reveal p-5 ${className}`}>
+    <div className={`card reveal p-5 ${tone ? TONE[tone] : ""} ${className}`} data-tilt>
       {(title || right) && (
         <div className="flex items-center justify-between gap-3 mb-4">
           {title && (
@@ -233,7 +242,7 @@ export function KpiSkeletons({
         return (
           <div
             key={i}
-            className={`card ${hero ? "p-5 !bg-ink !border-ink" : "p-[18px]"} ${
+            className={`card ${hero ? "p-5 card-ink" : "p-[18px]"} ${
               hero && wide ? "col-span-2" : ""
             }`}
           >

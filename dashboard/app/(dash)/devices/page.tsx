@@ -159,15 +159,15 @@ export default function Users() {
       />
 
       {!d ? (
-        <KpiSkeletons n={6} grid="grid-cols-2 md:grid-cols-4 lg:grid-cols-7" focal wide />
+        <KpiSkeletons n={6} grid="grid-cols-2 md:grid-cols-4 lg:grid-cols-8" focal wide />
       ) : (
-        <div className="grid gap-4 grid-cols-2 md:grid-cols-4 lg:grid-cols-7 stagger">
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-4 lg:grid-cols-8 stagger">
           <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month, across every agent below" focal wide />
-          <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} />
-          <Kpi icon="verified" label="Verified" value={num(t.verified)} />
-          <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
-          <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} />
-          <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
+          <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} tone="b" />
+          <Kpi icon="verified" label="Verified" value={num(t.verified)} tone="b" />
+          <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" tone="b" />
+          <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} tone="a" />
+          <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} tone="g" wide />
         </div>
       )}
 
