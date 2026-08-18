@@ -64,7 +64,7 @@ export default function Regions() {
         </Card>
       )}
 
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-4 stagger">
         <Kpi label="Regions (SOL IDs)" value={num(t.regions)} sub="post-office branches using the app" focal />
         <Kpi label="Installs mapped" value={num(t.installs_with_region)} sub={`${num(t.anonymous_installs)} anonymous`} />
         <Kpi label="Subscribers" value={num(t.subscribers)} />

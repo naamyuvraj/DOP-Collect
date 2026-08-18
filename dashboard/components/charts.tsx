@@ -79,6 +79,10 @@ export function TrendArea({
           stroke={color}
           strokeWidth={2.5}
           fill={`url(#g-${y})`}
+          animationDuration={650}
+          animationEasing="ease-out"
+          // Anchors the tooltip to the line instead of leaving it floating.
+          activeDot={{ r: 4, strokeWidth: 2, stroke: "#fff", fill: color }}
         />
       </AreaChart>
     </ResponsiveContainer>
@@ -127,7 +131,14 @@ export function Bars({
         )}
         <Tooltip {...tip} cursor={{ fill: "#EEF3EF" }} formatter={full} />
         {/* Capped, or a single day of data renders as a slab the width of the card. */}
-        <Bar dataKey={y} fill={color} radius={[6, 6, 6, 6]} maxBarSize={horizontal ? 18 : 40} />
+        <Bar
+          dataKey={y}
+          fill={color}
+          radius={[6, 6, 6, 6]}
+          maxBarSize={horizontal ? 18 : 40}
+          animationDuration={650}
+          animationEasing="ease-out"
+        />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -156,6 +167,8 @@ export function Donut({
           innerRadius="58%"
           outerRadius="88%"
           paddingAngle={2}
+          animationDuration={650}
+          animationEasing="ease-out"
         >
           {data.map((_, i) => (
             <Cell key={i} fill={DONUT[i % DONUT.length]} />

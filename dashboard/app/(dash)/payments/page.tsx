@@ -59,10 +59,10 @@ export default async function Payments() {
   return (
     <>
       <PageHead title="Payments" subtitle="Subscriptions, revenue & transactions" />
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6 stagger">
         <Kpi label="Total revenue" value={inr(s.revenue)} sub="all time" focal wide />
         <Kpi label="Last 30 days" value={inr(mrr)} />
-        <Kpi label="Paid subs" value={num(active)}
+        <Kpi label="Paid subs" href="/plans" value={num(active)}
              sub={`${num(trialing)} free (trial or granted)`} />
         <Kpi label="Successful" value={num(ok.length)} />
         <Kpi label="Transactions" value={num(pays.length)} />

@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import Link from "next/link";
 import { Icon } from "./icons";
 
 /**
@@ -25,6 +26,7 @@ export function Kpi({
   wide,
   minor,
   icon,
+  href,
 }: {
   label: string;
   value: ReactNode;
@@ -33,6 +35,8 @@ export function Kpi({
   wide?: boolean;
   minor?: boolean;
   icon?: string;
+  /** Where this number lives in full. Makes the tile a link. */
+  href?: string;
 }) {
   const pad = `${focal ? "p-5" : minor ? "p-4" : "p-[18px]"} ${wide ? "col-span-2" : ""}`;
   // Size and colour carry the hierarchy. Weight stays at 600 — 700 only for the
@@ -42,12 +46,14 @@ export function Kpi({
     : minor
       ? "text-[17px] font-semibold"
       : "text-[22px] font-semibold";
-  return (
-    <div
-      className={`card relative transition-shadow hover:shadow-elevHover ${pad} ${
-        focal ? "!bg-ink !border-ink text-white" : ""
-      }`}
-    >
+  // A tile that names a metric should take you to it. The lift and the arrow are
+  // there so you can tell which ones will, before you click.
+  const cls = `card group relative block transition duration-200 hover:shadow-elevHover ${pad} ${
+    focal ? "!bg-ink !border-ink text-white" : ""
+  } ${href ? "hover:-translate-y-0.5" : ""}`;
+
+  const body = (
+    <>
       {icon && (
         <span
           className={`absolute grid place-items-center rounded-lg ${
@@ -72,7 +78,25 @@ export function Kpi({
           {sub}
         </div>
       )}
-    </div>
+      {href && (
+        <span
+          aria-hidden
+          className={`absolute bottom-3.5 right-3.5 text-body opacity-0 -translate-x-1
+            transition duration-200 group-hover:opacity-100 group-hover:translate-x-0
+            ${focal ? "text-white/60" : "text-faint"}`}
+        >
+          &rarr;
+        </span>
+      )}
+    </>
+  );
+
+  return href ? (
+    <Link href={href} className={cls}>
+      {body}
+    </Link>
+  ) : (
+    <div className={cls}>{body}</div>
   );
 }
 
@@ -88,7 +112,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={`card p-5 ${className}`}>
+    <div className={`card reveal p-5 ${className}`}>
       {(title || right) && (
         <div className="flex items-center justify-between gap-3 mb-4">
           {title && (

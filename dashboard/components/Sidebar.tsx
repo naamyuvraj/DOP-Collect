@@ -46,13 +46,14 @@ export default function Sidebar() {
             <Link
               key={n.href}
               href={n.href}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-body transition ${
+              className={`group flex items-center gap-2.5 px-3 py-2 rounded-lg text-body transition ${
                 active
                   ? "bg-white text-ink font-semibold"
                   : "text-white/65 font-medium hover:bg-white/[.07] hover:text-white"
               }`}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                className="shrink-0 transition-transform duration-200 group-hover:scale-110"
                 stroke="currentColor" strokeWidth="2" strokeLinecap="round"
                 strokeLinejoin="round">
                 <path d={n.icon} />

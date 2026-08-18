@@ -39,8 +39,12 @@ table, .tnum { font-variant-numeric: tabular-nums; }
   .pill { @apply inline-flex items-center px-2 py-0.5 rounded-md text-micro
            font-semibold; }
   .btn  { @apply rounded-lg font-medium text-body px-3.5 py-2 bg-ink text-white
-           disabled:opacity-50 transition hover:bg-ink/90; }
-  .btn-ghost { @apply bg-white text-ink border border-line hover:bg-canvas; }
+           disabled:opacity-50 transition hover:bg-ink/90
+           active:scale-[.97] disabled:active:scale-100
+           focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-green/40 focus-visible:ring-offset-1; }
+  .btn-ghost { @apply bg-white text-ink border border-line hover:bg-canvas
+                hover:border-line; }
   .input { @apply w-full rounded-lg border border-line bg-white px-3 py-2
             text-body outline-none transition
             focus:border-green focus:ring-2 focus:ring-green/15; }
@@ -54,4 +58,34 @@ table, .tnum { font-variant-numeric: tabular-nums; }
   /* The next step in an empty state — a real target, not a sentence about it. */
   .lnk { @apply font-medium text-green underline underline-offset-2
           decoration-green/40 hover:decoration-green transition-colors; }
+}
+
+/* --- Motion ---------------------------------------------------------------
+   Enough to make the panel feel alive on arrival, not enough to make it a
+   showreel: one 8px rise, ~40ms apart across a row, and never again after the
+   first paint. Anyone who has asked their OS to calm down gets none of it. */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.reveal { animation: rise .42s cubic-bezier(.22,.7,.3,1) both; }
+
+/* Stagger a row of tiles by position. Capped at 8 — past that the last tile
+   waits long enough to read as a bug rather than as choreography. */
+.stagger > *              { animation: rise .42s cubic-bezier(.22,.7,.3,1) both; }
+.stagger > *:nth-child(1) { animation-delay: 0ms }
+.stagger > *:nth-child(2) { animation-delay: 40ms }
+.stagger > *:nth-child(3) { animation-delay: 80ms }
+.stagger > *:nth-child(4) { animation-delay: 120ms }
+.stagger > *:nth-child(5) { animation-delay: 160ms }
+.stagger > *:nth-child(6) { animation-delay: 200ms }
+.stagger > *:nth-child(7) { animation-delay: 240ms }
+.stagger > *:nth-child(n+8) { animation-delay: 280ms }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .stagger > * { animation: none; }
+  * { transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

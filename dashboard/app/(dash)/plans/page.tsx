@@ -244,11 +244,11 @@ export default function Plans() {
         </div>
       </Card>
 
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4 mt-4">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-4 mt-4 stagger">
         <Kpi label="Paying" value={num(paidSubs.length)} sub="excl. trials" focal />
         <Kpi label="With access" value={num(withAccess.length)} sub="incl. trials" />
         <Kpi label="Plans offered" value={num(rows.filter((r) => r.active).length)} sub={`${num(rows.length)} total`} />
-        <Kpi label="Revenue" value={inr(revenueAllTime)} sub="all time" />
+        <Kpi label="Revenue" value={inr(revenueAllTime)} sub="all time" href="/payments" />
       </div>
 
       {/* Plan editor */}

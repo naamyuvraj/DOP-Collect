@@ -175,7 +175,7 @@ export default function Otp() {
         </div>
       )}
 
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-4 stagger">
         <Kpi
           label="Messages sent · 30d"
           value={num(w.d30.sent)}

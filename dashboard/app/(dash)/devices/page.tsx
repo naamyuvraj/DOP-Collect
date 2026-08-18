@@ -161,7 +161,7 @@ export default function Users() {
       {!d ? (
         <KpiSkeletons n={6} grid="grid-cols-2 md:grid-cols-4 lg:grid-cols-7" focal wide />
       ) : (
-        <div className="grid gap-4 grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-4 lg:grid-cols-7 stagger">
           <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month, across every agent below" focal wide />
           <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.installs)} installs`} />
           <Kpi icon="verified" label="Verified" value={num(t.verified)} />
@@ -247,7 +247,7 @@ export default function Users() {
                       <tr key={i}><td colSpan={11} className="py-3"><Skel className="h-6 w-full" /></td></tr>
                     ))
                   : view.map((r) => (
-                      <tr key={r.device_id} onClick={() => setOpen(r)} className="border-t border-line hover:bg-focal/20 cursor-pointer">
+                      <tr key={r.device_id} onClick={() => setOpen(r)} className="border-t border-line cursor-pointer transition-colors hover:bg-greenSoft/50 active:bg-greenSoft">
                         <Cell className="font-semibold">{r.name || <span className="text-faint">—</span>}</Cell>
                         <Cell className="font-mono text-xs">{r.mobile || <span className="text-faint">—</span>}</Cell>
                         <Cell right>{r.devices > 1 ? <Pill tone="a">{r.devices}</Pill> : <span className="text-muted">{r.devices}</span>}</Cell>

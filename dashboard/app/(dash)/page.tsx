@@ -52,22 +52,22 @@ export default async function Overview() {
       {/* The book leads. Everything on this page is downstream of how much RD
           the agents are carrying, so it is the tile that gets the size — the
           rest of the row qualifies it, and the row below only counts things. */}
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-        <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month" focal wide />
-        <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} />
-        <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" />
-        <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} />
-        <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} />
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-6 stagger">
+        <Kpi icon="value" label="Monthly book" value={inr(t.value)} sub="RD / month" focal wide href="/devices" />
+        <Kpi icon="agents" label="Agents" value={num(t.agents)} sub={`${num(t.verified)} verified`} href="/devices" />
+        <Kpi icon="active" label="Active" value={num(t.active)} sub="7 days" href="/activity" />
+        <Kpi icon="accounts" label="Accounts" value={num(t.accounts)} sub={`~${num(avgAcc)}/agent`} href="/devices" />
+        <Kpi icon="collected" label="Collected" value={inr(t.collected)} sub={`${num(t.lists)} lists`} href="/devices" />
       </div>
 
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-5 mt-4">
-        <Kpi icon="installs" label="Installs" value={num(t.installs)} sub="phones" minor />
-        <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} minor />
+      <div className="grid gap-4 grid-cols-2 md:grid-cols-5 mt-4 stagger">
+        <Kpi icon="installs" label="Installs" value={num(t.installs)} sub="phones" minor href="/releases" />
+        <Kpi icon="revenue" label="Revenue" value={inr(s.revenue)} minor href="/payments" />
         {/* Paying only — a free trial is not a subscriber. Said out loud because
             this tile read 1 while both agents were on trial. */}
-        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} sub="paying" minor />
-        <Kpi icon="ai" label="AI" value={num(t.ai_queries)} minor />
-        <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" minor />
+        <Kpi icon="subscribers" label="Subscribers" value={num(t.subscribers)} sub="paying" minor href="/plans" />
+        <Kpi icon="ai" label="AI" value={num(t.ai_queries)} minor href="/assistant" />
+        <Kpi icon="keys" label="Keys" value={num(s.key_calls_1d)} sub="24h" minor href="/keys" />
       </div>
 
       <div className="grid gap-4 mt-4 lg:grid-cols-[1.4fr_1fr]">
