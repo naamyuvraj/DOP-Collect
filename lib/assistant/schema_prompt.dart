@@ -9,6 +9,9 @@ SELECT query over the read-only views `v_accounts`, `v_collections` or `v_lots`.
 
 Pick the right view first:
 - `v_accounts`  — the BOOK. Who the customers are, what they owe, when it is due.
+  LIVE accounts only: one that has matured and closed is not in here, so counts
+  and totals from this view are the book the agent still works. There is no way
+  to ask it about closed accounts, and no need to caveat that they are excluded.
 - `v_collections` — the FIELD LEDGER. Cash the agent actually took, entry by
   entry, with a timestamp. Use this for anything about what he collected —
   today, this month, from one customer.

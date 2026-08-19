@@ -66,13 +66,15 @@ class Collection {
         note: m['note'] as String?,
       );
 
-  Collection copyWith({int? id}) => Collection(
+  Collection copyWith({int? id, int? amount, int? installments}) => Collection(
         id: id ?? this.id,
         accountNumber: accountNumber,
-        amount: amount,
+        amount: amount ?? this.amount,
+        // Never copied over: [collectedAt] and [cycleYm] are what actually
+        // happened at the door. A correction fixes the figure, not the history.
         collectedAt: collectedAt,
         cycleYm: cycleYm,
-        installments: installments,
+        installments: installments ?? this.installments,
         note: note,
       );
 }

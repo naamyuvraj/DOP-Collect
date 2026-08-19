@@ -22,6 +22,10 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 ///   v8: added `lots.item_count`/`total_amount` (backfilled) and the
 ///       `v_collections` / `v_lots` read-only views, so the assistant can see
 ///       the collect ledger and the lists — not just the account book.
+///   v9: added `accounts.closed_at` — when a COMPLETE sync first found the
+///       account gone from the portal listing (matured and closed). Existing
+///       rows get NULL, i.e. "live", so an upgrade closes nothing on its own;
+///       the first finished sync after it is what marks them.
 class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
@@ -148,7 +152,7 @@ class AppDatabase {
       // the plaintext DB as-is (migration failed / not yet done) so the app
       // never fails to start and no data is lost.
       password: encrypted ? key : null,
-      version: 8,
+      version: 9,
       onCreate: (db, version) async {
         await _createAccounts(db);
         await _createLots(db);
@@ -171,6 +175,12 @@ class AppDatabase {
           // _createLots above; only pre-existing lots tables need the backfill.
           if (oldV >= 2) await _addLotTotals(db);
           await _createLedgerViews(db);
+        }
+        if (oldV < 9) {
+          await _addClosedColumn(db);
+          // v_accounts now filters on closed_at, so it must be rebuilt — it
+          // carries no data, so dropping and recreating it is always safe.
+          await _createAssistantView(db);
         }
       },
       // Force key validation NOW so a bad/lost key fails here (recoverable
@@ -240,7 +250,8 @@ class AppDatabase {
         default_installments  INTEGER,
         last_deposit_date     TEXT,
         route_order           INTEGER,
-        daily_amount          INTEGER
+        daily_amount          INTEGER,
+        closed_at             TEXT
       )
     ''');
     await db.execute(
@@ -315,6 +326,16 @@ class AppDatabase {
     await db.execute('ALTER TABLE accounts ADD COLUMN aslaas TEXT');
   }
 
+  /// v9: the closure stamp. Before this column existed, an account that matured
+  /// and closed stayed in the book forever — `replaceAll` is an upsert and
+  /// nothing else ever deleted a row. It then aged into a permanent defaulter
+  /// (its next due date receding a month at a time), kept its old short code
+  /// while the live book renumbered around it, and sat in the daily round for a
+  /// customer who no longer had an account.
+  Future<void> _addClosedColumn(Database db) async {
+    await db.execute('ALTER TABLE accounts ADD COLUMN closed_at TEXT');
+  }
+
   /// Read-only view the AI assistant queries. Exposes clean, pre-computed
   /// columns (bucket, fortnight, months_behind, maturity/new flags) so neither
   /// the local intent engine nor the cloud text-to-SQL has to reason about ISO
@@ -373,6 +394,11 @@ class AppDatabase {
         a.last_deposit_date,
         a.serial
       FROM accounts a
+      -- Closed accounts are excluded outright. Every column above is a
+      -- statement about a LIVE account: `months_behind` on a closed one grows
+      -- by one every month forever, so leaving them in made the assistant
+      -- report matured customers as the agent's worst defaulters.
+      WHERE a.closed_at IS NULL
     ''');
   }
 

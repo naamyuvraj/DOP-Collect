@@ -75,17 +75,18 @@ class _UpdateBannerState extends State<UpdateBanner> {
       child: Row(
         children: [
           const Icon(Icons.rocket_launch_rounded,
-              color: AppTheme.black, size: 22),
+              color: AppTheme.onFocal, size: 22),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Update ready',
-                    style: AppTheme.body(14, weight: FontWeight.w800)),
+                    style: AppTheme.body(14,
+                        weight: FontWeight.w800, color: AppTheme.onFocal)),
                 Text('Restart to get the latest',
                     style: AppTheme.body(12,
-                        color: AppTheme.black.withValues(alpha: 0.6))),
+                        color: AppTheme.onFocal.withValues(alpha: 0.6))),
               ],
             ),
           ),
@@ -94,11 +95,11 @@ class _UpdateBannerState extends State<UpdateBanner> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
               decoration: BoxDecoration(
-                  color: AppTheme.black,
+                  color: AppTheme.onFocal,
                   borderRadius: BorderRadius.circular(12)),
               child: Text('Restart',
                   style: AppTheme.body(13,
-                      weight: FontWeight.w700, color: Colors.white)),
+                      weight: FontWeight.w700, color: AppTheme.focal)),
             ),
           ),
         ],

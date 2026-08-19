@@ -164,7 +164,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
     await widget.lots.update(_lot);
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 3), 
       content: Text('Removed ${removed.customerName}'),
       action: SnackBarAction(
         label: 'Undo',
@@ -254,14 +254,14 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
     await widget.lots.update(_lot);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Submitted — reference $ref saved to this list.')));
+        SnackBar(duration: const Duration(seconds: 3), content: Text('Submitted — reference $ref saved to this list.')));
   }
 
   Future<void> _copy() async {
     final text = _asText();
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 3), 
           content: Text('List copied — clears in 90s. Paste into WhatsApp/notes.')));
     }
     // This is customer PII (names + full account numbers). The Android clipboard
@@ -349,7 +349,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
               onPressed: _copy),
           IconButton(
               tooltip: 'Delete',
-              icon: const Icon(Icons.delete_outline, color: AppTheme.red),
+              icon: Icon(Icons.delete_outline, color: AppTheme.red),
               onPressed: _delete),
         ],
       ),
@@ -384,12 +384,12 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
                 foreground: AppTheme.ink,
                 radius: 14,
                 expand: false, // else it balloons to full height in a bottom bar
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.visibility_rounded, size: 18, color: AppTheme.ink),
-                    SizedBox(width: 8),
-                    Flexible(
+                    const SizedBox(width: 8),
+                    const Flexible(
                         child: Text('Preview & Download',
                             maxLines: 1, overflow: TextOverflow.ellipsis)),
                   ],
@@ -402,16 +402,16 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
                 child: PushButton(
                   onPressed: _prepareOnPortal,
                   color: AppTheme.green,
-                  foreground: Colors.white,
+                  foreground: AppTheme.onAccent,
                   radius: 14,
                   expand: false,
-                  child: const Row(
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(Icons.cloud_upload_rounded,
-                          size: 18, color: Colors.white),
-                      SizedBox(width: 8),
-                      Flexible(
+                          size: 18, color: AppTheme.onAccent),
+                      const SizedBox(width: 8),
+                      const Flexible(
                           child: Text('Submit on Portal',
                               maxLines: 1, overflow: TextOverflow.ellipsis)),
                     ],
@@ -440,7 +440,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
               style: AppTheme.body(13, color: AppTheme.inkMuted)),
           const SizedBox(height: 2),
           Text(lot.dateLabel, style: AppTheme.body(12, color: AppTheme.inkFaint)),
-          const Divider(height: 20, color: AppTheme.divider),
+          Divider(height: 20, color: AppTheme.divider),
           // ASLAAS is per account — the portal holds a different number for each
           // one — so this only reports coverage; the numbers are on the rows.
           Row(
@@ -531,7 +531,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
           IconButton(
             tooltip: 'Remove from list',
             visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.remove_circle_outline,
+            icon: Icon(Icons.remove_circle_outline,
                 color: AppTheme.red, size: 22),
             onPressed: () => _removeItem(i),
           ),

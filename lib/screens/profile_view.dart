@@ -7,6 +7,7 @@ import '../data/app_settings.dart';
 import '../data/credentials.dart';
 import '../theme/app_theme.dart';
 import '../widgets/push_button.dart';
+import 'change_mobile_screen.dart';
 import 'onboarding_login.dart';
 
 /// View the agent's own profile (name, agent name, login id, ASLAAS, photo),
@@ -19,7 +20,7 @@ class ProfileView extends StatefulWidget {
 }
 
 class _ProfileViewState extends State<ProfileView> {
-  String _agent = '', _userId = '', _photo = '';
+  String _agent = '', _userId = '', _photo = '', _mobile = '';
   Uint8List? _photoBytes; // decoded once (P4)
   bool _loading = true;
 
@@ -32,11 +33,13 @@ class _ProfileViewState extends State<ProfileView> {
   Future<void> _load() async {
     final agent = await AppSettings.agentName();
     final photo = await AppSettings.profilePhoto();
+    final mobile = await AppSettings.mobile();
     final creds = await Credentials.load();
     if (!mounted) return;
     setState(() {
       _agent = agent;
       _photo = photo;
+      _mobile = mobile;
       _photoBytes = photo.isEmpty ? null : base64Decode(photo);
       _userId = creds.agentId;
       _loading = false;
@@ -91,13 +94,13 @@ class _ProfileViewState extends State<ProfileView> {
                 width: 120,
                 height: 120,
                 clipBehavior: Clip.antiAlias,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                     color: AppTheme.black, shape: BoxShape.circle),
                 child: _photoBytes == null
                     ? Center(
                         child: Text(_initials,
                             style: AppTheme.display(40,
-                                weight: FontWeight.w800, color: Colors.white)),
+                                weight: FontWeight.w800, color: AppTheme.onAccent)),
                       )
                     : Image.memory(_photoBytes!, fit: BoxFit.cover),
               ),
@@ -110,6 +113,7 @@ class _ProfileViewState extends State<ProfileView> {
           ),
           const SizedBox(height: 24),
           _row('User ID', _userId.isEmpty ? '—' : _mask(_userId)),
+          _row('Mobile', _mobile.isEmpty ? '—' : _mobile),
           _row('Photo', _photo.isEmpty ? 'Not set' : 'Tap avatar to view'),
           const SizedBox(height: 26),
           PushButton(
@@ -124,7 +128,93 @@ class _ProfileViewState extends State<ProfileView> {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          // Both of these were on Settings. They are facts about the person
+          // using the app, not things the app does, so they belong with the
+          // rest of his details.
+          PushButton(
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const ChangeMobileScreen()));
+              _load();
+            },
+            color: AppTheme.surface,
+            foreground: AppTheme.ink,
+            child: const Text('Update mobile number'),
+          ),
+          const SizedBox(height: 28),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 10),
+            child: Text('APPEARANCE', style: AppTheme.label(AppTheme.inkMuted)),
+          ),
+          _themeToggle(),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, top: 6),
+            child: Text(
+                'Dark is easier on the eyes at night. Auto follows your phone.',
+                style: AppTheme.body(12, color: AppTheme.inkFaint)),
+          ),
         ],
+      ),
+    );
+  }
+
+  /// Light / Dark / Auto, as one segmented control rather than a switch — a
+  /// two-state toggle cannot express "follow the phone".
+  Widget _themeToggle() {
+    final options = <(ThemeMode, String, IconData)>[
+      (ThemeMode.light, 'Light', Icons.light_mode_rounded),
+      (ThemeMode.dark, 'Dark', Icons.dark_mode_rounded),
+      (ThemeMode.system, 'Auto', Icons.brightness_auto_rounded),
+    ];
+    final current = AppTheme.mode.value;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Container(
+        padding: const EdgeInsets.all(5),
+        decoration: AppTheme.card(radius: 16),
+        child: Row(
+          children: [
+            for (final (mode, label, icon) in options)
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  // The app root listens to this, persists it, and repaints the
+                  // whole tree — nothing to plumb from here.
+                  onTap: () => AppTheme.mode.value = mode,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOut,
+                    height: 46,
+                    alignment: Alignment.center,
+                    decoration: mode == current
+                        ? AppTheme.card(
+                            fill: AppTheme.black,
+                            radius: 12,
+                            offset: AppTheme.faceOffsetPressed)
+                        : const BoxDecoration(),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(icon,
+                            size: 17,
+                            color: mode == current
+                                ? AppTheme.onAccent
+                                : AppTheme.inkFaint),
+                        const SizedBox(width: 7),
+                        Text(label,
+                            style: AppTheme.body(13.5,
+                                weight: FontWeight.w700,
+                                color: mode == current
+                                    ? AppTheme.onAccent
+                                    : AppTheme.inkFaint)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

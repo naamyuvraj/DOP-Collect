@@ -10,7 +10,7 @@ import '../services/remote_config.dart';
 import '../theme/app_theme.dart';
 import '../data/app_settings.dart';
 import '../util/format.dart';
-import '../widgets/glass_panel.dart';
+import '../widgets/section_panel.dart';
 import '../widgets/summary_card.dart';
 import '../widgets/update_banner.dart';
 import 'account_list_screen.dart';
@@ -42,7 +42,6 @@ class _HomeDashboardState extends State<HomeDashboard> {
   Future<List<RdAccount>>? _future;
   String _name = '';
   Uint8List? _photoBytes; // decoded once, not on every frame (P4)
-  int _newMonths = AccountFilter.newAccountMonths;
   Fortnight _half = Fortnight.first; // segmented First/Second-half toggle
   bool _balanceHidden = true; // balance hero masked by default (privacy)
 
@@ -157,13 +156,12 @@ class _HomeDashboardState extends State<HomeDashboard> {
               _collectionPanel(s),
               _section(
                 title: 'Attention',
-                tint: const Color(0xFFF3B7B7),
                 children: [
                   _sum('Defaulters', AppTheme.red,
                       AccountFilter.defaulters, s),
                   const SizedBox(height: 10),
                   _sum('Freezing soon (6 mo)', AppTheme.red,
-                      AccountFilter.aboutToFreeze, s),
+                      AccountFilter.aboutToFreeze, s, rank: 1),
                 ],
               ),
               // New Accounts — always visible.
@@ -174,14 +172,13 @@ class _HomeDashboardState extends State<HomeDashboard> {
               // Portfolio — visible by default (no "See more" gate).
               _section(
                 title: 'Portfolio',
-                tint: const Color(0xFFCFC1F2),
                 children: [
                   _sum('Maturity', AppTheme.green, AccountFilter.maturity, s,
                       amount: false),
                   const SizedBox(height: 10),
                   _sum('Advanced Paid', AppTheme.accent,
                       AccountFilter.advancedPaid, s,
-                      amount: false),
+                      amount: false, rank: 1),
                 ],
               ),
             ],
@@ -203,13 +200,13 @@ class _HomeDashboardState extends State<HomeDashboard> {
               width: 44,
               height: 44,
               clipBehavior: Clip.antiAlias,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                   color: AppTheme.black, shape: BoxShape.circle),
               child: _photoBytes == null
                   ? Center(
                       child: Text(_initials(),
                           style: AppTheme.display(16,
-                              weight: FontWeight.w800, color: Colors.white)),
+                              weight: FontWeight.w800, color: AppTheme.onAccent)),
                     )
                   : Image.memory(_photoBytes!,
                       fit: BoxFit.cover, gaplessPlayback: true),
@@ -247,17 +244,16 @@ class _HomeDashboardState extends State<HomeDashboard> {
       child: Container(
         height: 44,
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: const BoxDecoration(
-          color: AppTheme.black,
-          borderRadius: BorderRadius.all(Radius.circular(22)),
-        ),
+        // Pressable, so it stands off the page like every other button.
+        decoration: AppTheme.card(
+            fill: AppTheme.black, radius: 22, offset: AppTheme.faceOffset),
         child: Row(
           children: [
-            const Icon(Icons.sync_rounded, color: Colors.white, size: 20),
+            Icon(Icons.sync_rounded, color: AppTheme.onAccent, size: 20),
             const SizedBox(width: 6),
             Text('Sync',
                 style: AppTheme.body(14,
-                    weight: FontWeight.w700, color: Colors.white)),
+                    weight: FontWeight.w700, color: AppTheme.onAccent)),
           ],
         ),
       ),
@@ -286,12 +282,14 @@ class _HomeDashboardState extends State<HomeDashboard> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.campaign_rounded, size: 20, color: AppTheme.black),
+          const Icon(Icons.campaign_rounded, size: 20, color: AppTheme.onFocal),
           const SizedBox(width: 10),
           Expanded(
             child: Text(a.text.trim(),
                 style: AppTheme.body(13,
-                    weight: FontWeight.w600, color: AppTheme.black, height: 1.35)),
+                    weight: FontWeight.w600,
+                    color: AppTheme.onFocal,
+                    height: 1.35)),
           ),
         ],
       ),
@@ -334,7 +332,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
       decoration: AppTheme.card(),
       child: Column(
         children: [
-          const Icon(Icons.cloud_sync_rounded,
+          Icon(Icons.cloud_sync_rounded,
               size: 48, color: AppTheme.inkFaint),
           const SizedBox(height: 14),
           Text('No accounts yet',
@@ -352,19 +350,19 @@ class _HomeDashboardState extends State<HomeDashboard> {
             child: Container(
               height: 50,
               alignment: Alignment.center,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: AppTheme.black,
-                borderRadius: BorderRadius.all(Radius.circular(14)),
+                borderRadius: const BorderRadius.all(Radius.circular(14)),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.sync_rounded,
-                      color: Colors.white, size: 20),
+                  Icon(Icons.sync_rounded,
+                      color: AppTheme.onAccent, size: 20),
                   const SizedBox(width: 8),
                   Text('Sync Collection',
                       style: AppTheme.body(15,
-                          weight: FontWeight.w700, color: Colors.white)),
+                          weight: FontWeight.w700, color: AppTheme.onAccent)),
                 ],
               ),
             ),
@@ -385,8 +383,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
         : AccountFilter.secondHalfDeposited;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
-      child: GlassPanel(
-        tint: const Color(0xFFCDE6C6),
+      child: SectionPanel(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -400,7 +397,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
             const SizedBox(height: 12),
             _sum('Pending', AppTheme.amber, pending, s),
             const SizedBox(height: 10),
-            _sum('Deposited', AppTheme.green, deposited, s),
+            _sum('Deposited', AppTheme.green, deposited, s, rank: 1),
           ],
         ),
       ),
@@ -412,16 +409,20 @@ class _HomeDashboardState extends State<HomeDashboard> {
       final active = _half == half;
       return GestureDetector(
         onTap: () => setState(() => _half = half),
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: active ? AppTheme.black : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-          ),
+          decoration: active
+              ? AppTheme.card(
+                  fill: AppTheme.black,
+                  radius: 20,
+                  offset: AppTheme.faceOffsetPressed)
+              : const BoxDecoration(),
           child: Text(label,
               style: AppTheme.body(12,
                   weight: FontWeight.w700,
-                  color: active ? Colors.white : AppTheme.inkMuted)),
+                  color: active ? AppTheme.onAccent : AppTheme.inkMuted)),
         ),
       );
     }
@@ -429,7 +430,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.6),
+        color: AppTheme.surface.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(22),
       ),
       child: Row(children: [
@@ -447,13 +448,11 @@ class _HomeDashboardState extends State<HomeDashboard> {
 
   Widget _section({
     required String title,
-    required Color tint,
     required List<Widget> children,
   }) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 16),
-        child: GlassPanel(
-          tint: tint,
+        child: SectionPanel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -473,39 +472,25 @@ class _HomeDashboardState extends State<HomeDashboard> {
       statusColor: AppTheme.amber,
       count: '${st.count}',
       amount: inr(st.amount),
+      // The 1/2/3-month window used to sit here as a dropdown. A control
+      // inside a summary tile makes the tile two things at once — a figure to
+      // read and a form to operate — and it was the only card on the page you
+      // could touch without opening it. It now lives on the list this card
+      // opens, where changing the window and seeing the accounts it lets in
+      // are the same glance. The card just reports the current window, which
+      // defaults to one month.
       onView: () => _openFilter(AccountFilter.newAccounts),
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: AppTheme.panel(AppTheme.surfaceSoft, radius: 10),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<int>(
-            value: _newMonths,
-            isDense: true,
-            style: AppTheme.body(13, weight: FontWeight.w700),
-            items: const [
-              DropdownMenuItem(value: 1, child: Text('1 mo')),
-              DropdownMenuItem(value: 2, child: Text('2 mo')),
-              DropdownMenuItem(value: 3, child: Text('3 mo')),
-            ],
-            onChanged: (v) async {
-              if (v == null) return;
-              AccountFilter.newAccountMonths = v;
-              await AppSettings.setNewAccountMonths(v);
-              if (mounted) setState(() => _newMonths = v);
-            },
-          ),
-        ),
-      ),
     );
   }
 
   Widget _sum(String title, Color color, AccountFilter f,
       Stat Function(AccountFilter) s,
-      {bool amount = true}) {
+      {bool amount = true, int rank = 0}) {
     final st = s(f);
     return SummaryCard(
       title: title,
       statusColor: color,
+      rank: rank,
       count: '${st.count}',
       amount: amount ? inr(st.amount) : null,
       onView: () => _openFilter(f),

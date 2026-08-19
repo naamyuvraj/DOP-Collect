@@ -204,7 +204,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.bolt_rounded,
+              Icon(Icons.bolt_rounded,
                   size: 16, color: AppTheme.green),
               const SizedBox(width: 4),
               Text('Maturity updates automatically as you type',
@@ -281,7 +281,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         width: 44,
         height: 44,
         decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        child: Icon(icon, color: Colors.white, size: 22),
+        child: Icon(icon, color: AppTheme.onAccent, size: 22),
       ),
     );
   }
@@ -298,7 +298,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         decoration: AppTheme.panel(AppTheme.surfaceSoft, radius: 12),
         child: Row(
           children: [
-            const Icon(Icons.event_outlined,
+            Icon(Icons.event_outlined,
                 size: 18, color: AppTheme.inkFaint),
             const SizedBox(width: 10),
             Expanded(
@@ -325,7 +325,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                   _openedOn = null;
                   _rate.text = _spec.rate.toString();
                 }),
-                child: const Icon(Icons.close, size: 18, color: AppTheme.inkFaint),
+                child: Icon(Icons.close, size: 18, color: AppTheme.inkFaint),
               )
             else
               Text('New RD',
@@ -366,15 +366,17 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(r.payout == null ? 'MATURITY VALUE' : 'YOU GET BACK',
-              style: AppTheme.label(AppTheme.black)),
+              style: AppTheme.label(AppTheme.onFocal)),
           const SizedBox(height: 6),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(inr(r.maturity.round()),
-                style: AppTheme.display(34, weight: FontWeight.w800)),
+                style: AppTheme.display(34,
+                    weight: FontWeight.w800, color: AppTheme.onFocal)),
           ),
-          const Divider(height: 26, color: Color(0x33000000)),
+          Divider(
+              height: 26, color: AppTheme.onFocal.withValues(alpha: 0.15)),
           _row('Total deposited', inr(r.deposited.round())),
           _row('Interest earned', inr(r.interest.round())),
           for (final extra in r.rows) _row(extra.$1, extra.$2),
@@ -388,9 +390,12 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label, style: AppTheme.body(13, color: AppTheme.black)),
+            Text(label,
+                style: AppTheme.body(13,
+                    color: AppTheme.onFocal.withValues(alpha: 0.75))),
             Text(value,
-                style: AppTheme.body(14.5, weight: FontWeight.w800)),
+                style: AppTheme.body(14.5,
+                    weight: FontWeight.w800, color: AppTheme.onFocal)),
           ],
         ),
       );

@@ -101,7 +101,7 @@ class _CollectScreenState extends State<CollectScreen> {
     final lots = await widget.lots.all();
     final dayState =
         await AppSettings.dayCloseState(now, CollectionRound.total(today));
-    final rule = await AppSettings.dailyRule();
+    const rule = DailyRule.standard; // fixed book-wide; per-customer wins
     final daily = await AppSettings.collectDailyMode();
     if (!mounted) return;
     // Default to his round once he has arranged one — that's the order he
@@ -328,17 +328,20 @@ class _CollectScreenState extends State<CollectScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('IN YOUR BAG TODAY', style: AppTheme.label(AppTheme.ink)),
+          Text('IN YOUR BAG TODAY', style: AppTheme.label(AppTheme.onFocal)),
           const SizedBox(height: 6),
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(inr(bag), style: AppTheme.display(30, weight: FontWeight.w800)),
+              Text(inr(bag),
+                  style: AppTheme.display(30,
+                      weight: FontWeight.w800, color: AppTheme.onFocal)),
               const SizedBox(width: 10),
               Flexible(
                 child: Text('${_today.length} collections',
-                    style: AppTheme.body(13, color: AppTheme.inkMuted)),
+                    style: AppTheme.body(13,
+                        color: AppTheme.onFocal.withValues(alpha: 0.7))),
               ),
             ],
           ),
@@ -348,8 +351,8 @@ class _CollectScreenState extends State<CollectScreen> {
             child: LinearProgressIndicator(
               value: capped / LotPacking.defaultCap,
               minHeight: 8,
-              backgroundColor: Colors.black.withValues(alpha: 0.10),
-              valueColor: const AlwaysStoppedAnimation(AppTheme.black),
+              backgroundColor: AppTheme.onFocal.withValues(alpha: 0.12),
+              valueColor: const AlwaysStoppedAnimation(AppTheme.onFocal),
             ),
           ),
           const SizedBox(height: 8),
@@ -361,7 +364,8 @@ class _CollectScreenState extends State<CollectScreen> {
                       ? 'Swipe a customer right when they pay you.'
                       : '${inr(room)} more fits this list · $done collected, '
                           '$owing to go (${inr(outstanding)})',
-                  style: AppTheme.body(12.5, color: AppTheme.inkMuted),
+                  style: AppTheme.body(12.5,
+                      color: AppTheme.onFocal.withValues(alpha: 0.75)),
                 ),
               ),
               // Day close sits on the bag card because that's the number he is
@@ -414,7 +418,7 @@ class _CollectScreenState extends State<CollectScreen> {
             Text(label,
                 style: AppTheme.body(12.5,
                     weight: FontWeight.w800,
-                    color: solid ? Colors.white : AppTheme.ink)),
+                    color: solid ? AppTheme.onAccent : AppTheme.ink)),
           ],
         ),
       ),
@@ -443,7 +447,7 @@ class _CollectScreenState extends State<CollectScreen> {
             child: Text(label,
                 style: AppTheme.body(13.5,
                     weight: FontWeight.w800,
-                    color: on ? Colors.white : AppTheme.inkMuted)),
+                    color: on ? AppTheme.onAccent : AppTheme.inkMuted)),
           ),
         ),
       );
@@ -488,7 +492,7 @@ class _CollectScreenState extends State<CollectScreen> {
             child: Text('${f.label} $n',
                 style: AppTheme.body(12.5,
                     weight: FontWeight.w700,
-                    color: on ? Colors.white : AppTheme.inkMuted)),
+                    color: on ? AppTheme.onAccent : AppTheme.inkMuted)),
           ),
         ),
       );
@@ -518,7 +522,7 @@ class _CollectScreenState extends State<CollectScreen> {
               decoration: AppTheme.card(radius: 12),
               child: Row(
                 children: [
-                  const Icon(Icons.search_rounded,
+                  Icon(Icons.search_rounded,
                       size: 19, color: AppTheme.inkFaint),
                   const SizedBox(width: 8),
                   Expanded(
@@ -542,7 +546,7 @@ class _CollectScreenState extends State<CollectScreen> {
                         _searchCtrl.clear();
                         _query = '';
                       }),
-                      child: const Icon(Icons.close_rounded,
+                      child: Icon(Icons.close_rounded,
                           size: 19, color: AppTheme.inkMuted),
                     ),
                 ],
@@ -600,7 +604,7 @@ class _CollectScreenState extends State<CollectScreen> {
           value: 'arrange',
           child: Row(
             children: [
-              const Icon(Icons.route_rounded, size: 18, color: AppTheme.black),
+              Icon(Icons.route_rounded, size: 18, color: AppTheme.black),
               const SizedBox(width: 10),
               Text('Arrange my route', style: AppTheme.body(14)),
             ],
@@ -610,7 +614,7 @@ class _CollectScreenState extends State<CollectScreen> {
           value: 'all',
           child: Row(
             children: [
-              const Icon(Icons.account_balance_wallet_rounded,
+              Icon(Icons.account_balance_wallet_rounded,
                   size: 18, color: AppTheme.black),
               const SizedBox(width: 10),
               Text('All accounts', style: AppTheme.body(14)),
@@ -624,7 +628,7 @@ class _CollectScreenState extends State<CollectScreen> {
         decoration: AppTheme.card(radius: 12),
         child: Row(
           children: [
-            const Icon(Icons.sort_rounded, size: 18, color: AppTheme.black),
+            Icon(Icons.sort_rounded, size: 18, color: AppTheme.black),
             const SizedBox(width: 6),
             Text(_sort.label,
                 style: AppTheme.body(13.5, weight: FontWeight.w700)),
@@ -731,7 +735,7 @@ class _CollectScreenState extends State<CollectScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.checklist_rounded,
+            Icon(Icons.checklist_rounded,
                 size: 48, color: AppTheme.inkFaint),
             const SizedBox(height: 14),
             Text('Nothing to collect yet',

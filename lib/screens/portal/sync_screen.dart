@@ -1109,7 +1109,7 @@ class _SyncScreenState extends State<SyncScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.verified_user_outlined,
+                Icon(Icons.verified_user_outlined,
                     color: AppTheme.accent, size: 20),
                 const SizedBox(width: 8),
                 Text('Installments keyed', style: AppTheme.display(15)),
@@ -1178,10 +1178,18 @@ class _SyncScreenState extends State<SyncScreen> {
         _snack(result.error ?? 'No accounts found.');
         return;
       }
-      // Merge whatever was read — replaceAll is an upsert, so a short read adds
-      // and updates but never removes, and the accounts it did reach are worth
-      // keeping.
-      await widget.repo.replaceAll(result.accounts);
+      // Merge whatever was read — replaceAll never removes a row, and the
+      // accounts it did reach are worth keeping.
+      //
+      // `complete` is what decides whether absence MEANS anything. Only a walk
+      // that started at page 1 and read every page the portal advertised can
+      // conclude that a missing account has matured and closed; a short read
+      // holds a prefix of the book, so absence there is just the pages it never
+      // got to. Passing the flag through is the whole difference between
+      // "closed accounts finally leave the book" and "a stalled sync empties
+      // it".
+      final closed =
+          await widget.repo.replaceAll(result.accounts, complete: result.complete);
 
       // ...but a partial run is NOT a sync. Stamping last_sync would silence the
       // "you haven't synced" nag on a run that failed, and `sync_done` is what
@@ -1203,11 +1211,25 @@ class _SyncScreenState extends State<SyncScreen> {
         // larger and not what "book value" means here.
         'total_amount':
             result.accounts.fold<int>(0, (s, a) => s + a.denominationAmount),
+        // A count, like `accounts` — no names, no numbers. Lets the dashboard
+        // tell a book that shrank because accounts matured from one that shrank
+        // because a sync went wrong.
+        'closed': closed.length,
       }));
       if (!mounted) return;
+      // Name the closures rather than letting accounts vanish quietly — this is
+      // the agent's book, and a wrong closure must be something he can SEE.
+      // They stay readable under Settings → Matured Accounts for a month.
+      final closedNote = closed.isEmpty
+          ? ''
+          : closed.length == 1
+              ? ' ${closed.first.customerName} has closed — see Settings → '
+                  'Matured Accounts.'
+              : ' ${closed.length} accounts have closed — see Settings → '
+                  'Matured Accounts.';
       _snack(result.error ??
-          'Synced ${result.accounts.length} accounts. Run Deep Sync for '
-              'last-deposit dates.');
+          'Synced ${result.accounts.length} accounts.$closedNote'
+              '${closed.isEmpty ? ' Run Deep Sync for last-deposit dates.' : ''}');
       // Fast list sync only. Exact per-account figures (last deposit etc.) are
       // fetched separately via the "Deep Sync" button.
       if (mounted) Navigator.of(context).pop(true);
@@ -1277,7 +1299,7 @@ class _SyncScreenState extends State<SyncScreen> {
 
   void _snack(String m) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(m)));
   }
 
   @override

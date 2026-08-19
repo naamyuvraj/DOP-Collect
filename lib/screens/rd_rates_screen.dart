@@ -45,7 +45,7 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
       _dirty = false;
     });
     ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('RD rates saved')));
+        .showSnackBar(const SnackBar(duration: Duration(seconds: 3), content: Text('RD rates saved')));
   }
 
   Future<void> _reset() async {
@@ -79,7 +79,7 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
       _dirty = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Restored the built-in rates')));
+        const SnackBar(duration: Duration(seconds: 3), content: Text('Restored the built-in rates')));
   }
 
   void _editRate(int index) {
@@ -106,7 +106,7 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
             onPressed: () {
               final v = double.tryParse(ctrl.text.trim());
               if (v == null || v < 1 || v > 15) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 3), 
                     content: Text('Enter a rate between 1% and 15%.')));
                 return;
               }
@@ -218,7 +218,7 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
               onPressed: () {
                 final v = double.tryParse(rateCtrl.text.trim());
                 if (v == null || v < 1 || v > 15) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 3), 
                       content: Text('Enter a rate between 1% and 15%.')));
                   return;
                 }
@@ -339,7 +339,7 @@ class _RdRatesScreenState extends State<RdRatesScreen> {
                       ),
                       IconButton(
                         visualDensity: VisualDensity.compact,
-                        icon: const Icon(Icons.remove_circle_outline,
+                        icon: Icon(Icons.remove_circle_outline,
                             color: AppTheme.red, size: 20),
                         onPressed: _rows.length > 1 ? () => _delete(idx) : null,
                       ),

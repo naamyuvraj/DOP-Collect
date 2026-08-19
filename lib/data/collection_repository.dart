@@ -3,9 +3,13 @@ import 'database.dart';
 
 /// The field collection ledger.
 ///
-/// Append and delete only — there is no "update a collection". A wrong entry is
-/// removed (the sheet's Undo) and re-recorded, so the log always reads as what
-/// actually happened at the door rather than a value someone edited later.
+/// Append, correct, and delete. This was append-and-delete only, on the
+/// argument that a re-recorded entry reads as what actually happened at the
+/// door. In practice a mistyped figure discovered days later could only be
+/// fixed by deleting and re-adding, which stamped the correction's time onto
+/// the customer's khata and moved the entry to today. [update] exists so the
+/// figure can be corrected while the door time and cycle stay put — the
+/// history stays honest, only the number moves.
 abstract class CollectionRepository {
   /// Record one handover. Returns the stored row (with its id) so the UI can
   /// offer Undo without re-reading.
@@ -13,6 +17,12 @@ abstract class CollectionRepository {
 
   /// Undo — drop a single recorded handover.
   Future<void> remove(int id);
+
+  /// Correct a recorded handover's figure. Only [Collection.amount] and
+  /// [Collection.installments] may change; the row keeps its id, its
+  /// `collected_at` and its cycle, so a correction can never silently move a
+  /// payment into a different month.
+  Future<void> update(Collection c);
 
   /// Every handover in a cycle (`yyyy-MM`), newest first.
   Future<List<Collection>> forCycle(String cycleYm);
@@ -39,6 +49,20 @@ class SqfliteCollectionRepository implements CollectionRepository {
   Future<void> remove(int id) async {
     final db = await _db.database;
     await db.delete('collections', where: 'id = ?', whereArgs: [id]);
+  }
+
+  @override
+  Future<void> update(Collection c) async {
+    assert(c.id != null, 'cannot correct an unsaved collection');
+    final db = await _db.database;
+    // Only the figure. Writing the whole map would let a caller move
+    // collected_at or cycle_ym by accident.
+    await db.update(
+      'collections',
+      {'amount': c.amount, 'installments': c.installments},
+      where: 'id = ?',
+      whereArgs: [c.id],
+    );
   }
 
   @override
@@ -90,6 +114,14 @@ class MemoryCollectionRepository implements CollectionRepository {
 
   @override
   Future<void> remove(int id) async => _items.removeWhere((c) => c.id == id);
+
+  @override
+  Future<void> update(Collection c) async {
+    final i = _items.indexWhere((e) => e.id == c.id);
+    if (i == -1) return;
+    _items[i] = _items[i]
+        .copyWith(amount: c.amount, installments: c.installments);
+  }
 
   @override
   Future<List<Collection>> forCycle(String cycleYm) async =>

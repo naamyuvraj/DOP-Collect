@@ -114,7 +114,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
   }
 
   void _warn(String msg) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(msg)));
+      .showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(msg)));
 
   Future<void> _create() async {
     if (_selected.isEmpty) return;
@@ -188,7 +188,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
     if (!mounted) return;
     Navigator.of(context).pop(true);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('List created · ${items.length} accounts · '
+      SnackBar(duration: const Duration(seconds: 3), content: Text('List created · ${items.length} accounts · '
           '${inr(_total)} · $_mode')),
     );
   }
@@ -304,7 +304,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
                 overflow: TextOverflow.ellipsis,
                 style: AppTheme.body(12.5,
                     weight: FontWeight.w700,
-                    color: active ? Colors.white : AppTheme.ink)),
+                    color: active ? AppTheme.onAccent : AppTheme.ink)),
           ),
         ),
       );
@@ -339,7 +339,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
         decoration: AppTheme.card(radius: 10),
         child: Row(
           children: [
-            const Icon(Icons.search, color: AppTheme.inkFaint, size: 20),
+            Icon(Icons.search, color: AppTheme.inkFaint, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: TextField(
@@ -430,7 +430,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
         width: 34,
         height: 34,
         decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        child: Icon(icon, color: Colors.white, size: 20),
+        child: Icon(icon, color: AppTheme.onAccent, size: 20),
       ),
     );
   }
@@ -480,7 +480,7 @@ class _ChequeEntryScreenState extends State<ChequeEntryScreen> {
     for (final r in widget.rows) {
       final acc = r.account.accountNumber;
       if (_chq[acc]!.text.trim().isEmpty || _bank[acc]!.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 3), 
             content: Text(
                 'Enter the cheque number and bank account for every account.')));
         return;

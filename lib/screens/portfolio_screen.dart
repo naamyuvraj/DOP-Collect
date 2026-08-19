@@ -281,7 +281,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
         width: 44,
         height: 44,
         decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        child: Icon(icon, color: Colors.white, size: 22),
+        child: Icon(icon, color: AppTheme.onAccent, size: 22),
       ),
     );
   }
@@ -296,7 +296,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       decoration: AppTheme.panel(AppTheme.blueSoft, radius: 16),
       child: Row(
         children: [
-          const Icon(Icons.cloud_download_outlined,
+          Icon(Icons.cloud_download_outlined,
               color: AppTheme.accent, size: 22),
           const SizedBox(width: 12),
           Expanded(

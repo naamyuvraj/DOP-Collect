@@ -41,7 +41,7 @@ class _KhataBackupScreenState extends State<KhataBackupScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(m)));
+      ..showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(m)));
   }
 
   /// How stale the newest backup is, in the words he'd use.
@@ -306,11 +306,15 @@ class _KhataBackupScreenState extends State<KhataBackupScreen> {
                 children: [
                   Icon(_stale ? Icons.warning_amber_rounded : Icons.check_circle,
                       size: 18,
-                      color: _stale ? AppTheme.amber : AppTheme.green),
+                      color:
+                          _stale ? AppTheme.amberOnFocal : AppTheme.green),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(_lastLabel,
-                        style: AppTheme.body(13, weight: FontWeight.w700)),
+                        style: AppTheme.body(13,
+                            weight: FontWeight.w700,
+                            // The stale chip is lime in both themes.
+                            color: _stale ? AppTheme.onFocal : AppTheme.ink)),
                   ),
                 ],
               ),
@@ -320,11 +324,11 @@ class _KhataBackupScreenState extends State<KhataBackupScreen> {
               onPressed: _busy ? null : _backUp,
               color: AppTheme.black,
               child: _busy
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
+                          strokeWidth: 2, color: AppTheme.onAccent))
                   : const Text('Back up my khata'),
             ),
             const SizedBox(height: 10),

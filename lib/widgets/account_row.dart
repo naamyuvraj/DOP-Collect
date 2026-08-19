@@ -95,7 +95,7 @@ class AccountRow extends StatelessWidget {
       width: 42,
       height: 42,
       alignment: Alignment.center,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
           color: AppTheme.surfaceSoft, shape: BoxShape.circle),
       child: Text(initials.toUpperCase(),
           style: AppTheme.display(14, weight: FontWeight.w800)),

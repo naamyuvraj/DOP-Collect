@@ -72,7 +72,7 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.system_update_rounded,
+                Icon(Icons.system_update_rounded,
                     size: 64, color: AppTheme.black),
                 const SizedBox(height: 20),
                 Text('Update required',
@@ -86,25 +86,25 @@ class _ForceUpdateScreenState extends State<ForceUpdateScreen> {
                 PushButton(
                   onPressed: _busy ? null : _update,
                   color: AppTheme.black,
-                  foreground: Colors.white,
+                  foreground: AppTheme.onAccent,
                   radius: 14,
                   expand: false,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       if (_busy)
-                        const SizedBox(
+                        SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
+                                strokeWidth: 2, color: AppTheme.onAccent))
                       else
                         Icon(
                             _ready
                                 ? Icons.restart_alt_rounded
                                 : Icons.download_rounded,
                             size: 20,
-                            color: Colors.white),
+                            color: AppTheme.onAccent),
                       const SizedBox(width: 8),
                       Text(_busy
                           ? 'Checking…'

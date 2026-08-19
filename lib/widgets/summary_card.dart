@@ -24,193 +24,201 @@ class FocalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: const [
-          // 3D solid edge underneath (darker yellow) + soft ambient glow.
-          BoxShadow(
-              color: Color(0xFFCBD348), blurRadius: 0, offset: Offset(0, 7)),
-          BoxShadow(
-              color: Color(0x3AB9C24A), blurRadius: 30, offset: Offset(0, 16)),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 24),
+      // One flat neon block extruded in its OWN shadow, not grey — that is
+      // what stops it reading as a sticker laid on the page.
+      decoration: AppTheme.card(fill: AppTheme.focal),
+      child: Stack(
+        children: [
+          // Must be told to fill: a Stack hands its non-positioned children
+          // LOOSE constraints, so an unbounded Column shrink-wraps to its
+          // widest line and then centres its text on itself rather than on the
+          // card — the label ends up floating off to one side.
+          SizedBox(
+            width: double.infinity,
+            child: Column(
+              children: [
+                Text(label.toUpperCase(),
+                    style: AppTheme.label(
+                        AppTheme.onFocal.withValues(alpha: 0.75))),
+                const SizedBox(height: 10),
+                FittedBox(
+                  child: Text(hidden ? '• • • • •' : amount,
+                      style: AppTheme.display(58,
+                          weight: FontWeight.w800,
+                          spacing: -2,
+                          color: AppTheme.onFocal)),
+                ),
+                const SizedBox(height: 6),
+                Text(hidden ? 'Tap the eye to view' : sublabel,
+                    style: AppTheme.body(14,
+                        weight: FontWeight.w700,
+                        color: AppTheme.onFocal.withValues(alpha: 0.85))),
+              ],
+            ),
+          ),
+          // Eye toggle — hide/show the balance for privacy.
+          if (onToggleVisibility != null)
+            Positioned(
+              top: -6,
+              right: -6,
+              child: Material(
+                color: Colors.transparent,
+                child: IconButton(
+                  icon: Icon(
+                      hidden
+                          ? Icons.visibility_off_rounded
+                          : Icons.visibility_rounded,
+                      color: AppTheme.onFocal.withValues(alpha: 0.7),
+                      size: 22),
+                  onPressed: onToggleVisibility,
+                  tooltip: hidden ? 'Show' : 'Hide',
+                ),
+              ),
+            ),
         ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: Stack(
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(24, 22, 24, 26),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFF0F67A), Color(0xFFE1EA4C)],
-                ),
-              ),
-              child: Column(
-                children: [
-                  Text(label.toUpperCase(),
-                      style: AppTheme.label(
-                          AppTheme.black.withValues(alpha: 0.75))),
-                  const SizedBox(height: 10),
-                  FittedBox(
-                    child: Text(hidden ? '• • • • •' : amount,
-                        style: AppTheme.display(58,
-                            weight: FontWeight.w800, spacing: -2)),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(hidden ? 'Tap the eye to view' : sublabel,
-                      style: AppTheme.body(14,
-                          weight: FontWeight.w700,
-                          color: AppTheme.black.withValues(alpha: 0.85))),
-                ],
-              ),
-            ),
-            // Eye toggle — hide/show the balance for privacy.
-            if (onToggleVisibility != null)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Material(
-                  color: Colors.transparent,
-                  child: IconButton(
-                    icon: Icon(
-                        hidden
-                            ? Icons.visibility_off_rounded
-                            : Icons.visibility_rounded,
-                        color: AppTheme.black.withValues(alpha: 0.7),
-                        size: 22),
-                    onPressed: onToggleVisibility,
-                    tooltip: hidden ? 'Show' : 'Hide',
-                  ),
-                ),
-              ),
-            // Glossy shine sweeping across the top-left.
-            Positioned.fill(
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.center,
-                      colors: [
-                        Colors.white.withValues(alpha: 0.45),
-                        Colors.white.withValues(alpha: 0.0),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
 }
 
-/// A clean white floating summary card: a status dot + title, the count and
-/// amount, and a black round "View" button.
+/// A plain card: a status dot + title, the count and amount, and a charcoal
+/// round "View" button. Deliberately unremarkable — on a page of twelve of
+/// these, colour is reserved for the one block that is the point.
 class SummaryCard extends StatelessWidget {
   const SummaryCard({
     super.key,
     required this.title,
     required this.statusColor,
     required this.count,
+    this.rank = 0,
     this.amount,
     this.onView,
-    this.trailing,
   });
 
   final String title;
   final Color statusColor;
+
+  /// Position in its section, 0 first. Drives which step of the card family
+  /// this one sits on — series order IS emphasis order, so a section never
+  /// needs a colour per card.
+  final int rank;
   final String count;
   final String? amount;
   final VoidCallback? onView;
 
-  /// Optional compact control shown before the View button (e.g. a dropdown).
-  final Widget? trailing;
+  static TextStyle get _labelStyle => AppTheme.body(12.5,
+      weight: FontWeight.w700, color: AppTheme.inkMuted);
+
+  /// One cell: a caption on the top line, a figure on the bottom line. Both
+  /// cells use this so the two lines run straight across the card.
+  static Widget _cell({
+    required Widget label,
+    required String value,
+    required Color valueColor,
+    required CrossAxisAlignment align,
+    required TextAlign textAlign,
+  }) =>
+      Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: align,
+        children: [
+          label,
+          const SizedBox(height: 12),
+          Text(value,
+              maxLines: 1,
+              textAlign: textAlign,
+              overflow: TextOverflow.ellipsis,
+              style: AppTheme.display(26,
+                  weight: FontWeight.w800, spacing: -0.6, color: valueColor)),
+        ],
+      );
 
   @override
   Widget build(BuildContext context) {
     final card = Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
-      decoration: AppTheme.card(radius: 22),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      // Frosted in light mode so the section well reads through it; solid on
+      // black, where translucency would just dissolve the card.
+      decoration: AppTheme.card(
+          radius: 22, translucent: true, fill: AppTheme.cardSurface(rank)),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // TWO CELLS, BUILT THE SAME WAY. Both are caption-over-figure, so
+            // the captions share a line and the figures share a line — the
+            // right cell used to be figure-over-caption, which mirrored the
+            // left one and left the two numbers sitting at different heights.
+            Expanded(
+              child: _cell(
+                label: Row(
                   children: [
+                    // Flat, not a haloed dot. The old 3px alpha ring left a
+                    // 12px mark with only a 6px solid core — soft-UI residue
+                    // that reads as mush next to hard-edged blocks.
                     Container(
-                      width: 12,
-                      height: 12,
+                      width: 10,
+                      height: 10,
                       decoration: BoxDecoration(
-                          color: statusColor,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: statusColor.withValues(alpha: 0.25),
-                              width: 3)),
+                          color: statusColor, shape: BoxShape.circle),
                     ),
                     const SizedBox(width: 8),
-                    Flexible(
+                    Expanded(
                       child: Text(title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: AppTheme.body(13.5,
-                              weight: FontWeight.w700,
-                              color: AppTheme.inkMuted)),
+                          style: _labelStyle),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text(count,
-                        style: AppTheme.display(26, weight: FontWeight.w800)),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: Text('accounts',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                AppTheme.body(13, color: AppTheme.inkFaint)),
-                      ),
-                    ),
-                  ],
+                value: amount ?? count,
+                valueColor: AppTheme.ink,
+                align: CrossAxisAlignment.start,
+                textAlign: TextAlign.left,
+              ),
+            ),
+            // The second cell only exists when there are two figures to
+            // divide. A card whose only number is the count keeps it in the
+            // lead slot rather than pushing it into a cell of its own.
+            if (amount != null) ...[
+              const SizedBox(width: 14),
+              Container(width: 1, color: AppTheme.line),
+              const SizedBox(width: 14),
+              // An equal share, and its content starts right at the rule.
+              // Sized to its own content it hugged the card's far edge, which
+              // left a gap between the two figures that changed width with the
+              // amount — wide next to ₹0, narrow next to ₹1,21,000 — so the
+              // pair never sat still down a column of cards. Two equal columns
+              // put the rule in the same place on every card and bring the
+              // figures back within reading distance of each other.
+              Expanded(
+                child: _cell(
+                  // Centred in its column rather than pinned to the rule.
+                  // Left-aligned it sat hard against the divider with the
+                  // whole right half empty behind it; centring spends that
+                  // slack on both sides of the figure instead of all of it on
+                  // one.
+                  label: Text('accounts',
+                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                      style: _labelStyle),
+                  value: count,
+                  valueColor: AppTheme.inkFaint,
+                  align: CrossAxisAlignment.center,
+                  textAlign: TextAlign.center,
                 ),
-                if (amount != null) ...[
-                  const SizedBox(height: 4),
-                  Text(amount!,
-                      style: AppTheme.display(22,
-                          weight: FontWeight.w800, spacing: -0.5)),
-                ],
-              ],
-            ),
-          ),
-          if (trailing != null) ...[trailing!, const SizedBox(width: 10)],
-          if (onView != null)
-            Container(
-              width: 46,
-              height: 46,
-              decoration: const BoxDecoration(
-                  color: AppTheme.black, shape: BoxShape.circle),
-              child: const Icon(Icons.arrow_outward_rounded,
-                  color: Colors.white, size: 20),
-            ),
-        ],
+              ),
+            ],
+          ],
+        ),
       ),
     );
     if (onView == null) return card;
-    // Whole card is tappable, not just the arrow. The trailing dropdown (if any)
-    // still gets its own taps — a child gesture wins over this outer one.
+    // The whole card is the target. It always was — the arrow badge only ever
+    // restated that, and on a page of six cards it was six charcoal blobs
+    // competing with the one block that is meant to draw the eye.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onView,

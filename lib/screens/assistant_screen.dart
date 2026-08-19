@@ -169,7 +169,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
     setState(() => _listening = false);
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(
+      ..showSnackBar(SnackBar(duration: const Duration(seconds: 3), 
         content: Text(reason),
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -257,8 +257,16 @@ class _AssistantScreenState extends State<AssistantScreen> {
   void _openAccount(String? accountNumber) {
     final acc = accountNumber?.trim() ?? '';
     if (acc.isEmpty || widget.repo == null) return;
+    // Same account screen as everywhere else, khata included. Without the
+    // ledger passed through, PortfolioScreen drops its Khata tab entirely, so
+    // an account opened from here was a different, lesser screen than the same
+    // account opened from the Accounts list.
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PortfolioScreen(repo: widget.repo!, accountNumber: acc),
+      builder: (_) => PortfolioScreen(
+        repo: widget.repo!,
+        accountNumber: acc,
+        collections: widget.collections,
+      ),
     ));
   }
 
@@ -406,9 +414,9 @@ class _AssistantScreenState extends State<AssistantScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
           constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.78),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: AppTheme.black,
-            borderRadius: BorderRadius.only(
+            borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(18),
               topRight: Radius.circular(18),
               bottomLeft: Radius.circular(18),
@@ -416,7 +424,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
             ),
           ),
           child: Text(m.text,
-              style: AppTheme.body(14, color: Colors.white, height: 1.3)),
+              style: AppTheme.body(14, color: AppTheme.onAccent, height: 1.3)),
         ),
       );
     }
@@ -484,7 +492,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
                   ),
                   child: Text(action.isUndo ? 'Undo it' : 'Yes, record it',
                       style: AppTheme.body(14.5,
-                          weight: FontWeight.w800, color: Colors.white)),
+                          weight: FontWeight.w800, color: AppTheme.onAccent)),
                 ),
               ),
             ),
@@ -522,7 +530,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.undo_rounded, size: 17, color: AppTheme.red),
+            Icon(Icons.undo_rounded, size: 17, color: AppTheme.red),
             const SizedBox(width: 6),
             Text('Undo this entry',
                 style: AppTheme.body(13,
@@ -628,7 +636,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
               ),
               child: Text('Open account',
                   style: AppTheme.body(14,
-                      weight: FontWeight.w700, color: Colors.white)),
+                      weight: FontWeight.w700, color: AppTheme.onAccent)),
             ),
           ),
         ],
@@ -726,8 +734,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
                         AppTheme.body(10.5, weight: FontWeight.w700, color: fg)),
               ),
             if (tappable)
-              const Padding(
-                padding: EdgeInsets.only(left: 6),
+              Padding(
+                padding: const EdgeInsets.only(left: 6),
                 child: Icon(Icons.chevron_right_rounded,
                     size: 20, color: AppTheme.inkFaint),
               ),
@@ -807,7 +815,7 @@ class _AssistantScreenState extends State<AssistantScreen> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(
+              SizedBox(
                   width: 15,
                   height: 15,
                   child: CircularProgressIndicator(
@@ -857,8 +865,8 @@ class _AssistantScreenState extends State<AssistantScreen> {
                       color: _busy ? AppTheme.inkFaint : AppTheme.black,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.arrow_upward_rounded,
-                        color: Colors.white, size: 22),
+                    child: Icon(Icons.arrow_upward_rounded,
+                        color: AppTheme.onAccent, size: 22),
                   ),
                 ),
               ],
@@ -895,11 +903,11 @@ class _AssistantScreenState extends State<AssistantScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(_listening ? Icons.stop_rounded : Icons.mic_rounded,
-                color: Colors.white, size: 22),
+                color: AppTheme.onAccent, size: 22),
             const SizedBox(width: 8),
             Text(_listening ? 'Sun raha hoon… (roken)' : 'Bolkar poochhein',
                 style: AppTheme.body(15,
-                    weight: FontWeight.w700, color: Colors.white)),
+                    weight: FontWeight.w700, color: AppTheme.onAccent)),
           ],
         ),
       ),

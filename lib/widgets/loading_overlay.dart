@@ -13,7 +13,7 @@ Future<T> runWithLoader<T>(
   showDialog<void>(
     context: context,
     barrierDismissible: false,
-    barrierColor: Colors.black.withValues(alpha: 0.35),
+    barrierColor: AppTheme.scrim,
     builder: (_) => PopScope(
       canPop: false,
       child: Center(
@@ -26,7 +26,7 @@ Future<T> runWithLoader<T>(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CircularProgressIndicator(color: AppTheme.black),
+              CircularProgressIndicator(color: AppTheme.black),
               const SizedBox(height: 16),
               Text(message, style: AppTheme.body(13, color: AppTheme.inkMuted)),
             ],

@@ -49,7 +49,7 @@ export default function Sidebar() {
             {open ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M3 6h18M3 12h18M3 18h18" />}
           </svg>
         </button>
-        <img src="/logo.png" alt="" width={44} height={44} className="w-11 h-11 rounded-[6px] object-contain" />
+        <img src="/logo.png" alt="" width={44} height={44} className="w-11 h-11 object-contain" />
         <span className="font-display text-base font-medium tracking-[-0.015em]">DOP Collect</span>
       </div>
 
@@ -70,7 +70,7 @@ export default function Sidebar() {
             administers. Sized 36px at 2x from a 128px source so it stays crisp
             on a retina display without shipping the 917KB original. */}
         <img src="/logo.png" alt="" width={56} height={56}
-             className="w-14 h-14 rounded-[7px] object-contain shrink-0" />
+             className="w-14 h-14 object-contain shrink-0" />
         <div className="leading-tight">
           <div className="font-display text-base font-medium tracking-[-0.015em]">DOP Collect</div>
           <div className="text-faint text-micro mt-0.5">Admin</div>

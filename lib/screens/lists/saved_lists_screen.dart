@@ -13,10 +13,9 @@ import '../../services/analytics.dart';
 import '../../services/remote_config.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
-import '../../widgets/glass_pill.dart';
+import '../../widgets/action_pill.dart';
 import '../paywall_screen.dart';
 import '../portal/sync_screen.dart';
-import 'batch_list_screen.dart';
 import 'list_builder_screen.dart';
 import 'lot_detail_screen.dart';
 import 'lot_preview_screen.dart';
@@ -47,6 +46,14 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
   String _agentId = '';
   String _aslaas = '';
   int _view = 0; // 0 = Lists (not yet on portal), 1 = Downloads (submitted)
+
+  /// Which day's batch is showing, per view; null = all of them. Both tabs
+  /// already grouped by day, but on a busy week that is a long scroll to reach
+  /// the four lists made this morning past the three from yesterday. Kept per
+  /// view because the two tabs hold different days — a batch can be submitted
+  /// on a different day from the one it was built on.
+  String? _listsDay;
+  String? _downloadsDay;
   Set<int> _downloaded = {}; // lot ids already downloaded
 
   @override
@@ -110,18 +117,6 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
   }
 
   /// Auto-build: pack every account still to collect into ready ₹20,000 lists.
-  Future<void> _autoBuild() async {
-    final made = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) =>
-          BatchListScreen(accounts: widget.accounts, lots: widget.lots),
-    ));
-    if (made == true) _reload();
-  }
-
-  /// Lists not yet made on the portal (drives the floating Submit pill).
-  List<Lot> get _unsubmitted =>
-      (_lots ?? const <Lot>[]).where((l) => !l.isSubmitted).toList();
-
   /// A floating action pill (rounded, shadowed) — shared by "New" and
   /// "Submit on Portal" so they match on the bottom-left stack.
   Widget _pill(String label, IconData icon, VoidCallback onTap,
@@ -131,22 +126,19 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
       child: Container(
         height: 54,
         padding: const EdgeInsets.symmetric(horizontal: 22),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(27),
-          boxShadow: const [
-            BoxShadow(
-                color: Color(0x40000000), blurRadius: 18, offset: Offset(0, 8)),
-          ],
-        ),
+        // Same hard face as every other button. This used to paint its own
+        // blurred drop shadow — the glass language the palette replaced — so
+        // it read as soft and flat beside the pressables around it.
+        decoration: AppTheme.card(
+            fill: color, radius: 27, offset: AppTheme.buttonFace),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 22),
+            Icon(icon, color: AppTheme.onAccent, size: 22),
             const SizedBox(width: 8),
             Text(label,
                 style: AppTheme.body(16,
-                    weight: FontWeight.w800, color: Colors.white)),
+                    weight: FontWeight.w800, color: AppTheme.onAccent)),
           ],
         ),
       ),
@@ -248,12 +240,12 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                 decoration: AppTheme.panel(AppTheme.black, radius: 10),
                 child: Row(
                   children: [
-                    const Icon(Icons.download_rounded,
-                        size: 16, color: Colors.white),
+                    Icon(Icons.download_rounded,
+                        size: 16, color: AppTheme.onAccent),
                     const SizedBox(width: 6),
                     Text('Download all (${submittedLots.length})',
                         style: AppTheme.body(12.5,
-                            weight: FontWeight.w700, color: Colors.white)),
+                            weight: FontWeight.w700, color: AppTheme.onAccent)),
                   ],
                 ),
               ),
@@ -321,22 +313,6 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                 color: AppTheme.black,
               ),
             ),
-          // "Submit on Portal" — the primary Lists action, as a clear labeled
-          // pill stacked just above "New" (not a bare cloud icon up top).
-          if (_view == 0 &&
-              kEnablePortalSubmit &&
-              RemoteConfig.portalSubmit &&
-              _unsubmitted.isNotEmpty)
-            Positioned(
-              left: 20,
-              bottom: agentLevelBottom(context) + 66,
-              child: _pill(
-                'Submit on Portal',
-                Icons.cloud_upload_rounded,
-                () => _submitAllOnPortal(_unsubmitted),
-                color: AppTheme.green,
-              ),
-            ),
         ],
       ),
     );
@@ -353,15 +329,14 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
             margin: const EdgeInsets.symmetric(horizontal: 3),
             padding: const EdgeInsets.symmetric(vertical: 10),
             alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: active ? AppTheme.black : AppTheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.line),
-            ),
+            decoration: AppTheme.card(
+                fill: active ? AppTheme.black : AppTheme.surface,
+                radius: 12,
+                offset: active ? AppTheme.faceOffsetPressed : 0),
             child: Text(label,
                 style: AppTheme.body(13.5,
                     weight: FontWeight.w700,
-                    color: active ? Colors.white : AppTheme.ink)),
+                    color: active ? AppTheme.onAccent : AppTheme.ink)),
           ),
         ),
       );
@@ -380,35 +355,19 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
 
   Widget _listsView(List<Lot> unsubmitted) {
     final items = <Widget>[
-      // Auto-build the month's ₹20,000 lists (with a review screen). Making one
-      // by hand is the floating "New" pill; submitting is the "Submit on
-      // Portal" pill.
-      Padding(
-        padding: const EdgeInsets.fromLTRB(14, 4, 14, 4),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: _autoBuild,
-            icon: const Icon(Icons.tune_rounded, size: 18),
-            label: Text('Auto-build this month\'s lists',
-                style: AppTheme.body(13.5, weight: FontWeight.w700)),
-            style: TextButton.styleFrom(
-                foregroundColor: AppTheme.ink,
-                padding: const EdgeInsets.symmetric(horizontal: 6)),
-          ),
-        ),
-      ),
+      _batchFilter(unsubmitted, _listsDay,
+          (v) => setState(() => _listsDay = v)),
     ];
 
     if (unsubmitted.isEmpty) {
       items.add(_emptyMsg(
           'No lists to submit',
-          'Tap "Auto-build this month\'s lists" or the "New" button to make '
-              'this month\'s ₹20,000 lists, then submit them on the portal.'));
+          'Tap "New" to make this month\'s ₹20,000 lists, then submit them on '
+              'the portal.'));
     } else {
-      for (final entry in Lot.groupByDay(unsubmitted).map(
+      for (final entry in Lot.groupByDay(_onlyDay(unsubmitted, _listsDay)).map(
           (g) => MapEntry(g.day, g.lots))) {
-        items.add(_dayHeader(entry.key, entry.value.length));
+        items.add(_dayHeader(entry.key, entry.value));
         for (final lot in entry.value) {
           items.add(Padding(
               padding: const EdgeInsets.only(bottom: 10),
@@ -431,8 +390,11 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
           'Lists you submit on the portal appear here — download each, or a '
               'whole day\'s batch, to submit at the post office.');
     }
-    final items = <Widget>[];
-    for (final entry in Lot.groupByDay(submitted)) {
+    final items = <Widget>[
+      _batchFilter(submitted, _downloadsDay,
+          (v) => setState(() => _downloadsDay = v)),
+    ];
+    for (final entry in Lot.groupByDay(_onlyDay(submitted, _downloadsDay))) {
       items.add(_batchHeader(entry.day, entry.lots)); // day + "Download all"
       for (final lot in entry.lots) {
         items.add(Padding(
@@ -446,12 +408,130 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
     );
   }
 
-  Widget _dayHeader(String day, int n) => Padding(
-        padding: const EdgeInsets.fromLTRB(2, 10, 2, 8),
-        child: Text('${_relDay(day)} · $n list${n == 1 ? '' : 's'}',
-            style: AppTheme.body(12.5,
-                weight: FontWeight.w700, color: AppTheme.inkMuted)),
-      );
+  /// Pick one day's batch, or all of them. Only shown when there is more than
+  /// one day to choose between — a single-batch tab needs no filter.
+  Widget _batchFilter(
+      List<Lot> lots, String? selected, ValueChanged<String?> onChanged) {
+    final days = <String>[];
+    for (final g in Lot.groupByDay(lots)) {
+      days.add(g.day);
+    }
+    if (days.length < 2) return const SizedBox.shrink();
+    // Matches the fallback in _onlyDay: a stale selection reads as "All".
+    final active = days.contains(selected) ? selected : null;
+    final now = DateTime.now();
+    String label(String day) {
+      final lot = lots.firstWhere((l) => l.filedDayLabel == day);
+      return Lot.relativeDay(lot.filedAt, now);
+    }
+
+    Widget chip(String text, bool active, VoidCallback onTap) => GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: AppTheme.card(
+                fill: active ? AppTheme.black : AppTheme.surface,
+                radius: 20,
+                offset: active ? AppTheme.faceOffsetPressed : 0),
+            child: Text(text,
+                style: AppTheme.body(12.5,
+                    weight: FontWeight.w700,
+                    color: active ? AppTheme.onAccent : AppTheme.ink)),
+          ),
+        );
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+      child: Row(
+        children: [
+          chip('All (${lots.length})', active == null, () => onChanged(null)),
+          for (final day in days) ...[
+            const SizedBox(width: 8),
+            chip(
+                '${label(day)} '
+                '(${lots.where((l) => l.filedDayLabel == day).length})',
+                active == day,
+                () => onChanged(day)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// [lots] narrowed to the chosen batch.
+  ///
+  /// A day that no longer has any lists falls back to showing everything
+  /// rather than an empty screen: submitting a batch moves it from Lists to
+  /// Downloads, so the day you were filtered to can vanish under you.
+  List<Lot> _onlyDay(List<Lot> lots, String? day) {
+    if (day == null) return lots;
+    final kept = lots.where((l) => l.filedDayLabel == day).toList();
+    return kept.isEmpty ? lots : kept;
+  }
+
+  /// "Today · 4 lists · ₹61,000" with the day's submit action on the same
+  /// line.
+  ///
+  /// The total belongs here because the batch is what gets carried to the post
+  /// office, and its figure was only ever visible by adding up the cards. And
+  /// submitting is an action ON this batch, so it reads better as a link at
+  /// the end of the batch's own line than as a floating pill that hovered over
+  /// the last card and hid it.
+  Widget _dayHeader(String day, List<Lot> lots) {
+    final total = lots.fold(0, (s, l) => s + l.totalNetAmount);
+    final n = lots.length;
+    final canSubmit = kEnablePortalSubmit &&
+        RemoteConfig.portalSubmit &&
+        // !isSubmitted (referenceNumber == null), the same test lot_detail
+        // uses. submittedAt is a different field and a lot can carry one
+        // without the other.
+        lots.any((l) => !l.isSubmitted);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 10, 2, 8),
+      child: Row(
+        children: [
+          // Expanded, not Flexible: the label takes the whole line so the
+          // submit link is pushed out to the right edge instead of sitting
+          // immediately after the text and floating mid-row.
+          Expanded(
+            child: Text(
+                '${_relDay(day)} · $n list${n == 1 ? '' : 's'} · ${inr(total)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTheme.body(12.5,
+                    weight: FontWeight.w700, color: AppTheme.inkMuted)),
+          ),
+          if (canSubmit) ...[
+            const SizedBox(width: 10),
+            GestureDetector(
+              onTap: () => _submitAllOnPortal(
+                  lots.where((l) => l.submittedAt == null).toList()),
+              behavior: HitTestBehavior.opaque,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Submit on Portal',
+                      style: AppTheme.body(12.5,
+                          weight: FontWeight.w800,
+                          color: AppTheme.green,
+                          spacing: 10)
+                          .copyWith(
+                              decoration: TextDecoration.underline,
+                              decorationColor: AppTheme.green)),
+                  const SizedBox(width: 2),
+                  Icon(Icons.arrow_forward_rounded,
+                      size: 14, color: AppTheme.green),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _emptyMsg(String title, String body) {
     return Center(
@@ -460,7 +540,7 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.receipt_long_outlined,
+            Icon(Icons.receipt_long_outlined,
                 size: 52, color: AppTheme.inkFaint),
             const SizedBox(height: 12),
             Text(title, style: AppTheme.display(18, weight: FontWeight.w700)),
@@ -511,7 +591,7 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                         Row(
                           children: [
                             if (lot.isSubmitted) ...[
-                              const Icon(Icons.verified_rounded,
+                              Icon(Icons.verified_rounded,
                                   size: 13, color: AppTheme.green),
                               const SizedBox(width: 3),
                             ],
@@ -539,12 +619,12 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                       ],
                     ),
                   ),
-                  const Icon(Icons.chevron_right, color: AppTheme.inkFaint),
+                  Icon(Icons.chevron_right, color: AppTheme.inkFaint),
                 ],
               ),
             ),
           ),
-          const Divider(height: 1, color: AppTheme.divider),
+          Divider(height: 1, color: AppTheme.divider),
           Row(
             children: [
               if (downloads)

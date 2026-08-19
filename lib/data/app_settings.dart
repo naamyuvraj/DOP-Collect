@@ -1,6 +1,6 @@
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/daily_rule.dart';
 
 /// How the day stands on the collect sheet.
 ///
@@ -55,31 +55,14 @@ class AppSettings {
       (await SharedPreferences.getInstance())
           .setString(_kMobile, v.replaceAll(RegExp(r'\D'), ''));
 
-  // Daily collection rule for the whole book. The default (installment ÷ 30)
-  // suits most agents, but this is his business — he can change the number of
-  // visits he counts on, or put every account on one flat amount, and either
-  // way a single customer can still be overridden from the collect sheet.
-  static const _kDailyFlat = 'daily_rule_flat';
-  static const _kDailyDays = 'daily_rule_days';
-  static const _kDailyAmount = 'daily_rule_amount';
-
-  static Future<DailyRule> dailyRule() async {
-    final p = await SharedPreferences.getInstance();
-    return DailyRule(
-      mode: (p.getBool(_kDailyFlat) ?? false)
-          ? DailyMode.flat
-          : DailyMode.perMonth,
-      days: p.getInt(_kDailyDays) ?? DailyRule.defaultDays,
-      flatAmount: p.getInt(_kDailyAmount) ?? 0,
-    );
-  }
-
-  static Future<void> setDailyRule(DailyRule r) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setBool(_kDailyFlat, r.mode == DailyMode.flat);
-    await p.setInt(_kDailyDays, r.days);
-    await p.setInt(_kDailyAmount, r.flatAmount);
-  }
+  // The book-wide daily rule used to live here — a day count and a
+  // flat-amount mode, both settable from Settings. It is now fixed at
+  // DailyRule.defaultDays, and the only override left is per-customer, set
+  // from the collect sheet in front of the customer it applies to.
+  //
+  // The old keys (daily_rule_flat / _days / _amount) are left unread rather
+  // than migrated. Nothing writes them now, and clearing a saved value is not
+  // worth a migration for a setting that no longer exists.
 
   // Day close: the last day he counted his cash against the ledger, and the
   // figure he counted. Kept in prefs rather than the DB — it's a one-line
@@ -238,4 +221,28 @@ class AppSettings {
     await prefs.setInt(key, count);
     return count;
   }
+
+  // Light, dark, or follow the phone. Read at startup BEFORE the first frame,
+  // so a dark-mode agent never gets a white flash on a cold launch.
+  static const _kThemeMode = 'theme_mode';
+
+  static Future<ThemeMode> themeMode() async {
+    switch ((await SharedPreferences.getInstance()).getString(_kThemeMode)) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.system;
+    }
+  }
+
+  static Future<void> setThemeMode(ThemeMode m) async =>
+      (await SharedPreferences.getInstance()).setString(
+          _kThemeMode,
+          switch (m) {
+            ThemeMode.light => 'light',
+            ThemeMode.dark => 'dark',
+            ThemeMode.system => 'system',
+          });
 }

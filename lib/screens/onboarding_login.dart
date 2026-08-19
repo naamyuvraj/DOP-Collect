@@ -102,15 +102,15 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(content: Text(m)));
+      ..showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(m)));
   }
 
   /// Button content: a white spinner while busy, otherwise the label.
   Widget _btnChild(String label) => _busy
-      ? const SizedBox(
+      ? SizedBox(
           width: 18,
           height: 18,
-          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+          child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.onAccent))
       : Text(label);
 
   /// Push the OTP screen for [phone] bound to [agentId]. Returns true if verified.
@@ -454,14 +454,14 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
               border: Border.all(color: AppTheme.line, width: 2),
             ),
             child: _photo.isEmpty
-                ? const Icon(Icons.person_rounded, size: 44, color: AppTheme.inkFaint)
+                ? Icon(Icons.person_rounded, size: 44, color: AppTheme.inkFaint)
                 : Image.memory(base64Decode(_photo), fit: BoxFit.cover),
           ),
           Container(
             padding: const EdgeInsets.all(7),
             decoration:
-                const BoxDecoration(color: AppTheme.black, shape: BoxShape.circle),
-            child: const Icon(Icons.photo_camera_rounded, size: 16, color: Colors.white),
+                BoxDecoration(color: AppTheme.black, shape: BoxShape.circle),
+            child: Icon(Icons.photo_camera_rounded, size: 16, color: AppTheme.onAccent),
           ),
         ],
       ),
@@ -479,7 +479,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
         padding: const EdgeInsets.only(top: 2, bottom: 4, left: 4),
         child: Row(
           children: [
-            const Icon(Icons.verified_user_outlined,
+            Icon(Icons.verified_user_outlined,
                 size: 15, color: AppTheme.inkFaint),
             const SizedBox(width: 7),
             Expanded(
@@ -500,7 +500,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
           children: [
-            const Icon(Icons.smartphone_outlined,
+            Icon(Icons.smartphone_outlined,
                 color: AppTheme.inkFaint, size: 20),
             const SizedBox(width: 12),
             Text('+91',
@@ -542,7 +542,7 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
             labelText: 'Password',
             labelStyle: AppTheme.body(13, color: AppTheme.inkMuted),
             prefixIcon:
-                const Icon(Icons.lock_outline, color: AppTheme.inkFaint, size: 20),
+                Icon(Icons.lock_outline, color: AppTheme.inkFaint, size: 20),
             suffixIcon: IconButton(
               icon: Icon(
                   _obscure
@@ -593,7 +593,7 @@ Future<bool> ensureDopLogin(BuildContext context) async {
   if (!context.mounted) return false;
   ScaffoldMessenger.of(context)
     ..clearSnackBars()
-    ..showSnackBar(const SnackBar(
+    ..showSnackBar(const SnackBar(duration: Duration(seconds: 3), 
         content: Text('Add your DOP portal login (Agent ID + password) first.')));
   await Navigator.of(context).push(MaterialPageRoute(
     builder: (ctx) => OnboardingLogin(

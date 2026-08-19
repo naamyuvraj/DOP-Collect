@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../data/account_repository.dart';
+import '../data/app_settings.dart';
 import '../data/collection_repository.dart';
 import '../models/account_sort.dart';
 import '../models/rd_account.dart';
@@ -100,6 +101,7 @@ class _AccountListScreenState extends State<AccountListScreen> {
       body: Column(
         children: [
           if (_isTab) _searchRow(),
+          if (widget.filter == AccountFilter.newAccounts) _monthWindow(),
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 4),
             child: AccountSortBar(
@@ -162,16 +164,73 @@ class _AccountListScreenState extends State<AccountListScreen> {
     );
   }
 
+  /// How far back "new" reaches. It lives here rather than on the dashboard
+  /// card because changing the window and seeing which accounts it lets in is
+  /// one glance, and because a summary tile should be a figure to read, not a
+  /// form to operate.
+  Widget _monthWindow() {
+    const options = [1, 2, 3];
+    final current = AccountFilter.newAccountMonths;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Row(
+        children: [
+          Text('Opened in the last',
+              style: AppTheme.body(13, color: AppTheme.inkMuted)),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: AppTheme.panel(AppTheme.surfaceSoft, radius: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final m in options)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () async {
+                      if (m == AccountFilter.newAccountMonths) return;
+                      AccountFilter.newAccountMonths = m;
+                      await AppSettings.setNewAccountMonths(m);
+                      if (mounted) setState(_reload);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      curve: Curves.easeOut,
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      decoration: m == current
+                          ? AppTheme.card(
+                              fill: AppTheme.black,
+                              radius: 8,
+                              offset: AppTheme.faceOffsetPressed)
+                          : const BoxDecoration(),
+                      child: Text('$m mo',
+                          style: AppTheme.body(13,
+                              weight: FontWeight.w700,
+                              color: m == current
+                                  ? AppTheme.onAccent
+                                  : AppTheme.inkFaint)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _searchRow() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Container(
         height: 48,
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: AppTheme.card(radius: 12),
+        // A field you type into, so it takes the edge but not the face.
+        decoration: AppTheme.card(radius: 12, offset: 0),
         child: Row(
           children: [
-            const Icon(Icons.search_rounded, size: 20, color: AppTheme.inkFaint),
+            Icon(Icons.search_rounded, size: 20, color: AppTheme.inkFaint),
             const SizedBox(width: 8),
             Expanded(
               child: TextField(
@@ -194,8 +253,8 @@ class _AccountListScreenState extends State<AccountListScreen> {
                   _query = '';
                   _reload();
                 }),
-                child: const Padding(
-                  padding: EdgeInsets.all(6),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
                   child: Icon(Icons.close_rounded,
                       size: 20, color: AppTheme.inkMuted),
                 ),

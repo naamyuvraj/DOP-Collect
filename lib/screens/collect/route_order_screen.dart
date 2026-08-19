@@ -143,8 +143,8 @@ class _RouteOrderScreenState extends State<RouteOrderScreen> {
                         ),
                         ReorderableDragStartListener(
                           index: i,
-                          child: const Padding(
-                            padding: EdgeInsets.all(10),
+                          child: Padding(
+                            padding: const EdgeInsets.all(10),
                             child: Icon(Icons.drag_handle_rounded,
                                 color: AppTheme.inkFaint),
                           ),
@@ -168,7 +168,7 @@ class _RouteOrderScreenState extends State<RouteOrderScreen> {
               ),
               child: Text(_saving ? 'Saving…' : 'Save route',
                   style: AppTheme.body(15,
-                      weight: FontWeight.w800, color: Colors.white)),
+                      weight: FontWeight.w800, color: AppTheme.onAccent)),
             ),
           ),
         ),

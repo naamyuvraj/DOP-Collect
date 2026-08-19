@@ -127,11 +127,11 @@ class _CollectRowState extends State<CollectRow> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 20),
+            Icon(icon, color: AppTheme.onAccent, size: 20),
             const SizedBox(width: 8),
             Text(label,
                 style: AppTheme.body(14,
-                    weight: FontWeight.w800, color: Colors.white)),
+                    weight: FontWeight.w800, color: AppTheme.onAccent)),
           ],
         ),
       );
@@ -157,7 +157,7 @@ class _CollectRowState extends State<CollectRow> {
                   value: p.fraction,
                   strokeWidth: 3,
                   backgroundColor: AppTheme.line,
-                  valueColor: const AlwaysStoppedAnimation(AppTheme.amber),
+                  valueColor: AlwaysStoppedAnimation(AppTheme.amber),
                 ),
               ),
             Container(
@@ -173,8 +173,8 @@ class _CollectRowState extends State<CollectRow> {
                         width: 2),
               ),
               child: done
-                  ? const Icon(Icons.check_rounded,
-                      size: 19, color: Colors.white)
+                  ? Icon(Icons.check_rounded,
+                      size: 19, color: AppTheme.onAccent)
                   : null,
             ),
           ],
@@ -216,7 +216,7 @@ class _CollectRowState extends State<CollectRow> {
                 value: p.fraction,
                 minHeight: 5,
                 backgroundColor: AppTheme.line,
-                valueColor: const AlwaysStoppedAnimation(AppTheme.amber),
+                valueColor: AlwaysStoppedAnimation(AppTheme.amber),
               ),
             ),
           ],
@@ -274,7 +274,7 @@ class _CollectRowState extends State<CollectRow> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Divider(height: 18, color: AppTheme.divider),
+          Divider(height: 18, color: AppTheme.divider),
           Text('COLLECT', style: AppTheme.label(AppTheme.inkFaint)),
           const SizedBox(height: 8),
           Wrap(
@@ -318,7 +318,7 @@ class _CollectRowState extends State<CollectRow> {
               behavior: HitTestBehavior.opaque,
               child: Row(
                 children: [
-                  const Icon(Icons.receipt_long_rounded,
+                  Icon(Icons.receipt_long_rounded,
                       size: 18, color: AppTheme.black),
                   const SizedBox(width: 8),
                   Text('Share receipt',
@@ -391,7 +391,7 @@ class _CollectRowState extends State<CollectRow> {
           ),
           child: Text('Collect',
               style: AppTheme.body(14,
-                  weight: FontWeight.w800, color: Colors.white)),
+                  weight: FontWeight.w800, color: AppTheme.onAccent)),
         ),
       ],
     );

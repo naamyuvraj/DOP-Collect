@@ -1,18 +1,17 @@
 import Link from "next/link";
 import PageHead from "@/components/PageHead";
-import { Bars3D, Donut3D, TrendArea } from "@/components/LazyCharts";
+import TimeChart from "@/components/TimeChart";
+import AggregateChart from "./AggregateChart";
 import { Card, Empty, Kpi, Pill, Table, Td, Th } from "@/components/ui";
 import {
   getCollections,
   getDaily,
-  getEventTypes,
-  getKeyUsage,
   getRevenueByDay,
   getSummary,
   recent,
 } from "@/lib/data";
 import { computeUsers } from "@/lib/users";
-import { day, inr, num, shortId, when } from "@/lib/format";
+import { inr, num, shortId, when } from "@/lib/format";
 
 // Cache the analytics render for 60s (ISR) instead of re-querying Supabase on
 // every navigation. Usage stats don't need to be second-fresh, and this makes
@@ -27,23 +26,25 @@ type Ev = {
 };
 
 export default async function Overview() {
-  const [s, daily, types, keys, rev, coll, users, events] = await Promise.all([
+  const [s, daily, rev, coll, users, events, keyRows] = await Promise.all([
     getSummary(),
     getDaily(),
-    getEventTypes(),
-    getKeyUsage(),
     getRevenueByDay(),
     getCollections(),
     computeUsers(),
-    recent<Ev>("events", "device_id,event,props,created_at", 12),
+    // Raw rows, not the pre-aggregated views: v_events_by_type and v_key_usage
+    // carry no date column, so their charts could never honour a time window.
+    recent<Ev>("events", "device_id,event,props,created_at", 2000),
+    recent<{ key_index: number; model: string; ok: boolean; created_at: string }>(
+      "key_usage", "key_index,model,ok,created_at", 2000
+    ),
   ]);
   const t = users.totals;
   const avgAcc = t.agents ? Math.round(t.accounts / t.agents) : 0;
 
-  const dailyView = daily.slice(-30).map((d) => ({ ...d, d: day(d.day) }));
-  const revView = rev.slice(-30).map((d) => ({ ...d, d: day(d.day) }));
-  const collView = coll.slice(-30).map((d) => ({ ...d, d: day(d.day) }));
-  const keyView = keys.map((k) => ({ ...k, name: `Key ${k.key_index}` }));
+  // Windowing happens in the cards now, so the full series goes down.
+  const eventRows = events.map((e) => ({ at: e.created_at, key: e.event }));
+  const keyUsageRows = keyRows.map((k) => ({ at: k.created_at, key: `Key ${k.key_index}` }));
 
   return (
     <>
@@ -71,72 +72,55 @@ export default async function Overview() {
       </div>
 
       <div className="grid gap-4 mt-4 lg:grid-cols-[1.4fr_1fr]">
-        <Card title="Active · daily">
-          {dailyView.length ? (
-            <TrendArea data={dailyView} x="d" y="dau" />
-          ) : (
-            <Empty action="Install the APK on a handset and sign in — the first launch lands here.">
-              No agent has opened the app yet
-            </Empty>
-          )}
-        </Card>
-        <Card title="Key usage">
-          {keyView.length ? (
-            <Donut3D data={keyView} nameKey="name" valueKey="calls" />
-          ) : (
-            <Empty action={<>Add a Groq key on <Link className="lnk" href="/keys">API Keys</Link>, then ask the Assistant something.</>}>
-              No key calls yet
-            </Empty>
-          )}
-        </Card>
+        <TimeChart
+          title="Active · daily"
+          storageKey="dau"
+          data={daily}
+          series={[{ key: "dau", color: "#171C22", label: "Active" }]}
+          empty="No agent has opened the app in this window"
+        />
+        <AggregateChart
+          title="Key usage"
+          storageKey="keyusage"
+          rows={keyUsageRows}
+          kind="donut"
+          empty="No key calls in this window"
+        />
       </div>
 
       <div className="grid gap-4 mt-4 lg:grid-cols-2">
-        <Card title="Collections · ₹/day">
-          {collView.some((c) => c.amount) ? (
-            <Bars3D data={collView} x="d" series={[{ key: "amount", color: "#EDF751", label: "Collected" }]} />
-          ) : (
-            <Empty action="Ask an agent to submit a list on the portal — the amount is stamped as it goes.">
-              Nothing collected yet
-            </Empty>
-          )}
-        </Card>
-        <Card title="Lists · daily">
-          {collView.some((c) => c.lists) ? (
-            <TrendArea data={collView} x="d" y="lists" />
-          ) : (
-            <Empty action="Ask an agent to submit their first list on the portal.">
-              No lists filed yet
-            </Empty>
-          )}
-        </Card>
+        <TimeChart
+          title="Collections · ₹/day"
+          storageKey="collections"
+          data={coll}
+          kind="bars"
+          series={[{ key: "amount", color: "#EDF751", label: "Collected" }]}
+          empty="Nothing collected in this window"
+        />
+        <TimeChart
+          title="Lists · daily"
+          storageKey="lists"
+          data={coll}
+          series={[{ key: "lists", color: "#171C22", label: "Lists" }]}
+          empty="No lists filed in this window"
+        />
       </div>
 
       <div className="grid gap-4 mt-4 lg:grid-cols-2">
-        <Card title="Activity">
-          {types.length ? (
-            <Bars3D
-              data={types.slice(0, 8)}
-              x="event"
-              horizontal
-              colorByPoint
-              series={[{ key: "n", color: "#171C22", label: "Events" }]}
-            />
-          ) : (
-            <Empty action={<>Check a handset is signed in — see <Link className="lnk" href="/devices">Users</Link>.</>}>
-              No events recorded
-            </Empty>
-          )}
-        </Card>
-        <Card title="Revenue">
-          {revView.some((r) => r.revenue) ? (
-            <Bars3D data={revView} x="d" series={[{ key: "revenue", color: "#171C22", label: "Revenue" }]} />
-          ) : (
-            <Empty action={<>Price a tier on <Link className="lnk" href="/plans">Plans</Link>, then switch payments on there.</>}>
-              Nothing sold yet
-            </Empty>
-          )}
-        </Card>
+        <AggregateChart
+          title="Activity"
+          storageKey="eventtypes"
+          rows={eventRows}
+          empty="No events in this window"
+        />
+        <TimeChart
+          title="Revenue"
+          storageKey="revenue"
+          data={rev}
+          kind="bars"
+          series={[{ key: "revenue", color: "#171C22", label: "Revenue" }]}
+          empty="Nothing sold in this window"
+        />
       </div>
 
       <Card
@@ -154,7 +138,7 @@ export default async function Overview() {
             </tr>
           </thead>
           <tbody>
-            {events.map((e, i) => (
+            {events.slice(0, 12).map((e, i) => (
               <tr key={i}>
                 <Td className="whitespace-nowrap text-muted">{when(e.created_at)}</Td>
                 <Td className="font-mono text-xs">{shortId(e.device_id)}</Td>

@@ -63,6 +63,9 @@ class _LotPreviewScreenState extends State<LotPreviewScreen> {
     final w = MediaQuery.of(context).size.width;
     return Scaffold(
       appBar: AppBar(
+        // Pinned dark: the sheet below is a light document viewer in both
+        // themes, so the chrome over it cannot follow the canvas.
+        foregroundColor: AppTheme.onLight,
         title: Text(widget.title),
         actions: [
           IconButton(
@@ -80,7 +83,8 @@ class _LotPreviewScreenState extends State<LotPreviewScreen> {
         future: _pages,
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+                child: CircularProgressIndicator(color: AppTheme.onLight));
           }
           final pages = snap.data ?? const <Uint8List>[];
           if (snap.hasError || pages.isEmpty) return _fallback();
@@ -112,14 +116,15 @@ class _LotPreviewScreenState extends State<LotPreviewScreen> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
           child: PushButton(
             onPressed: _download,
-            color: AppTheme.black,
+            color: AppTheme.onLight,
             foreground: Colors.white,
             radius: 14,
             expand: false, // else it balloons to full height in a bottom bar
             child: const Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.download_rounded, size: 20, color: Colors.white),
+                Icon(Icons.download_rounded,
+                    size: 20, color: Colors.white),
                 SizedBox(width: 8),
                 Text('Download PDF'),
               ],
@@ -139,7 +144,7 @@ class _LotPreviewScreenState extends State<LotPreviewScreen> {
             'Preview isn\'t available on this phone.\n'
             'Tap "Download PDF" below to save and open it.',
             textAlign: TextAlign.center,
-            style: AppTheme.body(14, color: AppTheme.inkMuted),
+            style: AppTheme.body(14, color: AppTheme.onLightMuted),
           ),
         ),
       );

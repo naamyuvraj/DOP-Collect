@@ -212,7 +212,10 @@ class _MainShellState extends State<MainShell> {
       // Calculator moved into Settings rather than taking a sixth tab — it's a
       // reference tool used occasionally, not a daily surface like Collect.
       SettingsScreen(
-          repo: widget.repo, onSynced: _refreshData, onTour: runTour),
+          repo: widget.repo,
+          collections: widget.collections,
+          onSynced: _refreshData,
+          onTour: runTour),
     ];
 
     return Scaffold(
@@ -251,20 +254,20 @@ class _MainShellState extends State<MainShell> {
       child: Container(
         width: 58,
         height: 58,
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [Color(0xFF2E3A8C), Color(0xFF6D3BD6)],
           ),
           shape: BoxShape.circle,
+          // Hard face, like every other pressable — the blurred halo it had
+          // was the last of the glass language on this screen.
           boxShadow: [
-            const BoxShadow(
-                color: Color(0x552E2A8C), blurRadius: 20, offset: Offset(0, 10)),
             BoxShadow(
-                color: Colors.black.withValues(alpha: 0.18),
-                blurRadius: 4,
-                offset: const Offset(0, 2)),
+                color: Color(0xFF241E63),
+                blurRadius: 0,
+                offset: Offset(0, AppTheme.faceOffset)),
           ],
         ),
         child: const Icon(Icons.auto_awesome_rounded,
@@ -279,30 +282,13 @@ class _MainShellState extends State<MainShell> {
       child: Container(
         margin: const EdgeInsets.fromLTRB(14, 0, 14, 12),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        // The bar itself is furniture, not a control, so it takes no face —
+        // only the items inside it do. It gets the edge and the surface and
+        // nothing that suggests it can be pushed.
         decoration: BoxDecoration(
-          // Subtle top-highlight gradient for a glossy, glowing bar.
-          gradient: const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFFFFFFF), Color(0xFFF3F7F2)],
-          ),
-          borderRadius: BorderRadius.circular(34),
-          border: Border.all(color: const Color(0xCCFFFFFF), width: 1.2),
-          boxShadow: const [
-            // Soft green glow so the bar reads as floating + luminous.
-            BoxShadow(
-                color: Color(0x3321A06A),
-                blurRadius: 34,
-                offset: Offset(0, 16)),
-            BoxShadow(
-                color: Color(0x22101B12),
-                blurRadius: 12,
-                offset: Offset(0, 6)),
-            BoxShadow(
-                color: Color(0x0FFFFFFF),
-                blurRadius: 0,
-                offset: Offset(0, -1)),
-          ],
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.cardBorder, width: 1),
         ),
         child: Row(
           children: [
@@ -352,12 +338,15 @@ class _MainShellState extends State<MainShell> {
               curve: Curves.easeOut,
               width: 40,
               height: 32,
-              decoration: BoxDecoration(
-                color: active ? AppTheme.black : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
-              ),
+              decoration: active
+                  ? AppTheme.card(
+                      fill: AppTheme.black,
+                      radius: 9,
+                      offset: AppTheme.faceOffsetPressed)
+                  : const BoxDecoration(),
               child: Icon(_items[i].$1,
-                  size: 21, color: active ? Colors.white : AppTheme.inkFaint),
+                  size: 21,
+                  color: active ? AppTheme.onAccent : AppTheme.inkFaint),
             ),
             const SizedBox(height: 3),
             Text(_items[i].$2,

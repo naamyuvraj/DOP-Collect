@@ -8,12 +8,15 @@ import 'rd_account.dart';
 /// that rounds down can never reach the installment: ₹1,000/30 is ₹33.33, and
 /// thirty visits of ₹33 leave the agent covering the shortfall himself.
 ///
-/// He can still overrule it, at either level:
-///   * the whole book — change the number of days, or put every account on one
-///     flat amount ([DailyMode.flat]);
-///   * one customer — [RdAccount.dailyAmount], set from the collect sheet.
+/// The book-wide rule is no longer configurable: every account is the month's
+/// installment over [DailyRule.defaultDays] visits. The Settings screen used
+/// to expose the day count and a flat-amount mode, which asked the agent to
+/// make a decision about his whole book before he had collected anything —
+/// and the default was right for almost everyone.
 ///
-/// A per-customer amount always wins over the book-wide rule.
+/// One customer can still be overruled: [RdAccount.dailyAmount], set from the
+/// collect sheet, always wins. That is the override that gets used, because it
+/// is made in front of the customer it applies to.
 enum DailyMode {
   /// Monthly installment ÷ [DailyRule.days].
   perMonth,

@@ -54,7 +54,7 @@ class _VerifyGateScreenState extends State<VerifyGateScreen> {
 
   Future<void> _verify() async {
     if (_digits.length != 10) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 3), 
           content: Text('Enter your 10-digit mobile number.')));
       return;
     }
@@ -92,7 +92,7 @@ class _VerifyGateScreenState extends State<VerifyGateScreen> {
                     color: AppTheme.accentSoft,
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: const Icon(Icons.verified_user_outlined,
+                  child: Icon(Icons.verified_user_outlined,
                       color: AppTheme.black, size: 28),
                 ),
                 const SizedBox(height: 20),
@@ -138,7 +138,7 @@ class _VerifyGateScreenState extends State<VerifyGateScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          const Icon(Icons.smartphone_outlined,
+          Icon(Icons.smartphone_outlined,
               color: AppTheme.inkFaint, size: 20),
           const SizedBox(width: 12),
           Text('+91',

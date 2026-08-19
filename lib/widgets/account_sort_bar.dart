@@ -21,8 +21,8 @@ class AccountSortBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final children = <Widget>[
-      const Padding(
-        padding: EdgeInsets.only(right: 4),
+      Padding(
+        padding: const EdgeInsets.only(right: 4),
         child: Icon(Icons.swap_vert_rounded, size: 18, color: AppTheme.inkMuted),
       ),
       if (smartLabel != null)
@@ -47,18 +47,20 @@ class AccountSortBar extends StatelessWidget {
   Widget _chip(String label, bool active, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? AppTheme.black : AppTheme.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: active ? AppTheme.black : AppTheme.line),
-        ),
+        // The chosen chip stands off the strip; the rest stay flat outlines.
+        decoration: AppTheme.card(
+            fill: active ? AppTheme.black : AppTheme.surface,
+            radius: 20,
+            offset: active ? AppTheme.faceOffsetPressed : 0),
         child: Text(label,
             style: AppTheme.body(12.5,
                 weight: FontWeight.w700,
-                color: active ? Colors.white : AppTheme.ink)),
+                color: active ? AppTheme.onAccent : AppTheme.ink)),
       ),
     );
   }

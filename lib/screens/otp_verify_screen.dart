@@ -86,7 +86,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
       _ctrl.clear();
       _startCooldown(r.cooldown);
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('A new code is on its way.')));
+          const SnackBar(duration: Duration(seconds: 3), content: Text('A new code is on its way.')));
       FocusScope.of(context).requestFocus(_focus);
     } else {
       setState(() => _error = r.message);
@@ -139,7 +139,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        leading: const BackButton(color: AppTheme.ink),
+        leading: BackButton(color: AppTheme.ink),
       ),
       extendBodyBehindAppBar: true,
       body: Container(
@@ -156,7 +156,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                   color: AppTheme.accentSoft,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Icon(Icons.sms_outlined,
+                child: Icon(Icons.sms_outlined,
                     color: AppTheme.black, size: 30),
               ),
               const SizedBox(height: 20),
@@ -183,7 +183,7 @@ class _OtpVerifyScreenState extends State<OtpVerifyScreen> {
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    const Icon(Icons.error_outline_rounded,
+                    Icon(Icons.error_outline_rounded,
                         color: AppTheme.red, size: 18),
                     const SizedBox(width: 8),
                     Expanded(

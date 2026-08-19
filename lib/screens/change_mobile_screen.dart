@@ -86,7 +86,7 @@ class _ChangeMobileScreenState extends State<ChangeMobileScreen> {
 
   void _snack(String m) => ScaffoldMessenger.of(context)
     ..clearSnackBars()
-    ..showSnackBar(SnackBar(content: Text(m)));
+    ..showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(m)));
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +103,7 @@ class _ChangeMobileScreenState extends State<ChangeMobileScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                 decoration: AppTheme.card(fill: AppTheme.surfaceSoft, radius: 14),
                 child: Row(children: [
-                  const Icon(Icons.smartphone_outlined,
+                  Icon(Icons.smartphone_outlined,
                       size: 20, color: AppTheme.inkMuted),
                   const SizedBox(width: 12),
                   Text('Current: ',
@@ -141,7 +141,7 @@ class _ChangeMobileScreenState extends State<ChangeMobileScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          const Icon(Icons.smartphone_outlined,
+          Icon(Icons.smartphone_outlined,
               color: AppTheme.inkFaint, size: 20),
           const SizedBox(width: 12),
           Text('+91',

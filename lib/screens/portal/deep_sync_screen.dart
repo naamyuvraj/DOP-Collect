@@ -100,7 +100,7 @@ class _DeepSyncScreenState extends State<DeepSyncScreen> {
   void _snack(String m) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(m)));
+        .showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(m)));
   }
 
   @override

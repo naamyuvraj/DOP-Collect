@@ -148,7 +148,7 @@ class _DayCloseScreenState extends State<DayCloseScreen> {
             child: Text(
                 _counted == null ? 'Close without counting' : 'Close the day',
                 style: AppTheme.body(15,
-                    weight: FontWeight.w800, color: Colors.white)),
+                    weight: FontWeight.w800, color: AppTheme.onAccent)),
           ),
         ),
       ),
@@ -161,15 +161,17 @@ class _DayCloseScreenState extends State<DayCloseScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('THE APP RECORDED', style: AppTheme.label(AppTheme.ink)),
+            Text('THE APP RECORDED', style: AppTheme.label(AppTheme.onFocal)),
             const SizedBox(height: 6),
             Text(inr(_expected),
-                style: AppTheme.display(32, weight: FontWeight.w800)),
+                style: AppTheme.display(32,
+                    weight: FontWeight.w800, color: AppTheme.onFocal)),
             const SizedBox(height: 4),
             Text(
                 '${entries.length} collections · '
                 '${DateTime(widget.day.year, widget.day.month, widget.day.day) == DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day) ? 'today' : 'that day'}',
-                style: AppTheme.body(13, color: AppTheme.inkMuted)),
+                style: AppTheme.body(13,
+                    color: AppTheme.onFocal.withValues(alpha: 0.7))),
           ],
         ),
       );
@@ -221,7 +223,7 @@ class _DayCloseScreenState extends State<DayCloseScreen> {
               _counted = digits.isEmpty ? null : int.tryParse(digits);
             }),
           ),
-          const Divider(height: 20, color: AppTheme.divider),
+          Divider(height: 20, color: AppTheme.divider),
           Row(
             children: [
               Container(width: 8, height: 8,
@@ -294,7 +296,7 @@ class _DayCloseScreenState extends State<DayCloseScreen> {
               style: AppTheme.body(14.5, weight: FontWeight.w800)),
           IconButton(
             tooltip: 'Undo this entry',
-            icon: const Icon(Icons.undo_rounded,
+            icon: Icon(Icons.undo_rounded,
                 size: 19, color: AppTheme.inkFaint),
             onPressed: () => _undo(c),
           ),

@@ -3,23 +3,22 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../data/account_repository.dart';
 import '../data/app_settings.dart';
+import '../data/collection_repository.dart';
 import '../data/credentials.dart';
 import '../main.dart';
-import '../models/daily_rule.dart';
 import '../services/analytics.dart';
 import '../services/otp_service.dart';
 import '../services/subscription.dart';
 import '../services/supabase_config.dart';
 import '../theme/app_theme.dart';
-import '../util/format.dart';
 import '../widgets/loading_overlay.dart';
 import '../widgets/push_button.dart';
 import 'calculator_screen.dart';
-import 'change_mobile_screen.dart';
 import 'debug_breakdown.dart';
 import 'onboarding_login.dart';
 import 'paywall_screen.dart';
 import 'khata_backup_screen.dart';
+import 'matured_accounts_screen.dart';
 import 'privacy_screen.dart';
 import 'rd_rates_screen.dart';
 import 'portal/sync_screen.dart';
@@ -30,10 +29,16 @@ class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
     required this.repo,
+    this.collections,
     this.onSynced,
     this.onTour,
   });
   final AccountRepository repo;
+
+  /// Ledger, so a closed account opened from Matured Accounts still shows the
+  /// khata of what that customer actually paid in.
+  final CollectionRepository? collections;
+
   final VoidCallback? onSynced;
 
   /// Replays the guided product tour (owned by the shell, which holds the
@@ -50,156 +55,14 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  DailyRule _dailyRule = DailyRule.standard;
   int _versionTaps = 0; // 7 taps reveals the debug tools
 
   @override
   void initState() {
     super.initState();
-    AppSettings.dailyRule().then((v) {
-      if (mounted) setState(() => _dailyRule = v);
-    });
   }
 
   /// One line describing the book-wide daily rule as it stands.
-  String get _dailyRuleLabel => _dailyRule.mode == DailyMode.flat
-      ? 'Every customer pays ${inr(_dailyRule.flatAmount)} a visit'
-      : 'A month\'s installment over ${_dailyRule.days} visits — '
-          'e.g. ₹15,000 → ${inr(15000 ~/ _dailyRule.days)}, '
-          '₹3,000 → ${inr((3000 / _dailyRule.days).ceil())}';
-
-  Widget _ruleOption({
-    required bool selected,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) =>
-      InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                  selected
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.radio_button_unchecked_rounded,
-                  size: 20,
-                  color: selected ? AppTheme.black : AppTheme.inkFaint),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: AppTheme.body(14, weight: FontWeight.w700)),
-                    Text(subtitle,
-                        style: AppTheme.body(12, color: AppTheme.inkFaint)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-  /// The agent's call, for the whole book: how many visits a month is spread
-  /// over, or one flat amount for every account regardless of its value. A
-  /// single customer can still be overridden from the collect sheet.
-  Future<void> _editDailyRule() async {
-    final daysCtrl = TextEditingController(text: '${_dailyRule.days}');
-    final amtCtrl = TextEditingController(
-        text: _dailyRule.flatAmount > 0 ? '${_dailyRule.flatAmount}' : '');
-    var flat = _dailyRule.mode == DailyMode.flat;
-
-    final saved = await showDialog<DailyRule>(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (dialogContext, setLocal) => AlertDialog(
-          backgroundColor: AppTheme.surface,
-          title: Text('Daily collection amount', style: AppTheme.display(17)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'How much a customer hands over on one visit, for every '
-                  'account in your book.',
-                  style:
-                      AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4),
-                ),
-                const SizedBox(height: 14),
-                _ruleOption(
-                  selected: !flat,
-                  title: 'Spread the month',
-                  subtitle: 'Installment ÷ visits. ₹15,000 → ₹500.',
-                  onTap: () => setLocal(() => flat = false),
-                ),
-                if (!flat)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 16, bottom: 8),
-                    child: TextField(
-                      controller: daysCtrl,
-                      keyboardType: TextInputType.number,
-                      style: AppTheme.body(15, weight: FontWeight.w700),
-                      decoration: const InputDecoration(
-                          labelText: 'Visits in a month', hintText: '30'),
-                    ),
-                  ),
-                _ruleOption(
-                  selected: flat,
-                  title: 'Same for everyone',
-                  subtitle:
-                      'One amount for every account, whatever it is worth.',
-                  onTap: () => setLocal(() => flat = true),
-                ),
-                if (flat)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 16),
-                    child: TextField(
-                      controller: amtCtrl,
-                      keyboardType: TextInputType.number,
-                      style: AppTheme.body(15, weight: FontWeight.w700),
-                      decoration: const InputDecoration(
-                          prefixText: '₹ ', labelText: 'Every visit'),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () => Navigator.pop(
-                dialogContext,
-                DailyRule(
-                  mode: flat ? DailyMode.flat : DailyMode.perMonth,
-                  days: int.tryParse(daysCtrl.text.trim()) ??
-                      DailyRule.defaultDays,
-                  flatAmount: int.tryParse(amtCtrl.text.trim()) ?? 0,
-                ),
-              ),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (saved == null) return;
-    // A flat rule with no amount would collect ₹1 a visit — keep the old one.
-    if (saved.mode == DailyMode.flat && saved.flatAmount <= 0) return;
-    await AppSettings.setDailyRule(saved);
-    if (mounted) setState(() => _dailyRule = saved);
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
 
   Future<void> _sync() async {
     if (!await ensureDopLogin(context) || !mounted) return;
@@ -292,13 +155,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _btn('Sync Collection', _sync, primary: true),
           _btn('Deep Sync · last deposit', _deepSync, primary: true),
           _btn('Get ASLAAS numbers', _getAslaas, primary: true),
-
-          const SizedBox(height: 8),
-          _heading('COLLECTION'),
-          _btn('Daily collection amount', _editDailyRule),
+          _btn(
+              'Matured Accounts',
+              () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => MaturedAccountsScreen(
+                      repo: widget.repo, collections: widget.collections)))),
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
-            child: Text(_dailyRuleLabel,
+            child: Text(
+                'Accounts that closed in the last month, and their khata.',
                 style: AppTheme.body(12, color: AppTheme.inkFaint)),
           ),
 
@@ -340,13 +205,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => DebugBreakdown(repo: widget.repo)))),
 
-          const SizedBox(height: 8),
-          _heading('ACCOUNT'),
-          _btn(
-              'Update mobile number',
-              () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const ChangeMobileScreen()))),
-
           const SizedBox(height: 20),
           // Logout: at the very bottom, in red, well away from Sync so a
           // mis-tap can never wipe his saved login.
@@ -384,7 +242,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         foreground: danger
             ? AppTheme.red
             : primary
-                ? Colors.white
+                ? AppTheme.onAccent
                 : AppTheme.ink,
         radius: 14,
         child: Text(label),

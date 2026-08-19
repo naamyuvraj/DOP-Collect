@@ -48,6 +48,21 @@ class RdAccount {
   final int? defaultInstallments;
   final DateTime? lastDepositDate;
 
+  // --- Closure (never from the portal directly; inferred by a COMPLETE sync)
+
+  /// When a finished sync first found this account gone from the agent's
+  /// portal listing — i.e. matured and closed, or transferred away.
+  ///
+  /// The portal offers no status column and no closure event: an account that
+  /// closes simply stops appearing in "Agent Inquire and Update". So absence
+  /// from a sync that read EVERY page is the only closure signal there is, and
+  /// this is where it is recorded. Null means live.
+  ///
+  /// The row is kept rather than deleted because `collections` holds real money
+  /// the agent took at this customer's door, and deleting the account would
+  /// leave that ledger with no name against it.
+  final DateTime? closedAt;
+
   const RdAccount({
     required this.accountNumber,
     required this.customerName,
@@ -64,6 +79,7 @@ class RdAccount {
     this.pendingInstallments,
     this.defaultInstallments,
     this.lastDepositDate,
+    this.closedAt,
   });
 
   /// First fortnight (due day 1-15) or second (16+).
@@ -75,6 +91,9 @@ class RdAccount {
   /// Exact deposited if known, else estimate (denomination x months paid).
   int get depositedAmount => totalDeposit ?? denominationAmount * monthsPaid;
   bool get hasDetail => openingDate != null || totalDeposit != null;
+
+  /// True once a complete sync has found this account gone from the portal.
+  bool get isClosed => closedAt != null;
 
   // --- Derived (no detail fetch needed) ------------------------------------
   // Everything below is computed from the list fields the way the reference app
@@ -165,6 +184,7 @@ class RdAccount {
     int? pendingInstallments,
     int? defaultInstallments,
     DateTime? lastDepositDate,
+    DateTime? closedAt,
   }) =>
       RdAccount(
         accountNumber: accountNumber,
@@ -182,6 +202,7 @@ class RdAccount {
         pendingInstallments: pendingInstallments ?? this.pendingInstallments,
         defaultInstallments: defaultInstallments ?? this.defaultInstallments,
         lastDepositDate: lastDepositDate ?? this.lastDepositDate,
+        closedAt: closedAt ?? this.closedAt,
       );
 
   Map<String, Object?> toMap() => {
@@ -200,6 +221,7 @@ class RdAccount {
         'pending_installments': pendingInstallments,
         'default_installments': defaultInstallments,
         'last_deposit_date': lastDepositDate?.toIso8601String(),
+        'closed_at': closedAt?.toIso8601String(),
       };
 
   factory RdAccount.fromMap(Map<String, Object?> m) => RdAccount(
@@ -219,6 +241,7 @@ class RdAccount {
         pendingInstallments: (m['pending_installments'] as num?)?.toInt(),
         defaultInstallments: (m['default_installments'] as num?)?.toInt(),
         lastDepositDate: _dt(m['last_deposit_date']),
+        closedAt: _dt(m['closed_at']),
       );
 
   static DateTime? _dt(Object? v) =>

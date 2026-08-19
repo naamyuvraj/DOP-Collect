@@ -19,7 +19,7 @@ class PlaceholderScreen extends StatelessWidget {
             Icon(icon, size: 56, color: AppTheme.textMuted),
             const SizedBox(height: 12),
             Text('$title — coming soon',
-                style: const TextStyle(color: AppTheme.textMuted)),
+                style: TextStyle(color: AppTheme.textMuted)),
           ],
         ),
       ),

@@ -4,6 +4,7 @@ import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'assistant/assistant_config.dart';
 import 'screens/force_update_screen.dart';
@@ -75,6 +76,8 @@ Future<void> main() async {
   AccountFilter.newAccountMonths = await AppSettings.newAccountMonths();
   // Fold the retired second name ("display name") into the single Agent name.
   await AppSettings.migrateLegacyName();
+  // Theme choice, read before the first frame so dark mode never flashes white.
+  AppTheme.mode.value = await AppSettings.themeMode();
 
   // Remote config (admin-dashboard controlled): loads instantly from cache,
   // refreshes in the background. Read the flags it exposes right after.
@@ -192,13 +195,16 @@ class DopCollectApp extends StatefulWidget {
   State<DopCollectApp> createState() => _DopCollectAppState();
 }
 
-class _DopCollectAppState extends State<DopCollectApp> {
+class _DopCollectAppState extends State<DopCollectApp>
+    with WidgetsBindingObserver {
   late bool _onboarded = widget.onboarded;
   late bool _needsVerify = widget.needsVerify;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    AppTheme.mode.addListener(_onThemeChanged);
     DopCollectApp.onLogout = () {
       if (mounted) {
         setState(() {
@@ -222,6 +228,45 @@ class _DopCollectAppState extends State<DopCollectApp> {
     };
   }
 
+  @override
+  void dispose() {
+    AppTheme.mode.removeListener(_onThemeChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// The phone flipped to night mode under us. Only our business while the
+  /// agent is on "Auto".
+  @override
+  void didChangePlatformBrightness() {
+    if (AppTheme.mode.value == ThemeMode.system) _repaintEverything();
+  }
+
+  void _onThemeChanged() {
+    unawaited(AppSettings.setThemeMode(AppTheme.mode.value));
+    _repaintEverything();
+  }
+
+  /// Repaint the whole app for a theme swap.
+  ///
+  /// The colour tokens are statics rather than an InheritedWidget, so nothing
+  /// below has a dependency to notify — and Navigator caches each route's page
+  /// subtree, so a `setState` here alone would repaint nothing that is already
+  /// on screen (which is everything: the tabs live in one IndexedStack inside
+  /// the home route). Mark the tree dirty by hand instead. This keeps the
+  /// agent's place — re-keying the app would bounce him out of Settings the
+  /// instant he tapped the toggle.
+  void _repaintEverything() {
+    if (!mounted) return;
+    setState(() {});
+    void rebuild(Element el) {
+      el.markNeedsBuild();
+      el.visitChildren(rebuild);
+    }
+
+    (context as Element).visitChildren(rebuild);
+  }
+
   /// Full sign-out from the verify gate: wipe credentials + session, drop to
   /// onboarding.
   Future<void> _fullLogout() async {
@@ -239,17 +284,29 @@ class _DopCollectAppState extends State<DopCollectApp> {
 
   @override
   Widget build(BuildContext context) {
+    final mode = AppTheme.mode.value;
+    final brightness = mode == ThemeMode.system
+        ? PlatformDispatcher.instance.platformBrightness
+        : (mode == ThemeMode.dark ? Brightness.dark : Brightness.light);
+    // Statics, not inherited — swap them before anything below reads them.
+    AppTheme.applyBrightness(brightness);
     return MaterialApp(
       title: 'DOP Collect',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: mode,
       // Respect Android's font-size setting but clamp it: below 1.0 the app
       // never shrinks, and past 1.3 the dense cards start to overflow. This
       // lets a large-font user scale up safely without breaking the layout.
-      builder: (context, child) => MediaQuery.withClampedTextScaling(
-        minScaleFactor: 1.0,
-        maxScaleFactor: 1.3,
-        child: child ?? const SizedBox.shrink(),
+      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        // A default for the many screens that carry no AppBar of their own.
+        value: AppTheme.overlayStyle,
+        child: MediaQuery.withClampedTextScaling(
+          minScaleFactor: 1.0,
+          maxScaleFactor: 1.3,
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
       home: RemoteConfig.updateRequired
           ? const ForceUpdateScreen()

@@ -2,6 +2,7 @@ import '../data/account_repository.dart';
 import '../data/app_settings.dart';
 import '../data/collection_repository.dart';
 import '../models/collection.dart';
+import '../models/daily_rule.dart';
 import '../models/rd_account.dart';
 import '../util/format.dart';
 import 'speech_text.dart';
@@ -251,7 +252,7 @@ class CollectActions {
       ));
     }
 
-    final rule = await AppSettings.dailyRule();
+    const rule = DailyRule.standard; // fixed book-wide; per-customer wins
     final progress = CollectionProgress(
       account: account,
       collected: thisCycle.fold(0, (s, c) => s + c.amount),

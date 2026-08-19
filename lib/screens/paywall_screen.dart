@@ -94,7 +94,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
   void _snack(String m) => ScaffoldMessenger.of(context)
     ..clearSnackBars()
-    ..showSnackBar(SnackBar(content: Text(m)));
+    ..showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(m)));
 
   void _showError(String msg) => showDialog<void>(
         context: context,
@@ -213,11 +213,17 @@ class _PaywallScreenState extends State<PaywallScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Lime when the trial is live, amber-soft once it has ended —
+              // and only the lime one stays light in dark mode.
               Text(ended ? 'TRIAL ENDED' : 'FREE TRIAL',
-                  style: AppTheme.label(AppTheme.ink)),
+                  style: AppTheme.label(
+                      ended ? AppTheme.ink : AppTheme.onFocal)),
               const SizedBox(height: 8),
               Text(title,
-                  style: AppTheme.display(21, weight: FontWeight.w800, height: 1.2)),
+                  style: AppTheme.display(21,
+                      weight: FontWeight.w800,
+                      height: 1.2,
+                      color: ended ? AppTheme.ink : AppTheme.onFocal)),
               const SizedBox(height: 8),
               Text(
                 ended
@@ -227,7 +233,9 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     : 'Everything is included, and nothing will be charged '
                         'automatically. Before it ends we\'ll agree a price '
                         'with you based on your book and how much you use it.',
-                style: AppTheme.body(13.5, color: AppTheme.ink, height: 1.45),
+                style: AppTheme.body(13.5,
+                    color: ended ? AppTheme.ink : AppTheme.onFocal,
+                    height: 1.45),
               ),
             ],
           ),
@@ -250,7 +258,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.support_agent_rounded,
+              Icon(Icons.support_agent_rounded,
                   size: 20, color: AppTheme.inkMuted),
               const SizedBox(width: 12),
               Expanded(
@@ -371,7 +379,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'trial' => (
           'Free trial · ${s!.daysLeft} day${s.daysLeft == 1 ? '' : 's'} left',
           AppTheme.focal,
-          AppTheme.black
+          AppTheme.onFocal
         ),
       'expired' => (
           'Your access has ended — subscribe to continue',
@@ -422,7 +430,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         style: AppTheme.display(17, weight: FontWeight.w800)),
                     if (isBest) ...[
                       const SizedBox(width: 8),
-                      _pill('BEST VALUE', AppTheme.focal, AppTheme.black),
+                      _pill('BEST VALUE', AppTheme.focal, AppTheme.onFocal),
                     ],
                   ]),
                   const SizedBox(height: 3),
@@ -445,15 +453,15 @@ class _PaywallScreenState extends State<PaywallScreen> {
               child: PushButton(
                 onPressed: _busyPlan != null ? null : () => _choose(p),
                 color: AppTheme.black,
-                foreground: Colors.white,
+                foreground: AppTheme.onAccent,
                 radius: 12,
                 expand: false,
                 child: _busyPlan == p.code
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
+                            strokeWidth: 2, color: AppTheme.onAccent))
                     : Text(_checkoutReady
                         ? (_active ? 'Extend' : 'Choose')
                         : 'Soon'),

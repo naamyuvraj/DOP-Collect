@@ -13,7 +13,8 @@ function Skeleton() {
 type TrendAreaProps = { data: any[]; x: string; y: string; color?: string; height?: number; depth?: number };
 type BarsProps = { data: any[]; x: string; y: string; color?: string; horizontal?: boolean; height?: number };
 type DonutProps = { data: any[]; nameKey: string; valueKey: string; height?: number };
-type Series = { key: string; color: string; label: string };
+export type SeriesSpec = { key: string; color: string; label: string };
+type Series = SeriesSpec;
 type Donut3DProps = { data: any[]; nameKey: string; valueKey: string; height?: number; depth?: number; squash?: number };
 type Bars3DProps = { data: any[]; x: string; series: Series[]; height?: number; depth?: number; legend?: boolean; horizontal?: boolean; colorByPoint?: boolean };
 

@@ -9,7 +9,7 @@ import '../../models/lot.dart';
 import '../../models/lot_packing.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
-import '../../widgets/glass_pill.dart';
+import '../../widgets/action_pill.dart';
 import '../../widgets/push_button.dart';
 
 /// Lists tab — "Auto List Making". One tap packs every account that needs
@@ -79,7 +79,7 @@ class _BatchListScreenState extends State<BatchListScreen> {
       }
     });
     ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 3), 
       content: Text('Removed ${removed.customerName}'),
       action: SnackBarAction(
         label: 'Undo',
@@ -162,7 +162,7 @@ class _BatchListScreenState extends State<BatchListScreen> {
             Positioned(
               left: 20,
               bottom: agentLevelBottom(context),
-              child: GlassPill(
+              child: ActionPill(
                 key: BatchListScreen.saveKey,
                 label: _saving ? 'Saving…' : 'Save all lists',
                 icon: Icons.save_alt_rounded,
@@ -286,7 +286,7 @@ class _BatchListScreenState extends State<BatchListScreen> {
           IconButton(
             tooltip: 'Remove from list',
             visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.remove_circle_outline,
+            icon: Icon(Icons.remove_circle_outline,
                 color: AppTheme.red, size: 20),
             onPressed: () => _removeMember(lotIndex, itemIndex),
           ),
@@ -306,7 +306,7 @@ class _BatchListScreenState extends State<BatchListScreen> {
               width: 76,
               height: 76,
               decoration: AppTheme.panel(AppTheme.blueSoft, radius: 24),
-              child: const Icon(Icons.playlist_add_check_rounded,
+              child: Icon(Icons.playlist_add_check_rounded,
                   color: AppTheme.accent, size: 36),
             ),
             const SizedBox(height: 20),

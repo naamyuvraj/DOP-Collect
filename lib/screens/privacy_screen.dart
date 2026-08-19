@@ -41,7 +41,7 @@ class PrivacyScreen extends StatelessWidget {
                 'sent to the AI service to work out the answer.',
             'With no network, the assistant answers on-device by itself — there '
                 'is nothing to switch on.',
-          ], tone: AppTheme.focal, dot: AppTheme.amber),
+          ], tone: AppTheme.focal, dot: AppTheme.amberOnFocal),
           _section('What we do collect', [
             'About you: your Agent name, your Agent ID, your post-office '
                 'region (SOL), your phone model and your mobile number. This '

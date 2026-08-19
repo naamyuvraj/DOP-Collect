@@ -64,7 +64,7 @@ class DeveloperCard extends StatelessWidget {
         await Clipboard.setData(const ClipboardData(text: supportEmail));
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Support email copied.')));
+              const SnackBar(duration: Duration(seconds: 3), content: Text('Support email copied.')));
         }
       },
       child: Container(
@@ -72,14 +72,14 @@ class DeveloperCard extends StatelessWidget {
         decoration: AppTheme.card(fill: AppTheme.surfaceSoft, radius: 12),
         child: Row(
           children: [
-            const Icon(Icons.mail_outline_rounded,
+            Icon(Icons.mail_outline_rounded,
                 size: 18, color: AppTheme.inkMuted),
             const SizedBox(width: 10),
             Expanded(
               child: Text(supportEmail,
                   style: AppTheme.body(13, weight: FontWeight.w700)),
             ),
-            const Icon(Icons.copy_rounded, size: 15, color: AppTheme.inkFaint),
+            Icon(Icons.copy_rounded, size: 15, color: AppTheme.inkFaint),
           ],
         ),
       ),
@@ -127,10 +127,10 @@ class DeveloperCard extends StatelessWidget {
       width: size,
       height: size,
       alignment: Alignment.center,
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
           color: AppTheme.black, shape: BoxShape.circle),
       child: Text(initials.toUpperCase(),
-          style: AppTheme.display(24, weight: FontWeight.w800, color: Colors.white)),
+          style: AppTheme.display(24, weight: FontWeight.w800, color: AppTheme.onAccent)),
     );
   }
 }

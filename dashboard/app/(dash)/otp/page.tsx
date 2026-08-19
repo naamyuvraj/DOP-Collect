@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import PageHead from "@/components/PageHead";
-import { Bars3D, TrendArea } from "@/components/LazyCharts";
+import TimeChart from "@/components/TimeChart";
 import { Card, Empty, Kpi, KpiSkeletons, Pill, Table, Td, Th, Toggle } from "@/components/ui";
 import { peekCached, isFresh, setCached } from "@/lib/clientCache";
 import { day, num, when } from "@/lib/format";
@@ -218,24 +218,21 @@ export default function Otp() {
       </p>
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr] mt-4">
-        <Card title="Messages sent per day" right={<span className="text-muted text-micro">last 30 days</span>}>
-          {chart.some((c) => c.sent > 0 || c.blocked > 0) ? (
-            <Bars3D
-              data={chart}
-              x="label"
-              height={220}
-              series={[
-                { key: "verified", color: "#EDF751", label: "Led to a verified sign-in" },
-                { key: "unverified", color: "#171C22", label: "Sent, never verified" },
-                { key: "blocked", color: "#C9CDD3", label: "Refused by limits (never sent)" },
-              ]}
-            />
-          ) : (
-            <Empty action="Nothing has been billed. Turn on “Require phone verification” below to start sending.">
-              No OTPs sent in the last 30 days
-            </Empty>
-          )}
-        </Card>
+        <TimeChart
+          title="Messages sent per day"
+          storageKey="otp.sent"
+          data={chart}
+          dateKey="day"
+          kind="bars"
+          height={220}
+          legend
+          series={[
+            { key: "verified", color: "#EDF751", label: "Led to a verified sign-in" },
+            { key: "unverified", color: "#171C22", label: "Sent, never verified" },
+            { key: "blocked", color: "#C9CDD3", label: "Refused by limits (never sent)" },
+          ]}
+          empty="No OTPs sent in this window"
+        />
 
         <div className="grid gap-4 content-start">
           <Card title="This month">
