@@ -19,6 +19,24 @@ export function adminPassword(): string | null {
   return !p || p === DEFAULT_PASSWORD ? null : p;
 }
 
+/**
+ * The secret typed into the "Admin ID" field.
+ *
+ * `ADMIN_ID` if it is set, otherwise `DASHBOARD_PASSWORD`. The fallback is what
+ * makes the rename safe to deploy: without it, shipping this would lock the
+ * operator out of their own dashboard in the window between the deploy and
+ * setting the new variable.
+ *
+ * It is the ONLY knowledge factor now — the password field is gone — so treat it
+ * as a password, not a username. A guessable ADMIN_ID leaves the WhatsApp code
+ * as the only thing standing in front of every agent's identity.
+ */
+export function adminId(): string | null {
+  const v = process.env.ADMIN_ID;
+  if (v && v !== DEFAULT_PASSWORD) return v;
+  return adminPassword();
+}
+
 function sign(secret: string, body: string): string {
   return createHmac("sha256", secret).update(body).digest("hex");
 }
@@ -56,8 +74,42 @@ export function verifyToken(token: string | undefined | null): boolean {
   return timingSafeEqual(sign(secret, `${nonce}.${exp}`), sig);
 }
 
+export const PENDING_COOKIE = "dop_admin_pending";
+
 /**
- * Constant-time password check.
+ * A token for "the password was right, the WhatsApp code is still owed".
+ *
+ * Signed over `pending.<nonce>.<exp>` while a session token is signed over
+ * `<nonce>.<exp>`. Same shape, different signed message, so the two can never
+ * be swapped: a pending token presented as a session cookie fails
+ * [verifyToken], and a session token presented at the OTP step fails
+ * [verifyPending]. Without that separation, holding one would mean holding the
+ * other and the second factor would be decorative.
+ *
+ * Short-lived on purpose — it is a half-finished login, not a session.
+ */
+export function mintPending(ttlMinutes = 10): string | null {
+  const secret = authSecret();
+  if (!secret) return null;
+  const nonce = randomBytes(16).toString("hex");
+  const exp = Date.now() + ttlMinutes * 60_000;
+  const body = `${nonce}.${exp}`;
+  return `${body}.${sign(secret, `pending.${body}`)}`;
+}
+
+/** Verify a pending token's signature + expiry (constant-time). */
+export function verifyPending(token: string | undefined | null): boolean {
+  const secret = authSecret();
+  if (!secret || !token) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  const [nonce, exp, sig] = parts;
+  if (!nonce || !exp || !sig || Number(exp) < Date.now()) return false;
+  return timingSafeEqual(sign(secret, `pending.${nonce}.${exp}`), sig);
+}
+
+/**
+ * Constant-time check of the typed Admin ID.
  *
  * `given !== expected` short-circuits on the first differing byte, and on a
  * length mismatch before that — so it leaks both. HMAC both sides first and the
@@ -65,8 +117,8 @@ export function verifyToken(token: string | undefined | null): boolean {
  * nothing for the comparison to leak. The login throttle makes this hard to
  * exploit over a network; it costs one line not to rely on that.
  */
-export function passwordMatches(given: string): boolean {
-  const expected = adminPassword();
+export function adminIdMatches(given: string): boolean {
+  const expected = adminId();
   const secret = authSecret();
   if (!expected || !secret || !given) return false;
   return timingSafeEqual(sign(secret, given), sign(secret, expected));

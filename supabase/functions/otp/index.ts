@@ -9,6 +9,8 @@
 //   * issues a device session token and enforces MAX 2 devices per account
 //     (a 3rd verify kicks the oldest — "session out")
 //   * session_check heartbeat + logout
+//   * admin_send / admin_verify — WhatsApp second factor for the admin
+//     dashboard, pinned to ADMIN_PHONE and gated by ADMIN_OTP_SECRET
 //   * bind_agent — fill in an agent id the "Log in" tab could not supply at
 //     verify time (session token proves ownership; only ever fills a null)
 //
@@ -22,6 +24,8 @@
 //   MSG91_WA_TEMPLATE_LANG       – template language code (e.g. en_US / en)
 //   MSG91_WA_NAMESPACE           – (optional) template namespace, if your account uses one
 //   MSG91_WA_HAS_BUTTON          – (optional) "true" if it's an auth template with a copy-code button
+//   ADMIN_OTP_SECRET             – shared secret the admin dashboard sends as x-admin-secret
+//   ADMIN_PHONE                  – the only number admin_send may text (SET THIS)
 //   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 //
 // Deploy:
@@ -300,6 +304,109 @@ Deno.serve(async (req) => {
       .from("app_config").select("value").eq("key", "require_integrity").maybeSingle();
     if (intCfg?.value === true && !req.headers.get("x-integrity-token"))
       return json({ ok: false, code: "integrity_required" }, 403);
+
+    // ---- admin_send / admin_verify: second factor for the ADMIN DASHBOARD --
+    //
+    // The dashboard was a single shared password. This adds a WhatsApp code to
+    // one pinned number, so the password alone is no longer enough to reach
+    // every agent's identity, the Groq keys and the delete button.
+    //
+    // It lives HERE rather than in the dashboard because this function already
+    // holds the MSG91 auth key, and the code storage, salted hashing, TTL,
+    // attempt cap and cooldown are already written and tested. Doing it in the
+    // Next app would mean a second copy of all of that plus the MSG91 secret in
+    // a second place.
+    //
+    // Two things keep it from becoming a free WhatsApp sender:
+    //   * ADMIN_OTP_SECRET — a shared secret only the dashboard server knows.
+    //     Not the anon key, which ships inside the APK.
+    //   * ADMIN_PHONE — if set, the ONLY number that may be sent a code. Set it.
+    //     Without it, anything holding the secret can send to any number, which
+    //     is somebody else's phone and your bill.
+    //
+    // It touches otp_codes and otp_requests and NOTHING else. No accounts row,
+    // no device_sessions row — the admin is not an agent and must never appear
+    // as one, or they take a slot in the max_devices count and a row in the
+    // dashboard's own agent list.
+    if (action === "admin_send" || action === "admin_verify") {
+      const secret = Deno.env.get("ADMIN_OTP_SECRET") ?? "";
+      const given = req.headers.get("x-admin-secret") ?? "";
+      // Fail closed: with no secret configured these actions are unavailable,
+      // rather than open to anyone who guesses the action name.
+      if (!secret || !given || !timingSafeEqual(await sha256(given), await sha256(secret))) {
+        return json({ ok: false, code: "forbidden" }, 403);
+      }
+
+      const pinned = normPhone(Deno.env.get("ADMIN_PHONE") ?? "");
+      if (pinned.length === 12 && pinned !== phone) {
+        return json({ ok: false, code: "not_admin_phone" }, 403);
+      }
+
+      // Namespaced so an admin code and an agent code for the SAME number
+      // cannot overwrite each other — otp_codes is keyed by phone_hash, and if
+      // the admin's mobile is also an agent's, one pending code would silently
+      // replace the other.
+      const adminHash = await sha256("admin:" + phone);
+
+      if (action === "admin_send") {
+        if (!authkey || !wa.number || !wa.template) {
+          logReq("admin", adminHash, "admin_send", "not_configured");
+          return json({ ok: false, code: "not_configured" }, 503);
+        }
+        // Own buckets: an admin locked out because agents used up a shared
+        // hourly cap would be a bad day, and the reverse is worse.
+        if ((await bump(`admincd:${adminHash}`, cooldown)) > 1) {
+          logReq("admin", adminHash, "admin_send", "cooldown");
+          return json({ ok: false, code: "cooldown", cooldown }, 429);
+        }
+        if ((await bump(`admin:${adminHash}`, 3600)) > 10) {
+          logReq("admin", adminHash, "admin_send", "rate_limited");
+          return json({ ok: false, code: "rate_limited" }, 429);
+        }
+
+        const otp = genOtp(OTP_DIGITS);
+        const salt = randomToken(16);
+        await sb.from("otp_codes").upsert({
+          phone_hash: adminHash,
+          otp_hash: await codeHash(salt, phone, otp),
+          salt,
+          expires_at: new Date(Date.now() + ttl * 1000).toISOString(),
+          attempts: 0,
+          created_at: new Date().toISOString(),
+        }, { onConflict: "phone_hash" });
+
+        const send = await sendWhatsApp(authkey, wa, phone, otp);
+        logReq("admin", adminHash, "admin_send", send.ok ? "ok" : "provider_error",
+          (send.data as { request_id?: string })?.request_id);
+        if (!send.ok) return json({ ok: false, code: "provider_down" }, 502);
+        return json({ ok: true, cooldown });
+      }
+
+      // admin_verify
+      const otp = String(body.otp || "").replace(/\D/g, "");
+      const { data: code } = await sb
+        .from("otp_codes").select("*").eq("phone_hash", adminHash).maybeSingle();
+      if (!code || new Date(code.expires_at).getTime() < Date.now()) {
+        if (code) await sb.from("otp_codes").delete().eq("phone_hash", adminHash);
+        logReq("admin", adminHash, "admin_verify", "expired");
+        return json({ ok: false, code: "expired" }, 401);
+      }
+      if ((code.attempts ?? 0) >= maxAttempts) {
+        await sb.from("otp_codes").delete().eq("phone_hash", adminHash);
+        logReq("admin", adminHash, "admin_verify", "too_many_attempts");
+        return json({ ok: false, code: "too_many_attempts" }, 429);
+      }
+      const expect = await codeHash(String(code.salt ?? ""), phone, otp);
+      if (!timingSafeEqual(expect, String(code.otp_hash ?? ""))) {
+        await sb.from("otp_codes")
+          .update({ attempts: (code.attempts ?? 0) + 1 }).eq("phone_hash", adminHash);
+        logReq("admin", adminHash, "admin_verify", "invalid");
+        return json({ ok: false, code: "invalid_otp" }, 401);
+      }
+      await sb.from("otp_codes").delete().eq("phone_hash", adminHash); // no replay
+      logReq("admin", adminHash, "admin_verify", "ok");
+      return json({ ok: true });
+    }
 
     if (action === "send" || action === "resend") {
       if (!authkey || !wa.number || !wa.template) {

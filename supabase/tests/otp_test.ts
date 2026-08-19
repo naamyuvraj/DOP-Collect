@@ -6,7 +6,7 @@
 
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
 import { type Db, newDb } from "./mock_supabase.ts";
-import { BASE_ENV, begin, load, otpFromWhatsApp, post, sha256Hex } from "./harness.ts";
+import { BASE_ENV, begin, fetchCalls, load, otpFromWhatsApp, post, sha256Hex } from "./harness.ts";
 
 const ENV = {
   ...BASE_ENV,
@@ -352,4 +352,149 @@ Deno.test("bind_agent needs an agent id", async () => {
   const r = await post(handler, { action: "bind_agent", token, agentId: "   " });
   assertEquals(r.json.ok, false);
   assertEquals(r.json.code, "bad_agent");
+});
+
+// ---------------------------------------------------------------------------
+// admin_send / admin_verify — the dashboard's WhatsApp second factor
+//
+// These must never leave a trace in the AGENT tables. The admin is not an
+// agent: an accounts row would put them in the dashboard's own agent list, and
+// a device_sessions row would eat a slot in someone's max_devices count.
+// ---------------------------------------------------------------------------
+
+const ADMIN_PHONE = "9990001111";
+const ADMIN_SECRET = "admin-shared-secret";
+const ADMIN_ENV = {
+  ...ENV,
+  ADMIN_OTP_SECRET: ADMIN_SECRET,
+  ADMIN_PHONE,
+};
+const withSecret = { "x-admin-secret": ADMIN_SECRET };
+
+/** admin_* namespaces its code row so it can't collide with an agent's. */
+const adminHashOf = (p: string) => sha256Hex("admin:91" + p);
+
+function adminDb(): Db {
+  Deno.env.delete("ADMIN_OTP_SECRET");
+  Deno.env.delete("ADMIN_PHONE");
+  return newDb();
+}
+
+Deno.test("admin_send needs the shared secret", async () => {
+  const db = adminDb();
+  begin(db, { env: ADMIN_ENV });
+  const r = await post(handler, { action: "admin_send", phone: ADMIN_PHONE });
+  assertEquals(r.json.ok, false);
+  assertEquals(r.json.code, "forbidden");
+  assertEquals(fetchCalls.length, 0, "no WhatsApp message may be sent");
+});
+
+Deno.test("admin_send rejects a wrong secret", async () => {
+  const db = adminDb();
+  begin(db, { env: ADMIN_ENV });
+  const r = await post(handler, { action: "admin_send", phone: ADMIN_PHONE },
+    { "x-admin-secret": "not-it" });
+  assertEquals(r.json.code, "forbidden");
+  assertEquals(fetchCalls.length, 0);
+});
+
+Deno.test("admin actions are unavailable when no secret is configured", async () => {
+  // Fails closed. Otherwise the action name alone would be the only thing
+  // between a stranger and a WhatsApp sender on your MSG91 bill.
+  const db = adminDb();
+  begin(db, { env: ENV });
+  const r = await post(handler, { action: "admin_send", phone: ADMIN_PHONE },
+    { "x-admin-secret": "" });
+  assertEquals(r.json.code, "forbidden");
+  assertEquals(fetchCalls.length, 0);
+});
+
+Deno.test("admin_send refuses any number but the pinned one", async () => {
+  const db = adminDb();
+  begin(db, { env: ADMIN_ENV });
+  const r = await post(handler,
+    { action: "admin_send", phone: "9998887777" }, withSecret);
+  assertEquals(r.json.ok, false);
+  assertEquals(r.json.code, "not_admin_phone");
+  assertEquals(fetchCalls.length, 0, "someone else's phone, and your bill");
+});
+
+Deno.test("the admin gets a code and can verify it, touching no agent tables", async () => {
+  const db = adminDb();
+  begin(db, { env: ADMIN_ENV });
+
+  const send = await post(handler,
+    { action: "admin_send", phone: ADMIN_PHONE }, withSecret);
+  assertEquals(send.json.ok, true);
+
+  // Stored under the namespaced hash, never the plain phone hash.
+  assertEquals(db.tables.otp_codes.length, 1);
+  assertEquals(db.tables.otp_codes[0].phone_hash, await adminHashOf(ADMIN_PHONE));
+
+  const code = otpFromWhatsApp();
+  const ver = await post(handler,
+    { action: "admin_verify", phone: ADMIN_PHONE, otp: code }, withSecret);
+  assertEquals(ver.json.ok, true);
+
+  assertEquals(db.tables.otp_codes.length, 0, "code consumed, no replay");
+  assertEquals(db.tables.accounts.length, 0, "the admin is not an agent");
+  assertEquals(db.tables.device_sessions.length, 0, "and takes no device slot");
+});
+
+Deno.test("admin_verify refuses a wrong code and burns an attempt", async () => {
+  const db = adminDb();
+  begin(db, { env: ADMIN_ENV });
+  await post(handler, { action: "admin_send", phone: ADMIN_PHONE }, withSecret);
+  const real = otpFromWhatsApp();
+  const wrong = real === "1234" ? "5678" : "1234";
+
+  const r = await post(handler,
+    { action: "admin_verify", phone: ADMIN_PHONE, otp: wrong }, withSecret);
+  assertEquals(r.json.code, "invalid_otp");
+  assertEquals(db.tables.otp_codes[0].attempts, 1);
+});
+
+Deno.test("an admin code cannot be replayed", async () => {
+  const db = adminDb();
+  begin(db, { env: ADMIN_ENV });
+  await post(handler, { action: "admin_send", phone: ADMIN_PHONE }, withSecret);
+  const code = otpFromWhatsApp();
+  await post(handler, { action: "admin_verify", phone: ADMIN_PHONE, otp: code }, withSecret);
+
+  const again = await post(handler,
+    { action: "admin_verify", phone: ADMIN_PHONE, otp: code }, withSecret);
+  assertEquals(again.json.ok, false);
+  assertEquals(again.json.code, "expired");
+});
+
+Deno.test("admin_verify still needs the secret", async () => {
+  const db = adminDb();
+  begin(db, { env: ADMIN_ENV });
+  await post(handler, { action: "admin_send", phone: ADMIN_PHONE }, withSecret);
+  const code = otpFromWhatsApp();
+
+  const r = await post(handler, { action: "admin_verify", phone: ADMIN_PHONE, otp: code });
+  assertEquals(r.json.code, "forbidden");
+  assertEquals(db.tables.otp_codes.length, 1, "the code survives — it was never checked");
+});
+
+Deno.test("an admin code and an agent code for the SAME number coexist", async () => {
+  // otp_codes is keyed by phone_hash. If the admin's mobile is also an agent's,
+  // an un-namespaced admin code would silently replace the agent's pending one.
+  const db = adminDb();
+  begin(db, { env: ADMIN_ENV });
+
+  const agentCode = await requestCode(ADMIN_PHONE, "some-phone");
+  await post(handler, { action: "admin_send", phone: ADMIN_PHONE }, withSecret);
+
+  assertEquals(db.tables.otp_codes.length, 2, "two independent pending codes");
+  const hashes = db.tables.otp_codes.map((c) => c.phone_hash).sort();
+  const expected = [await phoneHashOf(ADMIN_PHONE), await adminHashOf(ADMIN_PHONE)].sort();
+  assertEquals(hashes, expected);
+
+  // And the agent's code still works after the admin's was issued.
+  const agentVerify = await post(handler, {
+    action: "verify", phone: ADMIN_PHONE, otp: agentCode, agentId: "AGENT-COEXIST",
+  });
+  assertEquals(agentVerify.json.ok, true);
 });
