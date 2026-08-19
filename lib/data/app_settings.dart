@@ -176,18 +176,6 @@ class AppSettings {
   // signal gets the offline answer without having flipped anything.
   // See AssistantConfig.cloudActive / AssistantService.ask.
 
-  /// Whether screenshots and screen recording are allowed.
-  ///
-  /// Default FALSE — the app shows customer names, account numbers and amounts,
-  /// and Android writes the recents thumbnail to disk. The agent turns it on
-  /// when he needs to send a picture of something that has gone wrong, which is
-  /// the only reason the block was ever in his way. See ScreenSecurity.
-  static const _kAllowShots = 'allow_screenshots';
-  static Future<bool> allowScreenshots() async =>
-      (await SharedPreferences.getInstance()).getBool(_kAllowShots) ?? false;
-  static Future<void> setAllowScreenshots(bool v) async =>
-      (await SharedPreferences.getInstance()).setBool(_kAllowShots, v);
-
   /// "New Accounts" window in months (1/2/3), default 1.
   static const _kNewMonths = 'new_account_months';
   static Future<int> newAccountMonths() async =>

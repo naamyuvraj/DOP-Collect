@@ -133,6 +133,20 @@ class RemoteConfig {
   /// the phone step is optional. Flip on once the OTP flow is tested end-to-end.
   static bool get otpRequired => _flag('otp_required', def: false);
 
+  /// Whether screenshots / screen recording are allowed inside the app.
+  ///
+  /// Fleet-wide and admin-only, deliberately: this was a Settings toggle on the
+  /// phone and it should not have been. It is a privacy decision about other
+  /// people's data — customer names, account numbers and amounts, plus the
+  /// recents thumbnail Android writes to disk — so it belongs with whoever is
+  /// accountable for that, not with whoever happens to be holding the handset.
+  ///
+  /// Defaults to TRUE (allowed) so that asking an agent for a screenshot of a
+  /// problem just works. Turn it off from the dashboard to lock the fleet down.
+  /// The portal WebView blocks capture regardless of this flag — see
+  /// ScreenSecurity.forceOn.
+  static bool get allowScreenshots => _flag('allow_screenshots', def: true);
+
   /// Home-screen announcement banner.
   static ({String text, bool enabled}) get announcement {
     final m = _obj('announcement');

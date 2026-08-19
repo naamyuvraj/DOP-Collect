@@ -1,28 +1,27 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 
-import '../data/app_settings.dart';
+import 'remote_config.dart';
 
 /// The Android FLAG_SECURE block on screenshots, screen recording, casting and
 /// the recents thumbnail.
 ///
 /// MainActivity turns it ON at onCreate, so the app is protected from its first
-/// frame — before any Dart has run. Everything here can only relax it, and only
-/// because the agent asked in Settings. The app can never start unprotected and
-/// get locked down a moment later.
+/// frame — before any Dart has run, and before RemoteConfig has been read.
+/// Everything here can only relax it. The app can never start unprotected and
+/// get locked down a moment later, and a phone that cannot reach the config
+/// falls back to the cached value, or to blocked if it has never had one.
 class ScreenSecurity {
   ScreenSecurity._();
   static const _ch = MethodChannel('dop_collect/app');
 
-  /// Apply the saved preference. Called once at startup.
-  static Future<void> applySaved() async =>
-      _set(!await AppSettings.allowScreenshots());
-
-  /// Change the preference and apply it immediately.
-  static Future<void> setAllowed(bool allowed) async {
-    await AppSettings.setAllowScreenshots(allowed);
-    await _set(!allowed);
-  }
+  /// Apply the fleet-wide setting. Called at startup, after RemoteConfig.
+  ///
+  /// There is no per-device override. Whether customer data may be captured is
+  /// a decision about other people's information, so it sits with the admin who
+  /// is accountable for it rather than with whoever is holding the phone.
+  static Future<void> applySaved() =>
+      _set(!RemoteConfig.allowScreenshots);
 
   /// Force the block on regardless of the setting.
   ///

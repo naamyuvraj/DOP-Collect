@@ -42,7 +42,7 @@ create policy "anon read config" on public.app_config
   for select to anon using (key in (
     'assistant_cloud', 'analytics_default', 'portal_submit',
     'payments_enabled', 'announcement', 'force_update', 'otp_required',
-    'self_serve_billing', 'max_devices'
+    'self_serve_billing', 'max_devices', 'allow_screenshots'
   ));
 
 -- Sensible defaults.
@@ -50,6 +50,10 @@ insert into public.app_config (key, value) values
   ('assistant_cloud',   'true'::jsonb),
   ('analytics_default', 'true'::jsonb),
   ('portal_submit',     'true'::jsonb),
+  -- Screenshots default to ALLOWED so "send me a picture of it" works without
+  -- anyone changing anything. Turning this off blocks capture, casting and the
+  -- recents thumbnail on every install. The portal login is blocked regardless.
+  ('allow_screenshots', 'true'::jsonb),
   ('announcement',      '{"text":"","enabled":false}'::jsonb),
   ('force_update',      '{"version":"","message":"","enabled":false}'::jsonb),
   -- These two are read by RemoteConfig and were never seeded, so the app fell

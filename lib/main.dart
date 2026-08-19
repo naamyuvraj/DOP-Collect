@@ -92,8 +92,9 @@ Future<void> main() async {
   unawaited(Analytics.identify());
   unawaited(Analytics.track('app_open'));
 
-  // Screenshots are blocked from the first frame by MainActivity; this only
-  // relaxes it if the agent has asked for that in Settings.
+  // Screenshots are blocked from the first frame by MainActivity; this relaxes
+  // that only if the dashboard says so. Read after RemoteConfig.init() above,
+  // so it uses the cached value on a cold, offline start rather than guessing.
   if (!web) unawaited(ScreenSecurity.applySaved());
 
   // Silently download any Shorebird patch in the background so it stages itself

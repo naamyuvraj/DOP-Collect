@@ -49,6 +49,7 @@ export default function Config() {
             ["portal_submit", "Portal auto-submit", "Kill switch for making/paying lists on the DOP portal. Off = the “Submit on Portal” buttons are hidden on every install."],
             ["payments_enabled", "Subscriptions / paywall", "Master switch. On = agents whose plan expired are gated to the paywall. Off = everyone has full access (default)."],
             ["otp_required", "Phone verification", "Require phone verification at onboarding (1 phone ↔ 1 agent, max 2 devices). Off = no verification (default). Only turn on AFTER the app build with verification is live on phones."],
+            ["allow_screenshots", "Allow screenshots", "On = agents can screenshot and screen-record the app (default), which is what makes “send me a picture of it” work. Off = Android blocks capture, casting and the recents thumbnail on every install. The portal login screen is always blocked either way. Applies on the app’s next launch."],
           ].map(([key, label, help]) => (
             <div key={key} className="flex items-center justify-between py-3 border-t border-line first:border-0">
               <div className="pr-4">
