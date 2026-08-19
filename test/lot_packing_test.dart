@@ -49,9 +49,14 @@ void main() {
   });
 
   group('the listed-this-cycle guard expires with the cycle', () {
-    Lot lotOn(DateTime created, String account) => Lot(
+    // `submitted` is not decoration: an unsubmitted list blocks its accounts
+    // for ever, and only a FILED one expires with its cycle. See
+    // LotPacking._stillBlocks.
+    Lot lotOn(DateTime created, String account, {bool submitted = false}) => Lot(
           createdAt: created,
           mode: 'Cash',
+          referenceNumber: submitted ? 'C123456789' : null,
+          submittedAt: submitted ? created : null,
           items: [
             LotItem(
               accountNumber: account,
@@ -68,18 +73,33 @@ void main() {
       expect(listed, {'a'});
     });
 
-    test('last month\'s list does NOT suppress this month\'s collection', () {
+    test('last month\'s SUBMITTED list does not suppress this month', () {
       // The regression that mattered: the old `status == deposited` flag was
       // never reset, so every customer collected in June stayed invisible to
       // auto-build in July, August and forever. Derived from the lists, June's
-      // list simply stops counting once July starts.
-      final june = [lotOn(DateTime(2026, 6, 3), 'a')];
+      // list stops counting once July starts — but only because the cash was
+      // actually handed in, which is what `submitted` says here.
+      final june = [lotOn(DateTime(2026, 6, 3), 'a', submitted: true)];
       expect(LotPacking.listedThisCycle(june, now), isEmpty);
 
       final accounts = [_acct('a', 2000, DateTime(2026, 7, 2))];
       final lots = LotPacking.build(accounts, now,
           alreadyListed: LotPacking.listedThisCycle(june, now));
       expect(lots.single.items.single.accountNumber, 'a');
+    });
+
+    test('an UNSUBMITTED list from last month still blocks', () {
+      // The other half of the rule, and the reason it exists: a list built on
+      // 31 July and still sitting unsubmitted on 1 August is a live claim on
+      // those accounts. Expiring it by the calendar let auto-build pack the
+      // same customers a second time while the first list waited to be filed.
+      final june = [lotOn(DateTime(2026, 6, 3), 'a')];
+      expect(LotPacking.listedThisCycle(june, now), {'a'});
+
+      final accounts = [_acct('a', 2000, DateTime(2026, 7, 2))];
+      final lots = LotPacking.build(accounts, now,
+          alreadyListed: LotPacking.listedThisCycle(june, now));
+      expect(lots, isEmpty);
     });
   });
 

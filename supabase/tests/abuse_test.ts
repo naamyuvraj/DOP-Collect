@@ -171,7 +171,7 @@ const ingest = await load("ingest");
 const deviceRow = (over: Record<string, unknown> = {}) => ({
   kind: "device",
   row: {
-    id: "dev-mine", name: "Real Agent", mobile: "9810000001",
+    id: "dev-mine", agent_name: "Real Agent", mobile: "9810000001",
     agent_id: "AGENT-1", sol_id: "SOL1", app_version: "0.9.50+24",
     ...over,
   },
@@ -181,46 +181,46 @@ Deno.test("S4: a verified agent's row cannot be rewritten by a stranger", async 
   const db = await seeded();
   // The row as it stands after the agent verified their phone.
   db.tables.devices.push({
-    id: "dev-mine", account_id: "acct-1", name: "Real Agent",
+    id: "dev-mine", account_id: "acct-1", agent_name: "Real Agent",
     mobile: "9810000001", agent_id: "AGENT-1",
   });
   begin(db, { env: BASE_ENV });
 
   const res = await post(ingest, deviceRow({
-    name: "Impostor", mobile: "9990000000", agent_id: "AGENT-STOLEN",
+    agent_name: "Impostor", mobile: "9990000000", agent_id: "AGENT-STOLEN",
   })); // no token
 
   assertEquals(res.status, 403);
   assertEquals(res.json.error, "not_your_device");
   const row = db.tables.devices.find((d) => d.id === "dev-mine")!;
-  assertEquals(row.name, "Real Agent");
+  assertEquals(row.agent_name, "Real Agent");
   assertEquals(row.mobile, "9810000001");
   assertEquals(row.agent_id, "AGENT-1");
 });
 
 Deno.test("S4: another agent's valid token is not a key to this row", async () => {
   const db = await seeded();
-  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1", name: "Real Agent" });
+  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1", agent_name: "Real Agent" });
   begin(db, { env: BASE_ENV });
 
   const res = await post(ingest, {
-    ...deviceRow({ name: "Impostor" }),
+    ...deviceRow({ agent_name: "Impostor" }),
     token: OTHER_TOKEN,
   });
 
   assertEquals(res.status, 403);
-  assertEquals(db.tables.devices[0].name, "Real Agent");
+  assertEquals(db.tables.devices[0].agent_name, "Real Agent");
 });
 
 Deno.test("S4: the owner can still update their own row", async () => {
   const db = await seeded();
-  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1", name: "Old Name" });
+  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1", agent_name: "Old Name" });
   begin(db, { env: BASE_ENV });
 
-  const res = await post(ingest, { ...deviceRow({ name: "New Name" }), token: TOKEN });
+  const res = await post(ingest, { ...deviceRow({ agent_name: "New Name" }), token: TOKEN });
 
   assertEquals(res.json.ok, true);
-  assertEquals(db.tables.devices[0].name, "New Name");
+  assertEquals(db.tables.devices[0].agent_name, "New Name");
 });
 
 Deno.test("S4: a fresh install with no claim yet still reports normally", async () => {
@@ -236,12 +236,66 @@ Deno.test("S4: a fresh install with no claim yet still reports normally", async 
 
 Deno.test("S4: an unclaimed row is still open (agent mid-onboarding)", async () => {
   const db = await seeded();
-  db.tables.devices.push({ id: "dev-mine", account_id: null, name: "Half done" });
+  db.tables.devices.push({ id: "dev-mine", account_id: null, agent_name: "Half done" });
   begin(db, { env: BASE_ENV });
 
-  const res = await post(ingest, deviceRow({ name: "Finished" }));
+  const res = await post(ingest, deviceRow({ agent_name: "Finished" }));
   assertEquals(res.json.ok, true);
-  assertEquals(db.tables.devices[0].name, "Finished");
+  assertEquals(db.tables.devices[0].agent_name, "Finished");
+});
+
+// ---------------------------------------------------------------------------
+// The retired `name` column
+//
+// There is ONE name now and it is `agent_name`; `devices.name` was dropped by
+// admin/schema_one_name.sql. `ingest` still ACCEPTS `name` so a phone on an
+// older build keeps its row labelled, and these pin that fold — the tests above
+// used to cover it only by accident, by asserting on a column that no longer
+// exists, which is why they kept passing long after they stopped meaning
+// anything.
+// ---------------------------------------------------------------------------
+
+Deno.test("an older build's `name` still lands as agent_name", async () => {
+  const db = await seeded();
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(ingest, {
+    kind: "device",
+    row: { id: "dev-old-build", name: "Legacy Agent", platform: "android" },
+  });
+
+  assertEquals(res.json.ok, true);
+  const saved = db.tables.devices.find((d) => d.id === "dev-old-build")!;
+  assertEquals(saved.agent_name, "Legacy Agent");
+});
+
+Deno.test("agent_name wins when a build sends both", async () => {
+  const db = await seeded();
+  begin(db, { env: BASE_ENV });
+
+  await post(ingest, {
+    kind: "device",
+    row: { id: "dev-both", agent_name: "Current", name: "Legacy", platform: "android" },
+  });
+
+  assertEquals(db.tables.devices.find((d) => d.id === "dev-both")!.agent_name, "Current");
+});
+
+Deno.test("a report with no name does not blank the name already on the row", async () => {
+  // With two name columns this was survivable; with one it erases the only name
+  // we have, and the admin list is what reads it.
+  const db = await seeded();
+  db.tables.devices.push({ id: "dev-mine", account_id: null, agent_name: "Real Agent" });
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(ingest, {
+    kind: "device",
+    row: { id: "dev-mine", app_version: "1.0.0+40", platform: "android" },
+  });
+
+  assertEquals(res.json.ok, true);
+  assertEquals(db.tables.devices[0].agent_name, "Real Agent");
+  assertEquals(db.tables.devices[0].app_version, "1.0.0+40");
 });
 
 Deno.test("S4: plain events are unaffected — they carry no identity", async () => {
@@ -293,7 +347,7 @@ Deno.test("a missing model column costs the model, not the whole row", async () 
   assertEquals(res.json.ok, true, "the rest of the row must still land");
   const saved = db.tables.devices.find((d) => d.id === "dev-new");
   assert(saved, "row should exist");
-  assertEquals(saved!.name, "Real Agent");
+  assertEquals(saved!.agent_name, "Real Agent");
   assertEquals(saved!.mobile, "9810000001");
   assertEquals(saved!.model, undefined, "dropped, because the column is not there");
 });
