@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
@@ -133,6 +134,12 @@ class _OnboardingLoginState extends State<OnboardingLogin> {
     await AppSettings.setOnboarded(true);
     Analytics.identify(force: true);
     Analytics.track('login');
+    // The "Log in" tab verifies the phone BEFORE the DOP agent id exists on this
+    // handset, so the account was created with no agent id. Now that Credentials
+    // holds one, attach it — otherwise the 1:1 binding the device limit rests on
+    // is never established. Idempotent, and a no-op for the sign-up path where
+    // verify already carried the id.
+    unawaited(OtpService.bindAgent());
     if (!mounted) return;
     widget.onDone?.call();
   }

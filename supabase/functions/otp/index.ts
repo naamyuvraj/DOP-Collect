@@ -9,6 +9,8 @@
 //   * issues a device session token and enforces MAX 2 devices per account
 //     (a 3rd verify kicks the oldest — "session out")
 //   * session_check heartbeat + logout
+//   * bind_agent — fill in an agent id the "Log in" tab could not supply at
+//     verify time (session token proves ownership; only ever fills a null)
 //
 // Only a SHA-256 hash of the phone AND of the code is ever stored; the raw phone
 // only transits to MSG91 for delivery.
@@ -218,6 +220,71 @@ Deno.serve(async (req) => {
       await sb.from("device_sessions")
         .update({ last_seen: new Date().toISOString() }).eq("id", s.id);
       return json({ ok: true });
+    }
+
+    // ---- bind_agent: attach a DOP agent id to an already-verified account --
+    //
+    // The "Log in" tab verifies a phone BEFORE the DOP agent id has been typed
+    // in (onboarding_login._login reads Credentials, which is empty on a fresh
+    // phone, then collects the id afterwards via ensureDopLogin). So `verify`
+    // took the `else if (!accountId)` branch and created an account keyed on the
+    // phone alone, with agent_id null — and nothing ever filled it in.
+    //
+    // The consequences were not cosmetic. `accounts.agent_id` is what makes the
+    // binding 1:1, so a null one means the `already_linked` check below can
+    // never fire for that account, and the same agent id can be verified from
+    // any number of different mobiles — each getting its own account and its own
+    // full max_devices budget. The device limit stopped constraining the agent
+    // at all.
+    //
+    // Proof of ownership is the session token, exactly as in `changePhone`: the
+    // agent id is printed on receipts, so it is not a secret and cannot be the
+    // thing that authorises the write.
+    //
+    // Deliberately NOT destructive. It only fills a null, and refuses when the
+    // account already carries a different id or when another account already
+    // owns this one. Repairing the accounts that are ALREADY split is a data
+    // decision for a human, not something a background call should do.
+    if (action === "bind_agent") {
+      const agentId = String(body.agentId || "").trim().slice(0, 64);
+      if (!agentId) return json({ ok: false, code: "bad_agent" }, 400);
+
+      const { data: s } = await sb
+        .from("device_sessions")
+        .select("account_id, revoked_at")
+        .eq("token_hash", await sha256(String(body.token || "")))
+        .maybeSingle();
+      if (!s || s.revoked_at || !s.account_id)
+        return json({ ok: false, code: "no_session" }, 403);
+
+      const { data: acct } = await sb
+        .from("accounts").select("id, agent_id, disabled").eq("id", s.account_id).maybeSingle();
+      if (!acct) return json({ ok: false, code: "no_session" }, 403);
+      if (acct.disabled) return json({ ok: false, code: "account_disabled" }, 403);
+      if (acct.agent_id) {
+        // Already settled. Same id is a no-op; a different one is a genuine
+        // conflict the app must not paper over by rewriting the binding.
+        return acct.agent_id === agentId
+          ? json({ ok: true, code: "already_bound" })
+          : json({ ok: false, code: "agent_mismatch" }, 409);
+      }
+
+      const { data: taken } = await sb
+        .from("accounts").select("id").eq("agent_id", agentId).maybeSingle();
+      if (taken && taken.id !== acct.id)
+        return json({ ok: false, code: "already_linked", detail: "agent" }, 409);
+
+      const { error } = await sb
+        .from("accounts").update({ agent_id: agentId }).eq("id", acct.id);
+      // accounts.agent_id is UNIQUE, so two phones binding the same id at once
+      // race here. 23505 = unique_violation: the other one won, which is the
+      // same outcome as the pre-check above.
+      if (error) {
+        return (error as { code?: string }).code === "23505"
+          ? json({ ok: false, code: "already_linked", detail: "agent" }, 409)
+          : json({ ok: false, code: "bind_failed" }, 500);
+      }
+      return json({ ok: true, code: "bound" });
     }
 
     // ---- send / resend / verify: need a phone -----------------------------

@@ -246,3 +246,110 @@ Deno.test("codes differ between sends (not a fixed or predictable value)", async
   assertNotEquals(seen.size, 1, "every code was identical");
   assert(seen.size >= 6, `only ${seen.size} distinct codes in 12 sends`);
 });
+
+// ---------------------------------------------------------------------------
+// bind_agent — filling in the agent id the "Log in" tab could not supply
+// ---------------------------------------------------------------------------
+
+/** An account verified by phone only, as the "Log in" tab leaves it. */
+async function unbound(phone: string): Promise<{ db: Db; accountId: string; token: string }> {
+  const db = newDb();
+  const accountId = crypto.randomUUID();
+  db.tables.accounts.push({
+    id: accountId,
+    phone_hash: await sha256Hex("91" + phone),
+    agent_id: null,
+    disabled: false,
+  });
+  const token = "unbound-live-token";
+  db.tables.device_sessions.push({
+    id: crypto.randomUUID(),
+    account_id: accountId,
+    device_id: "new-phone",
+    token_hash: await sha256Hex(token),
+    revoked_at: null,
+    created_at: new Date().toISOString(),
+  });
+  return { db, accountId, token };
+}
+
+Deno.test("bind_agent fills a null agent id for the session's own account", async () => {
+  const { db, accountId, token } = await unbound("9830000003");
+  begin(db);
+  const r = await post(handler, { action: "bind_agent", token, agentId: "AGENT-NEW-01" });
+  assertEquals(r.json.ok, true);
+  assertEquals(r.json.code, "bound");
+  assertEquals(db.tables.accounts.find((a) => a.id === accountId)!.agent_id, "AGENT-NEW-01");
+});
+
+Deno.test("bind_agent is idempotent for the same id", async () => {
+  const { db, token } = await unbound("9830000004");
+  begin(db);
+  await post(handler, { action: "bind_agent", token, agentId: "AGENT-NEW-02" });
+  const again = await post(handler, { action: "bind_agent", token, agentId: "AGENT-NEW-02" });
+  assertEquals(again.json.ok, true);
+  assertEquals(again.json.code, "already_bound");
+});
+
+Deno.test("bind_agent never rewrites an agent id already on the account", async () => {
+  const { db, victimToken, accountId } = await seeded();
+  begin(db);
+  const r = await post(handler, { action: "bind_agent", token: victimToken, agentId: "AGENT-OTHER" });
+  assertEquals(r.json.ok, false);
+  assertEquals(r.json.code, "agent_mismatch");
+  assertEquals(db.tables.accounts.find((a) => a.id === accountId)!.agent_id, VICTIM_AGENT);
+});
+
+Deno.test("bind_agent refuses an agent id another account already owns", async () => {
+  // The victim owns VICTIM_AGENT; a second, unbound account tries to claim it.
+  const { db } = await seeded();
+  const otherId = crypto.randomUUID();
+  db.tables.accounts.push({
+    id: otherId,
+    phone_hash: await sha256Hex("91" + ATTACKER_PHONE),
+    agent_id: null,
+    disabled: false,
+  });
+  const otherToken = "other-live-token";
+  db.tables.device_sessions.push({
+    id: crypto.randomUUID(),
+    account_id: otherId,
+    device_id: "other-phone",
+    token_hash: await sha256Hex(otherToken),
+    revoked_at: null,
+    created_at: new Date().toISOString(),
+  });
+  begin(db);
+  const r = await post(handler, { action: "bind_agent", token: otherToken, agentId: VICTIM_AGENT });
+  assertEquals(r.json.ok, false);
+  assertEquals(r.json.code, "already_linked");
+  assertEquals(r.json.detail, "agent");
+  assertEquals(db.tables.accounts.find((a) => a.id === otherId)!.agent_id, null);
+});
+
+Deno.test("bind_agent needs a live session — a bare agent id is not proof", async () => {
+  const { db } = await unbound("9830000005");
+  begin(db);
+  const r = await post(handler, { action: "bind_agent", token: "", agentId: "AGENT-NEW-03" });
+  assertEquals(r.json.ok, false);
+  assertEquals(r.json.code, "no_session");
+  assertEquals(db.tables.accounts[0].agent_id, null);
+});
+
+Deno.test("bind_agent rejects a REVOKED session", async () => {
+  const { db, token } = await unbound("9830000006");
+  db.tables.device_sessions[0].revoked_at = new Date().toISOString();
+  begin(db);
+  const r = await post(handler, { action: "bind_agent", token, agentId: "AGENT-NEW-04" });
+  assertEquals(r.json.ok, false);
+  assertEquals(r.json.code, "no_session");
+  assertEquals(db.tables.accounts[0].agent_id, null);
+});
+
+Deno.test("bind_agent needs an agent id", async () => {
+  const { db, token } = await unbound("9830000007");
+  begin(db);
+  const r = await post(handler, { action: "bind_agent", token, agentId: "   " });
+  assertEquals(r.json.ok, false);
+  assertEquals(r.json.code, "bad_agent");
+});

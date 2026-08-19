@@ -120,7 +120,14 @@ Future<void> main() async {
   // remotely (kicked by the 2-device limit, or disabled by an admin), drop to
   // the verify gate on this launch. Background so it never delays startup, and
   // fail-open on a network blip.
-  if (!web && onboarded) unawaited(_enforceSession());
+  if (!web && onboarded) unawaited(_startupIdentity());
+}
+
+/// Session heartbeat, then the agent-id bind repair — in that order, so a device
+/// whose session has just been revoked doesn't try to bind with a dead token.
+Future<void> _startupIdentity() async {
+  await _enforceSession();
+  await OtpService.bindAgent();
 }
 
 /// Startup session heartbeat. Only acts when OTP is required AND the server says
