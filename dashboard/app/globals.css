@@ -138,6 +138,46 @@ table, .tnum { font-variant-numeric: tabular-nums; }
 @keyframes countIn { from { opacity: .35 } to { opacity: 1 } }
 .counting { animation: countIn .5s ease both; }
 
+/* --- Four-cube loader ------------------------------------------------------ */
+
+/* Squares, not spinners: the rest of this dashboard is flat rectangles, and a
+   round spinner reads as if it came from somewhere else. Colour is inherited,
+   so it works on the card and on the ink button without a second variant.
+
+   The chase runs clockwise — grid order is TL, TR, BL, BR, so the third step is
+   nth-child(4) and the fourth is nth-child(3). Getting that backwards makes it
+   stutter diagonally, which looks like a dropped frame rather than a choice. */
+.cubes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px;
+  width: 30px;
+  height: 30px;
+  animation: cubesTurn 3s linear infinite;
+}
+.cubes > i {
+  display: block;
+  background: currentColor;
+  border-radius: 2px;
+  animation: cubePulse 1.2s ease-in-out infinite;
+}
+.cubes > i:nth-child(1) { animation-delay: 0ms }
+.cubes > i:nth-child(2) { animation-delay: 150ms }
+.cubes > i:nth-child(4) { animation-delay: 300ms }
+.cubes > i:nth-child(3) { animation-delay: 450ms }
+
+@keyframes cubePulse {
+  0%, 70%, 100% { opacity: .2; transform: scale(.7) }
+  35%           { opacity: 1;  transform: scale(1) }
+}
+@keyframes cubesTurn { to { transform: rotate(360deg) } }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still legible as "working", with nothing moving. */
+  .cubes, .cubes > i { animation: none }
+  .cubes > i { opacity: .55 }
+}
+
 /* --- Reveal ---------------------------------------------------------------- */
 
 /* `to` deliberately does NOT set transform. An animation's final keyframe wins

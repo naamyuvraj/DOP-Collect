@@ -304,3 +304,27 @@ export function KpiSkeletons({
     </div>
   );
 }
+
+/**
+ * Four cubes chasing each other — the app's one loading indicator.
+ *
+ * Colour is inherited (`currentColor`), so it sits on a card or inside the ink
+ * button without needing a light and a dark variant.
+ */
+export function Cubes({ className = "" }: { className?: string }) {
+  return (
+    <span className={`cubes ${className}`} role="status" aria-label="Loading">
+      <i /><i /><i /><i />
+    </span>
+  );
+}
+
+/** Full-card "you are on your way in" state, shown while the route changes. */
+export function Redirecting({ label = "Opening the dashboard" }: { label?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 py-10">
+      <Cubes />
+      <span className="text-muted text-meta">{label}</span>
+    </div>
+  );
+}

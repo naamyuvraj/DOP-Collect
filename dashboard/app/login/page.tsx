@@ -1,6 +1,7 @@
 "use client";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Cubes, Redirecting } from "@/components/ui";
 
 export default function Login() {
   return (
@@ -21,6 +22,10 @@ function LoginForm() {
   const [hint, setHint] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Held from the moment the server says yes until the new route paints. Without
+  // it the form just sits there looking like nothing happened, which is exactly
+  // when someone presses the button a second time.
+  const [redirecting, setRedirecting] = useState(false);
   const router = useRouter();
   const next = useSearchParams().get("next") || "/";
 
@@ -47,7 +52,10 @@ function LoginForm() {
         setCode("");
         return;
       }
-      if (r.ok) return router.replace(next);
+      if (r.ok) {
+        setRedirecting(true);
+        return router.replace(next);
+      }
 
       setErr(
         j.error ||
@@ -60,6 +68,16 @@ function LoginForm() {
       setBusy(false);
     }
   }
+
+  // Auto-submit on the fourth digit, the way the app's verify screen does —
+  // typing the last one and then hunting for a button is a step nobody wants.
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+  useEffect(() => {
+    if (step === "otp" && code.length === 4 && !busy && !redirecting) {
+      submitRef.current(new Event("submit") as unknown as React.FormEvent);
+    }
+  }, [code, step, busy, redirecting]);
 
   async function resend() {
     setBusy(true);
@@ -76,7 +94,12 @@ function LoginForm() {
 
   return (
     <div className="min-h-screen grid place-items-center px-6">
-      <form
+      {redirecting ? (
+        <div className="card w-full max-w-sm p-7">
+          <Redirecting />
+        </div>
+      ) : (
+        <form
         onSubmit={submit}
         className="card w-full max-w-sm p-7 flex flex-col gap-4"
       >
@@ -118,16 +141,34 @@ function LoginForm() {
             <p className="text-muted text-xs">
               Code sent on WhatsApp to {hint || "your number"}.
             </p>
-            <input
-              className="input font-mono tracking-[.4em] text-center"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={4}
-              autoFocus
-              placeholder="····"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-            />
+            {/* Four boxes, but ONE real input laid over them.
+                Four separate inputs mean focus juggling on every keystroke and
+                they break paste and WhatsApp autofill — the browser fills the
+                first box with all four digits and gives up. A single input keeps
+                autocomplete="one-time-code" working; the boxes are just paint. */}
+            <div className="relative">
+              <div className="flex gap-2 justify-center">
+                {[0, 1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className={`w-12 h-14 rounded-[4px] border grid place-items-center
+                      font-mono text-xl transition-colors
+                      ${code.length === i ? "border-ink" : "border-line"}`}
+                  >
+                    {code[i] ?? ""}
+                  </div>
+                ))}
+              </div>
+              <input
+                className="absolute inset-0 w-full h-full opacity-0"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={4}
+                autoFocus
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              />
+            </div>
           </>
         )}
 
@@ -142,9 +183,16 @@ function LoginForm() {
             (step === "password" ? !adminId || phone.length !== 10 : code.length < 4)
           }
         >
-          {busy
-            ? step === "otp" ? "Checking…" : "Sending…"
-            : step === "otp" ? "Login" : "Send OTP"}
+          {busy ? (
+            <span className="inline-flex items-center gap-2.5">
+              <Cubes className="!w-4 !h-4 !gap-[2px]" />
+              {step === "otp" ? "Checking" : "Sending"}
+            </span>
+          ) : step === "otp" ? (
+            "Login"
+          ) : (
+            "Send OTP"
+          )}
         </button>
 
         {step === "otp" && (
@@ -158,6 +206,7 @@ function LoginForm() {
           </button>
         )}
       </form>
+      )}
     </div>
   );
 }
