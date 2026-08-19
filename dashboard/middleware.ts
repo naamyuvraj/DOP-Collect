@@ -11,6 +11,10 @@ import {
 const COOKIE = "dop_admin";
 const DEFAULT_SECRET = "dev-secret";
 
+/** Anything served straight out of public/ — images, icons, fonts, manifests. */
+const PUBLIC_FILE =
+  /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|txt|xml|json|webmanifest|woff2?|ttf|otf|map)$/i;
+
 // Verify the signed session token (nonce.exp.sig) using Web Crypto — the Node
 // `crypto` module isn't available in the Edge middleware runtime. Kept in sync
 // with lib/auth.ts (same HMAC-SHA256 over `nonce.exp`).
@@ -62,7 +66,16 @@ export async function middleware(req: NextRequest) {
     NextResponse.json({ ok: false, error }, { status, headers });
 
   // Static assets: headers only, no checks, no database round-trip.
-  if (pathname.startsWith("/_next") || pathname === "/favicon.ico") return pass();
+  //
+  // PUBLIC_FILE matters more than it looks. Everything under public/ is matched
+  // by this middleware, so an unauthenticated request for /logo.png was being
+  // 307'd to /login — the browser asked for a PNG, got an HTML page, and drew a
+  // broken image. On the login screen, which is the one page guaranteed to be
+  // unauthenticated and the first thing anyone sees.
+  //
+  // Safe to let through: these are files in public/, which are served to the
+  // world by definition, and no route ends in one of these extensions.
+  if (pathname.startsWith("/_next") || PUBLIC_FILE.test(pathname)) return pass();
 
   // 1. CSRF. Every state-changing request must say it came from here.
   if (isMutating(req.method) && !sameOrigin(req)) {
