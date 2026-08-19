@@ -10,7 +10,46 @@
  */
 
 const adminPhone = () => (process.env.ADMIN_PHONE || "").replace(/\D/g, "").slice(-10);
-const adminSecret = () => process.env.ADMIN_OTP_SECRET || "";
+// Trimmed on both sides of the wire. A long random string pasted into the
+// Vercel UI keeps a trailing newline that is invisible there, and Supabase has
+// it without — the header then never matches and the only symptom is
+// "forbidden", which reads as a missing secret rather than a whitespace one.
+const adminSecret = () => (process.env.ADMIN_OTP_SECRET || "").trim();
+
+/**
+ * What the RUNNING deployment can actually see — names and booleans, never
+ * values.
+ *
+ * This exists because "I set the variables and it still logs straight in" has
+ * no visible cause otherwise. Vercel binds env vars at deploy time, so a
+ * variable added after the last build is invisible to it; one set only for the
+ * Preview scope is invisible to Production; and a phone that is not 10 digits
+ * leaves adminOtpConfigured() false. All three look identical from the login
+ * screen: it just lets you in.
+ */
+export function adminOtpStatus() {
+  const phoneRaw = (process.env.ADMIN_PHONE || "").trim();
+  const phone = adminPhone();
+  const secret = adminSecret();
+  const active = adminOtpConfigured();
+
+  let reason = "";
+  if (active) reason = "Active — a code is required to sign in.";
+  else if (!phoneRaw && !secret)
+    reason = "Neither variable is visible to this deployment. If you have set them, redeploy — Vercel binds env vars at build time.";
+  else if (phoneRaw && phone.length !== 10)
+    reason = `ADMIN_PHONE is set but has ${phone.length} digits, not 10.`;
+  else if (!secret) reason = "ADMIN_OTP_SECRET is not visible to this deployment.";
+  else reason = "ADMIN_PHONE is not visible to this deployment.";
+
+  return {
+    active,
+    adminPhoneSet: phoneRaw.length > 0,
+    adminPhoneDigits: phone.length,
+    adminOtpSecretSet: secret.length > 0,
+    reason,
+  };
+}
 
 /**
  * Is the second factor switched on?

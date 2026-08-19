@@ -329,8 +329,11 @@ Deno.serve(async (req) => {
     // as one, or they take a slot in the max_devices count and a row in the
     // dashboard's own agent list.
     if (action === "admin_send" || action === "admin_verify") {
-      const secret = Deno.env.get("ADMIN_OTP_SECRET") ?? "";
-      const given = req.headers.get("x-admin-secret") ?? "";
+      // Both trimmed: these are long random strings that get pasted into a
+      // dashboard UI or piped in from a shell, and a stray newline on either
+      // side produces a bare "forbidden" that looks like a missing secret.
+      const secret = (Deno.env.get("ADMIN_OTP_SECRET") ?? "").trim();
+      const given = (req.headers.get("x-admin-secret") ?? "").trim();
       // Fail closed: with no secret configured these actions are unavailable,
       // rather than open to anyone who guesses the action name.
       if (!secret || !given || !timingSafeEqual(await sha256(given), await sha256(secret))) {

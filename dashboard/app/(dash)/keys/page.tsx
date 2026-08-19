@@ -14,6 +14,14 @@ type Key = {
 };
 type Usage = { key_index: number; calls: number; ok_calls: number; ok_pct: number };
 type Probe = { reachable: boolean; status: number | null; ms: number };
+type AuthStatus = {
+  active: boolean;
+  adminPhoneSet: boolean;
+  adminPhoneDigits: number;
+  adminOtpSecretSet: boolean;
+  adminIdSource: "ADMIN_ID" | "DASHBOARD_PASSWORD" | "none";
+  reason: string;
+};
 type EdgeFn = {
   slug: string;
   purpose: string;
@@ -42,6 +50,7 @@ export default function Keys() {
   const [note, setNote] = useState("");
   const [fns, setFns] = useState<EdgeFn[] | null>(null);
   const [deployAll, setDeployAll] = useState("");
+  const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [copied, setCopied] = useState("");
 
   async function loadModels() {
@@ -56,7 +65,7 @@ export default function Keys() {
   useEffect(() => {
     fetch("/api/functions", { cache: "no-store" })
       .then((r) => r.json())
-      .then((r) => { setFns(r.rows || []); setDeployAll(r.deployAll || ""); })
+      .then((r) => { setFns(r.rows || []); setDeployAll(r.deployAll || ""); setAuth(r.auth || null); })
       .catch(() => setFns([]));
   }, []);
 
@@ -366,6 +375,55 @@ export default function Keys() {
         )}
       </Card>
 
+      {/* What the RUNNING deployment can see. Every way this goes wrong —
+          variable added after the last build, set only for Preview, a phone
+          with the wrong number of digits — looks identical from the login
+          screen: it just lets you in. */}
+      {auth && (
+        <Card title="Admin login" className="mt-4">
+          <div className="flex items-center gap-2.5 flex-wrap mb-3">
+            <Pill tone={auth.active ? "g" : "r"}>
+              {auth.active ? "two-factor active" : "password only"}
+            </Pill>
+            <span className="text-muted text-xs">{auth.reason}</span>
+          </div>
+          <div className="flex flex-col gap-1.5 text-meta">
+            <EnvRow
+              name="ADMIN_ID"
+              ok={auth.adminIdSource === "ADMIN_ID"}
+              note={
+                auth.adminIdSource === "ADMIN_ID"
+                  ? "in use"
+                  : auth.adminIdSource === "DASHBOARD_PASSWORD"
+                    ? "not visible — falling back to DASHBOARD_PASSWORD"
+                    : "nothing set"
+              }
+            />
+            <EnvRow
+              name="ADMIN_PHONE"
+              ok={auth.adminPhoneSet && auth.adminPhoneDigits === 10}
+              note={
+                !auth.adminPhoneSet
+                  ? "not visible to this deployment"
+                  : auth.adminPhoneDigits === 10
+                    ? "10 digits"
+                    : `${auth.adminPhoneDigits} digits — needs 10`
+              }
+            />
+            <EnvRow
+              name="ADMIN_OTP_SECRET"
+              ok={auth.adminOtpSecretSet}
+              note={auth.adminOtpSecretSet ? "set" : "not visible to this deployment"}
+            />
+          </div>
+          <p className="text-micro text-faint mt-3">
+            Values are never read here, only whether the running build can see them.
+            Vercel binds env vars at build time — after changing one, redeploy.
+            The same ADMIN_OTP_SECRET must also be set on Supabase.
+          </p>
+        </Card>
+      )}
+
       {/* Edge functions. They belong on this page because they are the other
           half of the same failure: when the assistant goes quiet or a phone
           stops reporting, the cause is either a key above or one of these five
@@ -443,5 +501,16 @@ export default function Keys() {
       </Card>
 
     </>
+  );
+}
+
+/** One env var and whether this build can see it. Never its value. */
+function EnvRow({ name, ok, note }: { name: string; ok: boolean; note: string }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className={ok ? "text-green" : "text-red"}>{ok ? "\u2713" : "\u2717"}</span>
+      <code className="font-mono text-xs font-semibold">{name}</code>
+      <span className="text-faint text-micro">{note}</span>
+    </div>
   );
 }

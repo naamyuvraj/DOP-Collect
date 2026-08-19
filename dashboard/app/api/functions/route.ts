@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { isAuthed } from "@/lib/auth";
+import { isAuthed, adminIdSource } from "@/lib/auth";
+import { adminOtpStatus } from "@/lib/adminOtp";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,7 @@ export async function GET() {
     // even when this dashboard cannot reach the project.
     return NextResponse.json({
       rows: FUNCTIONS.map((f) => ({ ...f, deploy: deploy(f.slug), probe: null })),
+      auth: { ...adminOtpStatus(), adminIdSource: adminIdSource() },
     });
   }
 
@@ -108,5 +110,11 @@ export async function GET() {
   // installed CLI (2.20.12) documents exactly one `[Function name]`, so naming
   // all five would be relying on undocumented behaviour.
   const deployAll = `supabase functions deploy${ref ? ` --project-ref ${ref}` : ""} --use-api`;
-  return NextResponse.json({ rows, deployAll });
+  // Names and booleans only — never a value. Behind the admin gate like
+  // everything else here.
+  return NextResponse.json({
+    rows,
+    deployAll,
+    auth: { ...adminOtpStatus(), adminIdSource: adminIdSource() },
+  });
 }
