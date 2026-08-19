@@ -1,4 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  LIMITS,
+  clientIp,
+  isMutating,
+  sameOrigin,
+  securityHeaders,
+  withinRate,
+} from "@/lib/guard";
 
 const COOKIE = "dop_admin";
 const DEFAULT_SECRET = "dev-secret";
@@ -33,29 +41,70 @@ async function verify(token: string | undefined, secret: string): Promise<boolea
   return r === 0;
 }
 
-// Gate everything except the login page and the auth endpoint.
+/**
+ * The single gate: security headers, CSRF origin check, per-IP rate limit, then
+ * the auth cookie.
+ *
+ * Order matters. The origin check and the rate limit run BEFORE the auth check
+ * and apply to `/api/auth` too — that endpoint is the one an attacker actually
+ * wants, and exempting it because it is "public" would leave the login itself
+ * the only unguarded thing on the dashboard.
+ */
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const headers = securityHeaders(req.nextUrl.protocol === "https:");
+  const pass = () => {
+    const res = NextResponse.next();
+    for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+    return res;
+  };
+  const deny = (status: number, error: string) =>
+    NextResponse.json({ ok: false, error }, { status, headers });
+
+  // Static assets: headers only, no checks, no database round-trip.
+  if (pathname.startsWith("/_next") || pathname === "/favicon.ico") return pass();
+
+  // 1. CSRF. Every state-changing request must say it came from here.
+  if (isMutating(req.method) && !sameOrigin(req)) {
+    return deny(403, "bad_origin");
+  }
+
+  // 2. Rate limit, per IP. Only /api/* — page navigations cost a Supabase
+  //    round-trip to count and are not the thing worth counting.
+  if (pathname.startsWith("/api/")) {
+    const ip = clientIp(req);
+    const write = isMutating(req.method);
+    const { window, max } = write ? LIMITS.write : LIMITS.read;
+    if (!(await withinRate(`dash:${ip}:${write ? "w" : "r"}`, window, max))) {
+      return deny(429, "rate_limited");
+    }
+  }
+
+  // 3. Auth. `/api/auth` is how you GET a cookie, and /login + /privacy are
+  //    meant to be reachable without one.
   const isPublic =
     pathname.startsWith("/login") ||
     pathname.startsWith("/privacy") || // public policy page (Play Store link)
-    pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/_next") ||
-    pathname === "/favicon.ico";
-
-  if (isPublic) return NextResponse.next();
+    pathname.startsWith("/api/auth");
+  if (isPublic) return pass();
 
   const secret = process.env.AUTH_SECRET;
   const ok =
     !!secret &&
     secret !== DEFAULT_SECRET &&
     (await verify(req.cookies.get(COOKIE)?.value, secret));
-  if (ok) return NextResponse.next();
+  if (ok) return pass();
+
+  // An unauthenticated API call gets a 401, not a redirect to an HTML page —
+  // fetch() cannot do anything useful with a 307 to /login.
+  if (pathname.startsWith("/api/")) return deny(401, "unauthorized");
 
   const url = req.nextUrl.clone();
   url.pathname = "/login";
   url.searchParams.set("next", pathname);
-  return NextResponse.redirect(url);
+  const res = NextResponse.redirect(url);
+  for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+  return res;
 }
 
 export const config = {

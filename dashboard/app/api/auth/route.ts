@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { COOKIE, mintToken, adminPassword } from "@/lib/auth";
+import { COOKIE, mintToken, adminPassword, passwordMatches } from "@/lib/auth";
 import { admin, dbConfigured } from "@/lib/supabase";
 
 // POST { password } -> set the session cookie. DELETE -> log out.
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { password } = await req.json().catch(() => ({ password: "" }));
-  if (!password || password !== expected) {
+  if (!passwordMatches(String(password ?? ""))) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 

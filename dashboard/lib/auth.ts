@@ -56,6 +56,22 @@ export function verifyToken(token: string | undefined | null): boolean {
   return timingSafeEqual(sign(secret, `${nonce}.${exp}`), sig);
 }
 
+/**
+ * Constant-time password check.
+ *
+ * `given !== expected` short-circuits on the first differing byte, and on a
+ * length mismatch before that — so it leaks both. HMAC both sides first and the
+ * compared values are a fixed 64 hex chars whatever went in, which leaves
+ * nothing for the comparison to leak. The login throttle makes this hard to
+ * exploit over a network; it costs one line not to rely on that.
+ */
+export function passwordMatches(given: string): boolean {
+  const expected = adminPassword();
+  const secret = authSecret();
+  if (!expected || !secret || !given) return false;
+  return timingSafeEqual(sign(secret, given), sign(secret, expected));
+}
+
 export function isAuthed(): boolean {
   return verifyToken(cookies().get(COOKIE)?.value);
 }
