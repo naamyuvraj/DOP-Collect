@@ -6,6 +6,7 @@ import {
   mintPending,
   verifyPending,
   adminId,
+  adminIdSource,
   adminIdMatches,
 } from "@/lib/auth";
 import {
@@ -97,6 +98,12 @@ export async function POST(req: NextRequest) {
   // reporting both together, would tell someone who failed the ID whether they
   // at least had the right number.
   if (!adminIdMatches(String(body.adminId ?? ""))) {
+    // Which VARIABLE is in play, never its value. Vercel binds env vars at
+    // deploy time, so an ADMIN_ID added after the last build is invisible to the
+    // running one and the fallback is silently still in use — which looks
+    // exactly like typing the wrong thing. This line is the difference between
+    // "wrong Admin ID" and knowing why.
+    console.warn(`admin login refused — comparing against ${adminIdSource()}`);
     return NextResponse.json({ ok: false }, { status: 401 });
   }
 

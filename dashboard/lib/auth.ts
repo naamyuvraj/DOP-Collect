@@ -32,9 +32,19 @@ export function adminPassword(): string | null {
  * as the only thing standing in front of every agent's identity.
  */
 export function adminId(): string | null {
-  const v = process.env.ADMIN_ID;
+  // Trimmed because these are long random strings that get pasted, and a
+  // trailing newline out of a password manager or a shell is invisible in the
+  // Vercel UI — it just reads as "wrong Admin ID" for ever.
+  const v = process.env.ADMIN_ID?.trim();
   if (v && v !== DEFAULT_PASSWORD) return v;
   return adminPassword();
+}
+
+/** Which variable the Admin ID is actually coming from. Never its value. */
+export function adminIdSource(): "ADMIN_ID" | "DASHBOARD_PASSWORD" | "none" {
+  const v = process.env.ADMIN_ID?.trim();
+  if (v && v !== DEFAULT_PASSWORD) return "ADMIN_ID";
+  return adminPassword() ? "DASHBOARD_PASSWORD" : "none";
 }
 
 function sign(secret: string, body: string): string {
@@ -120,8 +130,9 @@ export function verifyPending(token: string | undefined | null): boolean {
 export function adminIdMatches(given: string): boolean {
   const expected = adminId();
   const secret = authSecret();
-  if (!expected || !secret || !given) return false;
-  return timingSafeEqual(sign(secret, given), sign(secret, expected));
+  const typed = (given || "").trim();
+  if (!expected || !secret || !typed) return false;
+  return timingSafeEqual(sign(secret, typed), sign(secret, expected));
 }
 
 export function isAuthed(): boolean {
