@@ -54,13 +54,17 @@ function foldRaw(rows: { action: string; status: string; created_at: string; pho
       d = { day, sent: 0, failed: 0, blocked: 0, verified: 0, verify_failed: 0, phones: 0, _phones: new Set() };
       byDay.set(day, d);
     }
-    const isSend = r.action === "send" || r.action === "resend";
+    // admin_send is billable — MSG91 charges the same for an admin login code as
+    // for an agent's. Excluded, the spend bar under-reports every admin login.
+    const isSend =
+      r.action === "send" || r.action === "resend" || r.action === "admin_send";
     if (isSend && r.status === "ok") {
       d.sent++;
       if (r.phone_hash) d._phones.add(r.phone_hash);
     } else if (isSend && r.status === "provider_error") d.failed++;
     else if (isSend) d.blocked++; // cooldown | rate_limited | not_configured
-    else if (r.action === "verify") r.status === "ok" ? d.verified++ : d.verify_failed++;
+    else if (r.action === "verify" || r.action === "admin_verify")
+      r.status === "ok" ? d.verified++ : d.verify_failed++;
   }
   return [...byDay.values()]
     .map(({ _phones, ...d }) => ({ ...d, phones: _phones.size }))
@@ -148,10 +152,12 @@ export async function getTopPhones(limit = 12): Promise<OtpPhone[]> {
   for (const r of (data as any[]) || []) {
     let e = m.get(r.phone_hash);
     if (!e) { e = { phone_hash: r.phone_hash, sent: 0, verified: 0, blocked: 0, last_seen: r.created_at }; m.set(r.phone_hash, e); }
-    const isSend = r.action === "send" || r.action === "resend";
+    const isSend =
+      r.action === "send" || r.action === "resend" || r.action === "admin_send";
     if (isSend && r.status === "ok") e.sent++;
     else if (isSend && r.status !== "provider_error") e.blocked++;
-    else if (r.action === "verify" && r.status === "ok") e.verified++;
+    else if ((r.action === "verify" || r.action === "admin_verify") && r.status === "ok")
+      e.verified++;
     if (r.created_at > e.last_seen) e.last_seen = r.created_at;
   }
   return [...m.values()].sort((a, b) => b.sent - a.sent).slice(0, limit);

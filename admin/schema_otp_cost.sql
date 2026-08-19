@@ -30,19 +30,29 @@ on conflict (key) do nothing;
 -- bare date_trunc would bucket on the session timezone — UTC on Supabase — and
 -- put every send between midnight and 5:30am IST on the previous day. The
 -- dashboard's JS fallback shifts by the same +05:30, so the two paths agree.
+-- `admin_send` is in the billable set because MSG91 charges for it exactly the
+-- same as an agent's code — it is a WhatsApp template message either way. Left
+-- out, the spend bar quietly under-reports every admin login. It is ALSO broken
+-- out as `admin_sent` (appended last; `create or replace view` can only add
+-- columns to the end) so a handful of admin logins can never be mistaken for
+-- agent demand.
 create or replace view public.v_otp_daily as
   select (created_at at time zone 'Asia/Kolkata')::date as day,
          count(*) filter (
-           where action in ('send','resend') and status = 'ok')             as sent,
+           where action in ('send','resend','admin_send') and status = 'ok')             as sent,
          count(*) filter (
-           where action in ('send','resend') and status = 'provider_error') as failed,
+           where action in ('send','resend','admin_send') and status = 'provider_error') as failed,
          count(*) filter (
-           where action in ('send','resend')
-             and status in ('cooldown','rate_limited','not_configured'))    as blocked,
-         count(*) filter (where action = 'verify' and status = 'ok')        as verified,
-         count(*) filter (where action = 'verify' and status <> 'ok')       as verify_failed,
+           where action in ('send','resend','admin_send')
+             and status in ('cooldown','rate_limited','not_configured'))                 as blocked,
+         count(*) filter (
+           where action in ('verify','admin_verify') and status = 'ok')                  as verified,
+         count(*) filter (
+           where action in ('verify','admin_verify') and status <> 'ok')                 as verify_failed,
          count(distinct phone_hash) filter (
-           where action in ('send','resend') and status = 'ok')             as phones
+           where action in ('send','resend','admin_send') and status = 'ok')             as phones,
+         count(*) filter (
+           where action = 'admin_send' and status = 'ok')                                as admin_sent
   from public.otp_requests
   group by 1;
 
@@ -60,11 +70,12 @@ create or replace view public.v_otp_failures as
 create or replace view public.v_otp_top_phones as
   select phone_hash,
          count(*) filter (
-           where action in ('send','resend') and status = 'ok')      as sent,
-         count(*) filter (where action = 'verify' and status = 'ok') as verified,
+           where action in ('send','resend','admin_send') and status = 'ok')  as sent,
          count(*) filter (
-           where action in ('send','resend')
-             and status in ('cooldown','rate_limited'))              as blocked,
+           where action in ('verify','admin_verify') and status = 'ok')       as verified,
+         count(*) filter (
+           where action in ('send','resend','admin_send')
+             and status in ('cooldown','rate_limited'))                       as blocked,
          min(created_at) as first_seen,
          max(created_at) as last_seen
   from public.otp_requests
