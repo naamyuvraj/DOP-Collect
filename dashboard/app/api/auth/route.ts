@@ -8,6 +8,7 @@ import {
   adminId,
   adminIdSource,
   adminIdMatches,
+  SESSION_SECONDS,
 } from "@/lib/auth";
 import {
   adminOtpConfigured,
@@ -160,7 +161,8 @@ const COOKIE_BASE = {
 /** Issue the real session and clear any half-finished login. */
 function grantSession(token: string) {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(COOKIE, token, { ...COOKIE_BASE, maxAge: 60 * 60 * 24 * 30 });
+  // Same lifetime the token itself was signed with — see SESSION_DAYS.
+  res.cookies.set(COOKIE, token, { ...COOKIE_BASE, maxAge: SESSION_SECONDS });
   res.cookies.set(PENDING_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }

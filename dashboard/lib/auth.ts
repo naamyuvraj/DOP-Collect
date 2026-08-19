@@ -2,6 +2,23 @@ import { cookies } from "next/headers";
 import { createHmac, randomBytes } from "crypto";
 
 export const COOKIE = "dop_admin";
+/**
+ * How long a signed-in admin session lasts, in days.
+ *
+ * ONE constant because there are two clocks and they must agree: the `exp`
+ * baked into the signed token, and the cookie's own maxAge. If the cookie
+ * outlives the token you get a browser that still holds a credential the server
+ * has already stopped honouring — which presents as being bounced to the login
+ * screen while apparently still logged in.
+ *
+ * Absolute, not sliding: 7 days from the moment you signed in, however much you
+ * use it. A session that renews on activity never expires for anyone who visits
+ * weekly, which would make the WhatsApp factor a one-time event rather than a
+ * recurring one.
+ */
+export const SESSION_DAYS = 7;
+export const SESSION_SECONDS = SESSION_DAYS * 24 * 60 * 60;
+
 
 // Insecure defaults that must NEVER be accepted in a real deployment.
 const DEFAULT_SECRET = "dev-secret";
@@ -63,8 +80,11 @@ function timingSafeEqual(a: string, b: string): boolean {
  * sig = HMAC-SHA256(AUTH_SECRET, `nonce.exp`). Unique per login (nonce) and
  * time-bound (exp), so the cookie is NOT the raw secret and rotating
  * AUTH_SECRET invalidates every existing session. Null if misconfigured.
+ *
+ * Defaults to [SESSION_DAYS]. Pass the cookie the matching maxAge — see
+ * [SESSION_SECONDS].
  */
-export function mintToken(ttlDays = 30): string | null {
+export function mintToken(ttlDays = SESSION_DAYS): string | null {
   const secret = authSecret();
   if (!secret) return null;
   const nonce = randomBytes(16).toString("hex");
@@ -85,6 +105,7 @@ export function verifyToken(token: string | undefined | null): boolean {
 }
 
 export const PENDING_COOKIE = "dop_admin_pending";
+
 
 /**
  * A token for "the password was right, the WhatsApp code is still owed".
