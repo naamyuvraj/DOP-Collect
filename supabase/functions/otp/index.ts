@@ -337,6 +337,26 @@ Deno.serve(async (req) => {
       // Fail closed: with no secret configured these actions are unavailable,
       // rather than open to anyone who guesses the action name.
       if (!secret || !given || !timingSafeEqual(await sha256(given), await sha256(secret))) {
+        // The RESPONSE stays a bare "forbidden" — it is unauthenticated and must
+        // not distinguish these cases for a caller. The LOG says which one it
+        // was, because otherwise all three are the same message and the only way
+        // to tell them apart is to guess.
+        //
+        // The sha256 prefixes are safe here: Supabase already shows the full
+        // digest of every secret in its own dashboard, and function logs are
+        // private to the project. Comparing the two prefixes below against that
+        // digest column is what turns "does not match" into "which side is
+        // wrong".
+        console.warn(
+          "admin auth refused: " +
+            (!secret
+              ? "ADMIN_OTP_SECRET is not set in THIS deployment — set it, then " +
+                "redeploy the function; secrets are injected at deploy time"
+              : !given
+                ? "no x-admin-secret header on the request"
+                : `secret mismatch — env sha256 starts ${(await sha256(secret)).slice(0, 12)}, ` +
+                  `caller sent sha256 starting ${(await sha256(given)).slice(0, 12)}`),
+        );
         return json({ ok: false, code: "forbidden" }, 403);
       }
 
