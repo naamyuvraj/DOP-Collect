@@ -117,11 +117,18 @@ class _AccountListScreenState extends State<AccountListScreen> {
                 }
                 final list = _apply(snap.data!);
                 if (list.isEmpty) {
+                  // New Accounts names the window it searched. "Nothing in
+                  // this list" leaves you wondering whether the filter is
+                  // broken or the month was genuinely quiet — and the window
+                  // is a setting, so it is not something you can infer.
                   final msg = _query.isNotEmpty
                       ? 'No account matches "$_query".'
                       : _isTab
                           ? 'No accounts yet — Sync from the dashboard.'
-                          : 'Nothing in this list right now.';
+                          : widget.filter == AccountFilter.newAccounts
+                              ? 'No new accounts in '
+                                  '${AccountFilter.newAccountsWindowLabel(DateTime.now())}.'
+                              : 'Nothing in this list right now.';
                   return Center(
                     child: Padding(
                       padding: const EdgeInsets.all(32),

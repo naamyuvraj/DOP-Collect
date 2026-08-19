@@ -1,3 +1,5 @@
+import 'package:intl/intl.dart';
+
 import 'rd_account.dart';
 
 /// A count + amount pair shown in a dashboard stat box.
@@ -44,9 +46,37 @@ enum AccountFilter {
         newAccounts => 'New Accounts',
       };
 
-  /// "New Accounts" window in months (opened within this many months). Default 1
-  /// (the actual need); user-selectable 1/2/3 from the Home dashboard.
+  /// "New Accounts" window in CALENDAR months, counting the current one.
+  /// Default 1; user-selectable 1/2/3 from the Home dashboard.
+  ///
+  ///   1 -> this month only
+  ///   2 -> this month and last
+  ///   3 -> this month and the two before it
   static int newAccountMonths = 1;
+
+  /// First instant inside the New Accounts window: midnight on the 1st of the
+  /// earliest month it covers.
+  ///
+  /// It used to be `DateTime(now.year, now.month - n, now.day)` — a window
+  /// anchored on TODAY'S DATE, not on the month. On 19 August with n = 1 that
+  /// started at 19 July, so "1 month" meant the back half of July plus the
+  /// front half of August: an account opened on the 3rd of this month counted,
+  /// one opened on the 3rd of last month did not, and the number changed every
+  /// single day. Nobody thinks about their book that way; a month is a month.
+  static DateTime newAccountsFrom(DateTime now) =>
+      DateTime(now.year, now.month - (newAccountMonths - 1), 1);
+
+  /// The window in words, for a heading or an empty state: "August 2026", or
+  /// "July - August 2026" when it spans more than one month.
+  static String newAccountsWindowLabel(DateTime now) {
+    final from = newAccountsFrom(now);
+    final to = DateTime(now.year, now.month, 1);
+    if (newAccountMonths <= 1) return DateFormat('MMMM yyyy').format(to);
+    // Same year reads better without repeating it: "June - August 2026".
+    final fromFmt = from.year == to.year ? 'MMMM' : 'MMMM yyyy';
+    return '${DateFormat(fromFmt).format(from)} - '
+        '${DateFormat('MMMM yyyy').format(to)}';
+  }
 
   /// How many whole months the account is behind (>=1 = missed), 0 if due this
   /// month, negative if paid ahead into a future month.
@@ -80,8 +110,7 @@ enum AccountFilter {
           ? a.pendingInstallments! <= 2
           : (a.monthsPaid > 0 && a.installmentsToMaturity <= 2),
       advancedPaid => behind <= -2,
-      newAccounts => !a.effectiveOpeningDate.isBefore(
-          DateTime(now.year, now.month - newAccountMonths, now.day)),
+      newAccounts => !a.effectiveOpeningDate.isBefore(newAccountsFrom(now)),
     };
   }
 
