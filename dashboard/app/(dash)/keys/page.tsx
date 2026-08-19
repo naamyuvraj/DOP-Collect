@@ -13,6 +13,15 @@ type Key = {
   enabled: boolean;
 };
 type Usage = { key_index: number; calls: number; ok_calls: number; ok_pct: number };
+type Probe = { reachable: boolean; status: number | null; ms: number };
+type EdgeFn = {
+  slug: string;
+  purpose: string;
+  secrets: string[];
+  /** The full terminal command to redeploy this one. */
+  deploy: string;
+  probe: Probe | null;
+};
 type ModelInfo = { id: string; context_window?: number; owned_by?: string };
 type ModelsData = {
   selected: string[];
@@ -31,6 +40,9 @@ export default function Keys() {
   const [pick, setPick] = useState("");
   const [custom, setCustom] = useState("");
   const [note, setNote] = useState("");
+  const [fns, setFns] = useState<EdgeFn[] | null>(null);
+  const [deployAll, setDeployAll] = useState("");
+  const [copied, setCopied] = useState("");
 
   async function loadModels() {
     const r = await fetch("/api/models", { cache: "no-store" }).then((r) => r.json());
@@ -38,6 +50,21 @@ export default function Keys() {
     setPick("");
   }
   useEffect(() => { loadModels(); }, []);
+
+  // Never cached. A stale "reachable" is worse than no answer at all — this
+  // table exists to be trusted at the moment something has broken.
+  useEffect(() => {
+    fetch("/api/functions", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((r) => { setFns(r.rows || []); setDeployAll(r.deployAll || ""); })
+      .catch(() => setFns([]));
+  }, []);
+
+  function copy(cmd: string) {
+    navigator.clipboard?.writeText(cmd);
+    setCopied(cmd);
+    setTimeout(() => setCopied(""), 1600);
+  }
 
   function say(m: string) {
     setNote(m);
@@ -338,6 +365,83 @@ export default function Keys() {
           </Empty>
         )}
       </Card>
+
+      {/* Edge functions. They belong on this page because they are the other
+          half of the same failure: when the assistant goes quiet or a phone
+          stops reporting, the cause is either a key above or one of these five
+          not answering — and there was nowhere to look for the second. */}
+      <Card
+        title="Edge functions"
+        className="mt-4"
+        right={
+          deployAll ? (
+            <button
+              onClick={() => copy(deployAll)}
+              className="text-muted text-micro font-semibold"
+            >
+              {copied === deployAll ? "copied ✓" : "copy all"}
+            </button>
+          ) : null
+        }
+      >
+        <p className="text-muted text-xs mb-3">
+          Everything server-side. The app carries no secrets of its own — MSG91,
+          Razorpay and the Groq keys all sit behind these. Status is checked live.
+        </p>
+
+        {!fns ? (
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 5 }).map((_, i) => <Skel key={i} className="h-16 w-full" />)}
+          </div>
+        ) : !fns.length ? (
+          <Empty action="Set SUPABASE_URL for this dashboard and reload.">
+            Could not reach the project
+          </Empty>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {fns.map((f) => (
+              <div key={f.slug} className="rounded-xl border border-line p-3">
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <code className="font-mono font-semibold text-body">{f.slug}</code>
+                  {f.probe ? (
+                    <Pill tone={f.probe.reachable ? "g" : "r"}>
+                      {f.probe.reachable ? `up · ${f.probe.status}` : "no answer"}
+                    </Pill>
+                  ) : (
+                    <Pill>not checked</Pill>
+                  )}
+                  {f.probe && <span className="text-faint text-micro">{f.probe.ms}ms</span>}
+                </div>
+
+                <p className="text-muted text-xs mt-1.5">{f.purpose}</p>
+
+                {/* The whole command, not a fragment to assemble. This is the
+                    thing you actually need at 11pm, and --use-api is the part
+                    everyone forgets — without it the bundler hangs on Docker. */}
+                <div className="flex items-center gap-2 mt-2">
+                  <code className="font-mono text-micro text-muted bg-black/[.06] rounded-lg px-2.5 py-1.5 overflow-x-auto whitespace-nowrap flex-1">
+                    {f.deploy}
+                  </code>
+                  <button
+                    onClick={() => copy(f.deploy)}
+                    className="text-muted text-micro font-semibold shrink-0"
+                  >
+                    {copied === f.deploy ? "copied ✓" : "copy"}
+                  </button>
+                </div>
+
+                {!!f.secrets.length && (
+                  <p className="text-micro text-faint mt-2">
+                    <span className="lbl !text-micro">needs </span>
+                    <span className="font-mono">{f.secrets.join(", ")}</span>
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
     </>
   );
 }

@@ -259,7 +259,25 @@ export default function Users() {
                       <tr key={r.device_id} onClick={() => setOpen(r)} className="border-t border-line cursor-pointer transition-colors hover:bg-white/[.06] active:bg-white/[.10]">
                         <Cell className="font-semibold">{r.name || <span className="text-faint">—</span>}</Cell>
                         <Cell className="font-mono text-xs">{r.mobile || <span className="text-faint">—</span>}</Cell>
-                        <Cell right>{r.devices > 1 ? <Pill tone="a">{r.devices}</Pill> : <span className="text-muted">{r.devices}</span>}</Cell>
+                        {/* The column asks "how many phones is he on", and the
+                            answer is how many are signed in NOW — that is what
+                            the device limit governs. It used to render
+                            `r.devices`, which counts every install ever seen
+                            and so never forgets a ghost: a factory reset, a
+                            replaced handset or an install from before the
+                            derived device id each leave one behind for good.
+                            Reading 4 next to three real phones was that count,
+                            not a session. The all-time number still earns its
+                            place as the faint second figure, and the drawer
+                            breaks it down per handset. */}
+                        <Cell right>
+                          {r.signed_in > 1
+                            ? <Pill tone="a">{r.signed_in}</Pill>
+                            : <span className="text-muted">{r.signed_in}</span>}
+                          {r.devices > r.signed_in && (
+                            <span className="text-faint text-micro"> / {r.devices}</span>
+                          )}
+                        </Cell>
                         <Cell className="font-mono text-xs">
                           {r.region ? <>{r.region}{regionOf(r.region) && <span className="text-muted font-sans"> · {regionOf(r.region)}</span>}</> : <span className="text-faint">—</span>}
                         </Cell>
