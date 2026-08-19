@@ -7,6 +7,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../data/account_repository.dart';
 import '../../data/app_settings.dart';
+import '../../services/screen_security.dart';
 import '../../data/credentials.dart';
 import '../../data/lot_repository.dart';
 import '../../data/portal/agent_detail_parser.dart';
@@ -113,6 +114,11 @@ class _SyncScreenState extends State<SyncScreen> {
   @override
   void initState() {
     super.initState();
+    // The agent types his real DOP banking password into this WebView. Block
+    // capture for as long as this screen is up, even if he has turned
+    // screenshots on for himself — that setting is about his own convenience,
+    // not a licence for a screen recorder to catch a live banking login.
+    unawaited(ScreenSecurity.forceOn());
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent(SyncScreen._desktopUa)
@@ -140,6 +146,8 @@ class _SyncScreenState extends State<SyncScreen> {
   void dispose() {
     _keepAliveTimer?.cancel();
     _captcha.dispose();
+    // Back to whatever the agent chose, however we left this screen.
+    unawaited(ScreenSecurity.applySaved());
     super.dispose();
   }
 

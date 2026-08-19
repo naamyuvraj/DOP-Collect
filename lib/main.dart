@@ -25,6 +25,7 @@ import 'screens/verify_gate_screen.dart';
 import 'data/session.dart';
 import 'services/analytics.dart';
 import 'services/otp_service.dart';
+import 'services/screen_security.dart';
 import 'services/update_service.dart';
 import 'shell.dart';
 import 'theme/app_theme.dart';
@@ -90,6 +91,10 @@ Future<void> main() async {
   await Analytics.init(defaultEnabled: RemoteConfig.analyticsDefault);
   unawaited(Analytics.identify());
   unawaited(Analytics.track('app_open'));
+
+  // Screenshots are blocked from the first frame by MainActivity; this only
+  // relaxes it if the agent has asked for that in Settings.
+  if (!web) unawaited(ScreenSecurity.applySaved());
 
   // Silently download any Shorebird patch in the background so it stages itself
   // with no user action — the Home banner then offers a one-tap restart, and it

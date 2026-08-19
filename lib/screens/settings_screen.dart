@@ -3,6 +3,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../data/account_repository.dart';
 import '../data/app_settings.dart';
+import '../services/screen_security.dart';
 import '../data/credentials.dart';
 import '../main.dart';
 import '../models/daily_rule.dart';
@@ -52,10 +53,14 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   DailyRule _dailyRule = DailyRule.standard;
   int _versionTaps = 0; // 7 taps reveals the debug tools
+  bool _allowShots = false;
 
   @override
   void initState() {
     super.initState();
+    AppSettings.allowScreenshots().then((v) {
+      if (mounted) setState(() => _allowShots = v);
+    });
     AppSettings.dailyRule().then((v) {
       if (mounted) setState(() => _dailyRule = v);
     });
@@ -334,6 +339,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Privacy & Safety',
               () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => const PrivacyScreen()))),
+          // Off by default. The screen carries customer names, account numbers
+          // and amounts, and Android writes the recents thumbnail to disk — but
+          // a block with no way round it just means photographing the screen
+          // with another phone, which protects nothing and loses the report.
+          _btn(
+            _allowShots ? 'Screenshots: allowed' : 'Screenshots: blocked',
+            () async {
+              final next = !_allowShots;
+              // Grabbed before the await — reaching for `context` afterwards is
+              // the gap where the screen may already be gone.
+              final messenger = ScaffoldMessenger.of(context);
+              await ScreenSecurity.setAllowed(next);
+              if (!mounted) return;
+              setState(() => _allowShots = next);
+              messenger.showSnackBar(SnackBar(
+                content: Text(next
+                    ? 'Screenshots on. Customer details will appear in them.'
+                    : 'Screenshots blocked again.'),
+              ));
+            },
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+            child: Text(
+              _allowShots
+                  ? 'Anything on screen can be captured — except the portal '
+                      'login, which stays blocked.'
+                  : 'Turn on if you need to send a picture of a problem.',
+              style: AppTheme.body(12, color: AppTheme.inkFaint),
+            ),
+          ),
           if (_versionTaps >= 7)
             _btn(
                 'Data breakdown (debug)',

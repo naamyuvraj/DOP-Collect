@@ -14,12 +14,30 @@ class MainActivity : FlutterActivity() {
     // live banking login form (password field) inside the sync WebView. This
     // keeps all of it out of the Android recents thumbnail (persisted to disk),
     // screenshots, screen recorders and MediaProjection/casting captures.
+    //
+    // Set here, at onCreate, so the app is secure from its first frame — before
+    // any Dart has run and before the setting below can be read. Dart may then
+    // relax it (see the `setSecure` channel method); it can never be the case
+    // that the app starts unprotected and gets locked down a moment later.
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE
-        )
+        setSecure(true)
+    }
+
+    /**
+     * Turn the screenshot/recording block on or off.
+     *
+     * Off is a deliberate, per-device choice made in Settings — the agent
+     * needed to send a screenshot of a problem, and a protection with no way
+     * round it just means photographing the screen with another phone, which
+     * protects nothing and loses the report.
+     */
+    private fun setSecure(on: Boolean) {
+        if (on) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -32,6 +50,14 @@ class MainActivity : FlutterActivity() {
                         restartApp()
                     }
                     "deviceInfo" -> result.success(deviceInfo())
+                    "setSecure" -> {
+                        // Window flags are main-thread only; channel calls
+                        // already arrive there, but be explicit — a stray
+                        // background call would throw and take the app down.
+                        val on = call.argument<Boolean>("on") ?: true
+                        runOnUiThread { setSecure(on) }
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
