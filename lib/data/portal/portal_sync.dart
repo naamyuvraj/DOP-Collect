@@ -202,45 +202,59 @@ class PortalSyncEngine {
   /// "Agent Enquire & Update Screen" link that appears -> the list (Page 1/47).
   /// This walks that path, preferring the Enquire link when it's already
   /// present, and falls back to opening the Accounts menu first.
+  /// Walk from wherever we are to the account-list page.
+  ///
+  /// The portal can silently drop a click: the page-finish still fires, the DOM
+  /// never changes. The old shape — four hops, each re-clicking the Enquire
+  /// link on every one of up to five wait slices — turned that into roughly two
+  /// dozen clicks on the same link with no gap between them. Finacle treats
+  /// replayed transaction tokens as an attack, so the recovery for a dropped
+  /// click was itself the thing most likely to get the agent's portal account
+  /// flagged.
+  ///
+  /// Now: a hard ceiling of [_maxNavClicks] clicks for the whole walk, and a
+  /// doubling gap between attempts. The overall time budget is unchanged —
+  /// [stepTimeout] is still spent waiting, just waiting rather than clicking.
+  static const _maxNavClicks = 4;
+
   Future<bool> navigateToAccountList({
     Duration stepTimeout = const Duration(seconds: 45),
   }) async {
-    for (var hop = 0; hop < 4; hop++) {
+    var clicks = 0;
+    var backoff = const Duration(milliseconds: 500);
+    final slice = Duration(
+        milliseconds: (stepTimeout.inMilliseconds / _maxNavClicks).round());
+
+    // One attempt: the Enquire link, or the Accounts menu that reveals it.
+    // Each real click is charged to the budget.
+    Future<bool> attempt() async {
+      if (clicks >= _maxNavClicks) return false;
+      clicks++;
+      if (await _clickEnquireLink()) return true;
+      if (clicks >= _maxNavClicks) return false;
+      clicks++;
+      return _clickSelector('#Accounts, a[name="HREF_Accounts"], #Accounts a');
+    }
+
+    while (clicks < _maxNavClicks) {
       if (await _onListPage()) return true;
 
       // Arm the page-load wait BEFORE clicking so a fast navigation can't
       // complete before we start listening.
       _pageLoad = Completer<void>();
-
-      var clicked = await _clickEnquireLink();
-      // …otherwise open the Accounts menu (stable id) to reveal it.
-      clicked = clicked ||
-          await _clickSelector(
-              '#Accounts, a[name="HREF_Accounts"], #Accounts a');
-
-      if (!clicked) {
+      if (!await attempt()) {
         _pageLoad = null;
         break;
       }
 
-      // The "Agent Enquire & Update Screen" step is the slow one: the portal can
-      // silently drop the click, or the session can lapse, while we wait. So
-      // rather than blocking for the whole timeout, wait in ~11s slices and
-      // AUTO-CLICK the link again each slice it's still loading.
-      const slice = Duration(seconds: 11);
-      final tries = (stepTimeout.inSeconds ~/ slice.inSeconds).clamp(1, 5);
-      for (var t = 0; t < tries; t++) {
-        await _awaitLoad(slice);
-        await _settle();
-        if (await _onListPage()) return true;
-        if (await _isSessionExpired()) return false;
-        // Still not there — nudge the Enquire link again and wait another slice.
-        _pageLoad = Completer<void>();
-        if (!await _clickEnquireLink()) {
-          _pageLoad = null;
-          break;
-        }
-      }
+      await _awaitLoad(slice);
+      await _settle();
+      if (await _onListPage()) return true;
+      if (await _isSessionExpired()) return false;
+
+      // Give the portal room before touching the link again.
+      await Future<void>.delayed(backoff);
+      backoff *= 2;
     }
     return _onListPage();
   }

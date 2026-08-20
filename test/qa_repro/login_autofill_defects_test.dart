@@ -81,38 +81,44 @@ void main() {
 
     test('a successful login must not consume the day\'s budget', () async {
       final today = DateTime(2026, 8, 20);
+      // A normal working day: four screens, every auto-login succeeds. The
+      // screen records the attempt, then the outcome clears it — which is what
+      // the portal does to its own failed-attempt counter on success.
       for (var i = 0; i < 4; i++) {
         await AppSettings.incrementDailyAutoLoginCount(today);
-        // …and each one SUCCEEDED, which on the portal side resets its own
-        // failed-attempt counter. Nothing in the app records that.
+        await AppSettings.resetDailyAutoLoginCount(today);
       }
       expect(await AppSettings.dailyAutoLoginCount(today), 0,
-          reason: 'DEFECT C1: the counter guards Finacle\'s 10-FAILED-attempt '
-              'lockout, but it counts successes and is never reset');
-    },
-        skip: 'DEFECT C1 — un-skip once only failed attempts are counted '
-            'and a success clears the day');
+          reason: 'the counter guards Finacle\'s 10-FAILED-attempt lockout, '
+              'so a day of successes must leave it untouched');
+    });
+
+    test('failures still accumulate, and still stop auto-login', () async {
+      final today = DateTime(2026, 8, 20);
+      for (var i = 0; i < 4; i++) {
+        await AppSettings.incrementDailyAutoLoginCount(today);
+      }
+      expect(await AppSettings.dailyAutoLoginCount(today), 4);
+      expect(autoLoginAllowed(0, 4), isFalse);
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  group('DEFECT C2 — a Keystore fault kills autofill silently', () {
-    test('EVIDENCE: Credentials.load() propagates the platform exception',
-        () async {
+  group('C2 (FIXED) — a Keystore fault degrades, it does not kill', () {
+    test('a Keystore fault is reported, not propagated', () async {
+      // It used to throw into a future SyncScreen awaits unawaited, which took
+      // autofill out for the life of the screen with nothing said.
       _Keystore.throwOnRead = true;
-      await expectLater(Credentials.load(), throwsA(isA<PlatformException>()));
+      await expectLater(Credentials.load(), completes);
     });
 
     test('load() degrades to empty credentials instead of throwing', () async {
       _Keystore.throwOnRead = true;
-      late Credentials c;
-      await expectLater(
-          () async => c = await Credentials.load(), returnsNormally);
+      // Awaited directly: returnsNormally does not await an async closure, so
+      // the original assigned `c` after the assertion had already read it.
+      final c = await Credentials.load();
       expect(c.hasAny, isFalse);
-    },
-        skip: 'DEFECT C2 — un-skip once Credentials.load() catches and reports '
-            'a Keystore fault (sync_screen.dart:139 stores the errored future '
-            'in _credsReady, and :128 awaits it unawaited -> unhandled async '
-            'error, autofill dead for the life of the screen, no message)');
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────

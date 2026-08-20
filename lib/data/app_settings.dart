@@ -202,7 +202,9 @@ class AppSettings {
   static Future<void> setRdRatesJson(String v) async =>
       (await SharedPreferences.getInstance()).setString(_kRdRates, v);
 
-  /// Daily auto-login attempt counter to guard against Finacle's 10-attempt lockout limit.
+  /// Daily counter of FAILED auto-logins, guarding Finacle's ten-failure
+  /// lockout. Successes do not count and clear the day — see
+  /// [resetDailyAutoLoginCount].
   static String _dailyLoginKey([DateTime? date]) {
     final d = date ?? DateTime.now();
     final y = d.year.toString().padLeft(4, '0');
@@ -210,6 +212,12 @@ class AppSettings {
     final day = d.day.toString().padLeft(2, '0');
     return 'dop_auto_login_${y}_${m}_$day';
   }
+
+  /// Clear the day's failures. Call this when a login SUCCEEDS: the portal
+  /// resets its own failed-attempt counter on success, so holding ours against
+  /// the agent would lock him out of a feature Finacle has already forgiven.
+  static Future<void> resetDailyAutoLoginCount([DateTime? date]) async =>
+      (await SharedPreferences.getInstance()).remove(_dailyLoginKey(date));
 
   static Future<int> dailyAutoLoginCount([DateTime? date]) async =>
       (await SharedPreferences.getInstance()).getInt(_dailyLoginKey(date)) ?? 0;

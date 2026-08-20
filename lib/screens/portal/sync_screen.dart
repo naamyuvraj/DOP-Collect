@@ -125,6 +125,7 @@ class _SyncScreenState extends State<SyncScreen> {
       ..setNavigationDelegate(NavigationDelegate(
         onPageFinished: (_) {
           _engine.notifyPageFinished();
+          unawaited(_resolveAutoLoginOutcome());
           _autofillIfLogin();
           // Fresh page — let the captcha <img> finish loading, then read it.
           _captchaTries = 0;
@@ -272,6 +273,9 @@ class _SyncScreenState extends State<SyncScreen> {
   /// failed find or a disabled button.
   int _loginClicks = 0;
 
+  /// An auto-login was submitted and we have not seen the result yet.
+  bool _autoLoginPending = false;
+
   /// True only when the Agent ID and password boxes both actually hold something.
   ///
   /// The portal locks an agent out after 10 failed attempts. Auto-submit used to
@@ -279,6 +283,42 @@ class _SyncScreenState extends State<SyncScreen> {
   /// race fixed above, a cleared Keystore, a relabelled field — it posted an
   /// EMPTY login and burned a real attempt, twice per screen, silently. Read the
   /// DOM rather than trusting that we typed successfully.
+  /// Is the login form still on screen? After a submit, still being here means
+  /// the attempt was rejected.
+  /// Charge the day's budget only for auto-logins that actually FAILED.
+  ///
+  /// This used to increment the moment the Log in button was clicked, so four
+  /// perfectly good logins in a normal working day — Sync, Prepare, Submit,
+  /// Deep Sync — exhausted the allowance and the fifth screen refused to
+  /// auto-login even though nothing had ever gone wrong. The counter exists to
+  /// stay clear of Finacle's ten-FAILED-attempt lockout; a success is what
+  /// clears that lockout on the portal side, so it clears ours too.
+  Future<void> _resolveAutoLoginOutcome() async {
+    if (!_autoLoginPending) return;
+    _autoLoginPending = false;
+    try {
+      final stillHere = _decode(
+          await _controller.runJavaScriptReturningResult(_onLoginPageJs));
+      if (stillHere.contains('true')) {
+        await AppSettings.incrementDailyAutoLoginCount();
+      } else {
+        await AppSettings.resetDailyAutoLoginCount();
+      }
+    } catch (_) {
+      // Could not read the page. Charge the attempt: over-counting costs one
+      // auto-login, under-counting costs the agent his portal account.
+      await AppSettings.incrementDailyAutoLoginCount();
+    }
+  }
+
+  static const _onLoginPageJs = r'''
+    (function(){
+      var id=document.querySelector('[name="AuthenticationFG.USER_PRINCIPAL"]');
+      var pw=document.querySelector('[name="AuthenticationFG.ACCESS_CODE"]');
+      return (id||pw) ? 'true' : 'false';
+    })();
+  ''';
+
   static const _credsFilledJs = r'''
     (function(){
       var id=document.querySelector('[name="AuthenticationFG.USER_PRINCIPAL"]');
@@ -424,7 +464,10 @@ class _SyncScreenState extends State<SyncScreen> {
               _decode(await _controller.runJavaScriptReturningResult(_loginJs));
           if (clicked.contains('true')) {
             _loginClicks++;
-            await AppSettings.incrementDailyAutoLoginCount();
+            // Not counted here. The counter guards Finacle's ten-FAILED-attempt
+            // lockout, and we do not yet know whether this one failed —
+            // _resolveAutoLoginOutcome decides when the next page lands.
+            _autoLoginPending = true;
             if (mounted) _snack('Captcha $guess — logging in…');
             return;
           }

@@ -1,6 +1,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/analytics.dart';
+
 /// Stores the agent's DOP login on the device so Sync can auto-fill the Agent
 /// ID and password (the captcha is always typed manually). Local-only — nothing
 /// leaves the phone.
@@ -30,14 +32,34 @@ class Credentials {
 
   bool get hasAny => agentId.isNotEmpty || password.isNotEmpty;
 
+  /// Never throws.
+  ///
+  /// A Keystore read can fail — the key is invalidated by a lock-screen change,
+  /// the vendor's provider misbehaves after an OS update, the device is in
+  /// direct-boot. SyncScreen stores this future in `_credsReady` and awaits it
+  /// unawaited, so a throw here became an unhandled async error: autofill was
+  /// dead for the life of the screen and nothing said why.
+  ///
+  /// Degrading to empty credentials is the honest failure. The agent sees the
+  /// fields unfilled and types them, which is exactly what he would do if he
+  /// had never saved them — instead of a screen that silently refuses to help.
   static Future<Credentials> load() async {
     final p = await SharedPreferences.getInstance();
-    await _migratePlaintext(p);
-    return Credentials(
-      agentId: await _secure.read(key: _kId) ?? '',
-      password: await _secure.read(key: _kPw) ?? '',
-      remember: p.getBool(_kRemember) ?? true,
-    );
+    final remember = p.getBool(_kRemember) ?? true;
+    try {
+      await _migratePlaintext(p);
+      return Credentials(
+        agentId: await _secure.read(key: _kId) ?? '',
+        password: await _secure.read(key: _kPw) ?? '',
+        remember: remember,
+      );
+    } catch (e, st) {
+      // Reported, not swallowed: a fleet-wide Keystore regression should show
+      // up on the dashboard rather than as "autofill stopped working".
+      Analytics.error('keystore', 'Credentials.load failed: $e',
+          detail: st.toString(), screen: 'credentials');
+      return Credentials(remember: remember);
+    }
   }
 
   Future<void> save() async {
