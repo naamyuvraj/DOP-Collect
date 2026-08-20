@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../data/account_repository.dart';
@@ -1349,14 +1352,65 @@ class _SyncScreenState extends State<SyncScreen> {
   /// Debug: copy the current WebView page's full HTML to the clipboard, so the
   /// exact portal DOM can be shared to fix navigation (e.g. the ASLAAS report
   /// link). Navigate the WebView to the page you want, then tap this.
+  /// Which screen this capture came from, for the filename.
+  String get _screenSlug => widget.isDetail
+      ? 'account_detail'
+      : widget.isBatch
+          ? 'submit_lists'
+          : widget.isSubmit
+              ? 'submit_list'
+              : widget.isPrepare
+                  ? 'prepare_list'
+                  : widget.isDeep
+                      ? 'deep_sync'
+                      : widget.isAslaas
+                          ? 'aslaas'
+                          : 'sync';
+
+  /// What the page LOOKS like, so a capture is self-describing even if the
+  /// person sending it does not know what they were on.
+  static String _pageKind(String html) {
+    if (html.contains('Session is Expired') || html.contains('Session Expired')) {
+      return 'session_expired';
+    }
+    if (html.contains('AuthenticationFG.ACCESS_CODE')) return 'login';
+    if (RegExp(r'Page\s+\d+\s+of\s+\d+', caseSensitive: false)
+        .hasMatch(html)) {
+      return 'account_list';
+    }
+    if (html.contains('Enquire')) return 'dashboard';
+    return 'unknown';
+  }
+
+  /// Capture the page as a FILE and hand it to the share sheet.
+  ///
+  /// This used to copy to the clipboard only. A 47-page account listing runs to
+  /// megabytes — too much for a clipboard to carry reliably and far too much to
+  /// paste into a chat — so the one artefact that makes a scraping bug
+  /// diagnosable in minutes instead of guesses was the one thing that could not
+  /// be got off the phone. The clipboard copy stays as a fallback.
   Future<void> _copyHtml() async {
     try {
       final html = _decode(await _controller
           .runJavaScriptReturningResult('document.documentElement.outerHTML'));
+      final kind = _pageKind(html);
+      final stamp = DateTime.now()
+          .toIso8601String()
+          .replaceAll(RegExp(r'[:.]'), '-')
+          .substring(0, 19);
+      final name = '${_screenSlug}__${kind}__$stamp.html';
+
       await Clipboard.setData(ClipboardData(text: html));
-      _snack('Page HTML copied (${html.length} chars) — paste it to share.');
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/$name');
+      await file.writeAsString(html);
+      await Share.shareXFiles([XFile(file.path)],
+          subject: 'DOP Collect page capture — $kind',
+          text: 'Screen: $_screenSlug\nLooks like: $kind\n'
+              'Size: ${html.length} chars');
+      if (mounted) _snack('Captured $name (${html.length} chars).');
     } catch (e) {
-      _snack('Copy failed: $e');
+      _snack('Capture failed: $e');
     }
   }
 

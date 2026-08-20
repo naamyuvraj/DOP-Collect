@@ -42,3 +42,6 @@ chat-agent.md
 
 # Dashboard secrets
 admin/keys.js
+
+# Live portal captures — real customer data, never committed.
+recon/live/
