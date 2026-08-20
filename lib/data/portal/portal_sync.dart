@@ -169,6 +169,21 @@ class PortalSyncEngine {
     return m != null ? int.parse(m.group(1)!) : 1;
   }
 
+  /// Which page the portal says is on screen right now — the X in "Page X of N",
+  /// or 0 when the label isn't there.
+  ///
+  /// This is the only honest answer to "did Next actually work?". The table
+  /// looking right is not enough: a click the portal drops leaves the PREVIOUS
+  /// page fully rendered, table and all, and the walk used to accept that as a
+  /// move. Since pages are de-duplicated by account number, re-reading page 1
+  /// forty-seven times adds nothing, finishes without error, and reports a
+  /// COMPLETE sync holding ten accounts — which then closes the other 455.
+  static int currentPage(String html) {
+    final m = RegExp(r'Page\s+(\d+)\s+of\s+\d+', caseSensitive: false)
+        .firstMatch(html);
+    return m != null ? int.parse(m.group(1)!) : 0;
+  }
+
   // --- Auto-navigation -----------------------------------------------------
 
   /// Reach the account list from wherever login lands.
