@@ -1,7 +1,7 @@
 name: dop_collect
 description: Lightweight RD collection app for a DOP agent business.
 publish_to: "none"
-version: 1.0.0+42
+version: 1.0.0+43
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
