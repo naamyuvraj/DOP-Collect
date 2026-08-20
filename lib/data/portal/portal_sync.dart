@@ -212,6 +212,12 @@ class PortalSyncEngine {
       // complete before we start listening.
       _pageLoad = Completer<void>();
 
+      // The "Agent Enquire & Update Screen" step is the slow one: the portal can
+      // silently drop the click, or the session can lapse, while we wait. So
+      // rather than blocking for the whole timeout, wait in ~11s slices and
+      // AUTO-CLICK the link again each slice it's still loading.
+      const slice = Duration(seconds: 11);
+
       var clicked = await _clickEnquireLink();
       // …otherwise open the Accounts menu (stable id) to reveal it.
       clicked = clicked ||
@@ -219,22 +225,31 @@ class PortalSyncEngine {
               '#Accounts, a[name="HREF_Accounts"], #Accounts a');
 
       if (!clicked) {
+        // NOTHING TO CLICK IS NOT THE SAME AS NOWHERE TO GO. The Enquire link
+        // leaves the DOM the moment its navigation starts, so the commonest
+        // reason there is nothing to click is that we already clicked and the
+        // page is on its way. Breaking here returned false while the list was
+        // still arriving — the agent saw "Could not open the account list" and
+        // then watched the list open behind the message.
+        //
+        // Give an in-flight load the same slice a click would have got, and
+        // only then give up.
+        await _awaitLoad(slice);
+        await _settle();
+        if (await _onListPage()) return true;
         _pageLoad = null;
         break;
       }
-
-      // The "Agent Enquire & Update Screen" step is the slow one: the portal can
-      // silently drop the click, or the session can lapse, while we wait. So
-      // rather than blocking for the whole timeout, wait in ~11s slices and
-      // AUTO-CLICK the link again each slice it's still loading.
-      const slice = Duration(seconds: 11);
       final tries = (stepTimeout.inSeconds ~/ slice.inSeconds).clamp(1, 5);
       for (var t = 0; t < tries; t++) {
         await _awaitLoad(slice);
         await _settle();
         if (await _onListPage()) return true;
         if (await _isSessionExpired()) return false;
-        // Still not there — nudge the Enquire link again and wait another slice.
+        // Still not there — nudge the Enquire link again and wait another
+        // slice. If it has gone, the navigation it started is probably still
+        // running: fall out to the outer hop, which re-checks the page rather
+        // than treating a missing link as a dead end.
         _pageLoad = Completer<void>();
         if (!await _clickEnquireLink()) {
           _pageLoad = null;
@@ -242,6 +257,10 @@ class PortalSyncEngine {
         }
       }
     }
+    // One last settle before answering: the walk can arrive here with a load
+    // still painting, and a false here becomes "Could not open the account
+    // list" on a screen that is about to show exactly that list.
+    await _settle();
     return _onListPage();
   }
 

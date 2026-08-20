@@ -34,6 +34,32 @@ void main() {
     });
   });
 
+  group('the link vanishes into its own navigation', () {
+    // The field report: "could not open account list… but at that time it has
+    // been already opened and the process is stopped". The click LANDS, the
+    // Enquire link leaves the DOM because the load has started, and the list
+    // paints a moment later. The engine used to read "nothing to click" as
+    // "nowhere to go", break, and answer false while the page was still on its
+    // way — so the message and the list arrived together.
+    test('a slow navigation is waited out, not called a dead end', () async {
+      boot(dashboardHtml);
+      portal.onEnquireClick = (p) {
+        // The link is gone the instant the load begins…
+        p.html = '<html><body>loading…</body></html>';
+        // …and the list lands later, without another click being possible.
+        Future<void>.delayed(const Duration(seconds: 2), () {
+          p.html = listPage1Html;
+          engine.notifyPageFinished();
+        });
+      };
+      expect(await engine.navigateToAccountList(), isTrue,
+          reason: 'the list did arrive; the engine must not have given up on '
+              'it just because there was nothing left to click');
+      expect(portal.enquireClicks, 1,
+          reason: 'one click was enough — it navigated');
+    });
+  });
+
   group('DEFECT N1 — a silently dropped click becomes a click storm', () {
     test('the portal drops every click: how many does the engine fire?',
         () async {
