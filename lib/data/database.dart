@@ -26,6 +26,10 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 ///       account gone from the portal listing (matured and closed). Existing
 ///       rows get NULL, i.e. "live", so an upgrade closes nothing on its own;
 ///       the first finished sync after it is what marks them.
+///  v10: rebuilt `v_accounts` so the assistant and the app agree. `is_new` and
+///       `is_maturity` were defined differently here than in `AccountFilter`,
+///       so the two surfaces answered the same question with different
+///       numbers; `opening_on` is new, and the dead `status` column is gone.
 class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
@@ -152,7 +156,7 @@ class AppDatabase {
       // the plaintext DB as-is (migration failed / not yet done) so the app
       // never fails to start and no data is lost.
       password: encrypted ? key : null,
-      version: 9,
+      version: 10,
       onCreate: (db, version) async {
         await _createAccounts(db);
         await _createLots(db);
@@ -180,6 +184,12 @@ class AppDatabase {
           await _addClosedColumn(db);
           // v_accounts now filters on closed_at, so it must be rebuilt — it
           // carries no data, so dropping and recreating it is always safe.
+          await _createAssistantView(db);
+        }
+        if (oldV < 10) {
+          // v_accounts had its own definitions of "new" and "maturing" that
+          // disagreed with the app's, and exposed `status` — a column nothing
+          // has written since the collections ledger replaced it. Rebuilt.
           await _createAssistantView(db);
         }
       },
@@ -254,8 +264,8 @@ class AppDatabase {
         closed_at             TEXT
       )
     ''');
-    await db.execute(
-        'CREATE INDEX idx_accounts_due ON accounts(next_due_date)');
+    await db
+        .execute('CREATE INDEX idx_accounts_due ON accounts(next_due_date)');
   }
 
   Future<void> _addDetailColumns(Database db) async {
@@ -348,6 +358,25 @@ class AppDatabase {
     const mb =
         "((CAST(strftime('%Y','now','localtime') AS INTEGER)*12 + CAST(strftime('%m','now','localtime') AS INTEGER)) "
         "- (CAST(strftime('%Y', a.next_due_date) AS INTEGER)*12 + CAST(strftime('%m', a.next_due_date) AS INTEGER)))";
+    // Derived opening date, IDENTICAL to `RdAccount.derivedOpeningDate`: next
+    // due minus months_paid months, with the day CLAMPED to the target month
+    // rather than allowed to overflow. SQLite's own `-N months` modifier
+    // normalises (31 Mar - 1 month = 3 Mar) where Dart's clamps (28 Feb), so
+    // doing it the lazy way would have reintroduced a divergence in the very
+    // column added to remove one.
+    const firstOfOpening = "date(a.next_due_date, 'start of month', "
+        "'-' || a.months_paid || ' months')";
+    const openingDay = "MIN("
+        "CAST(strftime('%d', a.next_due_date) AS INTEGER), "
+        "CAST(strftime('%d', date($firstOfOpening, '+1 month', '-1 day')) "
+        "AS INTEGER))";
+    const derivedOpening =
+        "date($firstOfOpening, '+' || ($openingDay - 1) || ' days')";
+    // Term: 60 months, or 120 for an account continued past five years — the
+    // same inference `RdAccount.termMonths` makes.
+    const term = 'CASE WHEN a.months_paid > 60 THEN 120 ELSE 60 END';
+    const toMaturity = 'MAX(0, $term - a.months_paid)';
+
     await db.execute('DROP VIEW IF EXISTS v_accounts');
     await db.execute('''
       CREATE VIEW v_accounts AS
@@ -356,7 +385,6 @@ class AppDatabase {
         a.customer_name,
         a.denomination_amount,
         a.months_paid,
-        a.status,
         a.next_due_date,
         date(a.next_due_date)                              AS next_due,
         strftime('%Y-%m', a.next_due_date)                 AS due_ym,
@@ -371,19 +399,32 @@ class AppDatabase {
         END                                                AS bucket,
         CASE WHEN $mb >= 6 THEN 1 ELSE 0 END               AS about_to_freeze,
         CASE WHEN $mb <= -2 THEN 1 ELSE 0 END              AS advanced_paid,
+        -- Maturity: within two installments of the end of the term. Was
+        -- `months_paid BETWEEN 58 AND 61`, which disagreed with the app in
+        -- BOTH directions — it called a 61-month account (just continued to
+        -- ten years, 59 still to run) maturing, and did not call a 119-month
+        -- one maturing at all. Now the same rule as `AccountFilter.maturity`.
         CASE
           WHEN a.pending_installments IS NOT NULL
             THEN (CASE WHEN a.pending_installments <= 2 THEN 1 ELSE 0 END)
-          WHEN a.months_paid BETWEEN 58 AND 61 THEN 1
+          WHEN a.months_paid > 0 AND $toMaturity <= 2 THEN 1
           ELSE 0
         END                                                AS is_maturity,
-        CASE
-          WHEN a.opening_date IS NOT NULL
-            THEN (CASE WHEN date(a.opening_date) >= date('now','localtime','-3 months')
-                       THEN 1 ELSE 0 END)
-          WHEN a.months_paid <= 3 THEN 1
-          ELSE 0
-        END                                                AS is_new,
+        -- The account's opening date: the exact one when a detail fetch has
+        -- stored it, else derived. Matches `RdAccount.effectiveOpeningDate`.
+        COALESCE(date(a.opening_date), $derivedOpening)    AS opening_on,
+        -- New: opened in the CURRENT calendar month, which is what
+        -- `AccountFilter.newAccounts` means at its default window of 1. This
+        -- was `months_paid <= 3` (or a 3-month window on the exact opening
+        -- date), so the assistant and the home screen disagreed about which
+        -- accounts were new, and by how many.
+        --
+        -- The agent can widen the app's window to 2 or 3 months; a view cannot
+        -- see that setting, so a widened window is answered from `opening_on`
+        -- instead — see the schema prompt.
+        CASE WHEN COALESCE(date(a.opening_date), $derivedOpening)
+                  >= date('now','localtime','start of month')
+             THEN 1 ELSE 0 END                             AS is_new,
         a.denomination_amount * a.months_paid              AS est_deposit,
         a.denomination_amount * (CASE WHEN $mb >= 1 THEN $mb ELSE 1 END)
                                                            AS arrears_amount,

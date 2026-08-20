@@ -17,9 +17,9 @@ class SqlGuard {
   /// a query that slipped past every other check can read nothing the app does
   /// not already show on screen — and can write nothing at all.
   static const Set<String> allowedTables = {
-    'v_accounts',   // the book, as the portal sees it
+    'v_accounts', // the book, as the portal sees it
     'v_collections', // the field ledger — what he took, and when
-    'v_lots',       // the lists he has built and submitted
+    'v_lots', // the lists he has built and submitted
   };
 
   /// Statement keywords, matched as whole words.
@@ -33,6 +33,9 @@ class SqlGuard {
     'insert', 'update', 'delete', 'drop', 'alter', 'create', 'replace',
     'attach', 'detach', 'pragma', 'vacuum', 'reindex', 'trigger',
     'begin', 'commit', 'rollback', 'grant',
+    // Not statements — functions that reach outside the database. The
+    // read-only handle stops writes; it stops none of these.
+    'load_extension', 'readfile', 'writefile', 'fts3_tokenizer',
   ];
 
   /// Punctuation that has no place in a single expression, matched literally:
@@ -60,19 +63,90 @@ class SqlGuard {
       }
     }
 
-    // Must read from one of our views, and must not name anything else after
-    // FROM/JOIN. Checked by parsing the sources rather than by substring, so a
-    // column called `v_accounts_note` could never smuggle a table past it.
-    final sources = RegExp(r'\b(from|join)\s+([a-z_][a-z0-9_]*)')
-        .allMatches(lower)
-        .map((m) => m.group(2)!)
-        .toList();
+    // A subquery in table position hides whatever follows it from the
+    // comma-list scan below — `FROM (SELECT * FROM v_accounts), sqlite_master`
+    // would report only `v_accounts`. Flat SELECTs are all this needs in order
+    // to answer, and `WITH` is already refused, so refuse this too.
+    if (_subqueryTable.hasMatch(lower)) {
+      throw SqlRejected('subquery in FROM/JOIN');
+    }
+    // Belt and braces: nothing in SQLite's own namespace is ever the answer to
+    // a question about the agent's book.
+    if (lower.contains('sqlite_')) throw SqlRejected('internal table');
+
+    // Must read from one of our views, and must not name anything else in a
+    // table position. Checked by parsing the sources rather than by substring,
+    // so a column called `v_accounts_note` could never smuggle a table past it.
+    final sources = tableSources(lower);
     if (sources.isEmpty) throw SqlRejected('no table');
     for (final t in sources) {
       if (!allowedTables.contains(t)) throw SqlRejected('unknown table: $t');
     }
 
-    if (!lower.contains('limit')) s = '$s LIMIT $maxRows';
+    if (!_hasLimit.hasMatch(lower)) s = '$s LIMIT $maxRows';
     return s;
   }
+
+  /// A real `LIMIT n` clause, not merely the letters "limit".
+  ///
+  /// This was `lower.contains('limit')`, so any identifier containing the word
+  /// — `SELECT customer_name AS daily_limit FROM v_accounts` — convinced the
+  /// guard a cap was already present and the query then ran unbounded.
+  static final RegExp _hasLimit = RegExp(r'(?<![a-z_])limit\s+\d');
+
+  /// Every table named in a table position, lower-cased.
+  ///
+  /// `FROM`/`JOIN` introduce a COMMA-SEPARATED list, and only the first entry
+  /// used to be inspected. That let the whitelist be walked straight past:
+  ///
+  ///     SELECT sm.sql FROM v_accounts, sqlite_master sm   -- the whole schema
+  ///     SELECT * FROM v_accounts, collections             -- the raw ledger
+  ///
+  /// Both name `v_accounts` first, passed the check, and then read whatever
+  /// they liked. So the whole list is read here: after a FROM or JOIN, take
+  /// each comma-separated entry and keep its FIRST identifier — the table —
+  /// discarding any alias that follows it.
+  static List<String> tableSources(String lowerSql) {
+    final out = <String>[];
+    for (final m in _fromClause.allMatches(lowerSql)) {
+      for (final entry in m.group(1)!.split(',')) {
+        final t = _firstIdent.firstMatch(entry.trim())?.group(0);
+        if (t == null) continue;
+        // `FROM x WHERE …` — a trailing keyword is not a second table.
+        if (_clauseKeywords.contains(t)) continue;
+        out.add(t);
+      }
+    }
+    return out;
+  }
+
+  static final RegExp _fromClause = RegExp(r'(?<![a-z_])(?:from|join)\s+'
+      r'([a-z_][a-z0-9_]*(?:\s+[a-z_][a-z0-9_]*)?'
+      r'(?:\s*,\s*[a-z_][a-z0-9_]*(?:\s+[a-z_][a-z0-9_]*)?)*)');
+  static final RegExp _firstIdent = RegExp(r'^[a-z_][a-z0-9_]*');
+  static final RegExp _subqueryTable = RegExp(r'(?<![a-z_])(?:from|join)\s*\(');
+
+  /// Words that may legally follow a table name and are not tables themselves.
+  static const Set<String> _clauseKeywords = {
+    'where',
+    'group',
+    'order',
+    'having',
+    'limit',
+    'union',
+    'on',
+    'as',
+    'left',
+    'right',
+    'inner',
+    'outer',
+    'cross',
+    'natural',
+    'join',
+    'using',
+    'window',
+    'except',
+    'intersect',
+    'offset',
+  };
 }

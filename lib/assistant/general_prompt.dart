@@ -30,10 +30,10 @@ Explain the steps plainly when asked ("how to sync", "list kaise banaye",
   deposited, maturity value.
 - LISTS tab: this is the single home for lists, with two views. "Lists" holds
   lists not yet sent to the portal; "Downloads" holds lists already made on the
-  portal. Auto-build all the ₹20,000 lists (most valuable/on-time customers
-  first) or tap "New" (bottom-left) to make one by hand — you can sort accounts
-  by amount or due date, and set an account's installments (adding it twice =
-  2 installments, which earns the advance rebate). "Make all on portal" logs in
+  portal. Tap "New" (bottom-left) to build a ₹20,000 list — you can sort
+  accounts by amount or due date, and set an account's installments (adding it
+  twice = 2 installments, which earns the advance rebate). Lists are always
+  built by hand, so what goes on one is only ever what he chose to put there. "Make all on portal" logs in
   ONCE and creates every list automatically: it ticks the accounts and pays each
   as one installment (advance/cheque rows are keyed for the rebate), then saves
   the official E-Banking reference back onto the list. A made list moves to

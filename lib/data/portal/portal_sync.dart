@@ -31,8 +31,17 @@ class SyncResult {
   /// short read is how a stall turns into a wrong number on the dashboard.
   final bool complete;
 
+  /// Rows that looked like accounts but had an unreadable due date or
+  /// denomination, and were dropped rather than stored as a sentinel. See
+  /// [AgentListParser.parse]. Non-zero means the agent is being shown fewer
+  /// accounts than the portal holds, and he is told so.
+  final int rejected;
+
   const SyncResult(this.accounts,
-      {this.reachedList = true, this.error, this.complete = true});
+      {this.reachedList = true,
+      this.error,
+      this.complete = true,
+      this.rejected = 0});
 }
 
 /// Result of preparing a bulk list on the portal (mode + account selection +
@@ -164,8 +173,8 @@ class PortalSyncEngine {
   }
 
   static int totalPages(String html) {
-    final m =
-        RegExp(r'Page\s+\d+\s+of\s+(\d+)', caseSensitive: false).firstMatch(html);
+    final m = RegExp(r'Page\s+\d+\s+of\s+(\d+)', caseSensitive: false)
+        .firstMatch(html);
     return m != null ? int.parse(m.group(1)!) : 1;
   }
 
@@ -332,19 +341,52 @@ class PortalSyncEngine {
     final firstHtml = await currentPageHtml();
     final total = totalPages(firstHtml);
     var walked = 0; // pages actually read — compared against `total` at the end
+    var rejected = 0;
 
     for (var page = 1; page <= total; page++) {
       final html = page == 1 ? firstHtml : await currentPageHtml();
-      for (final r in AgentListParser.parsePage(html)) {
+
+      // The portal's own page label must agree with where we think we are.
+      // Belt and braces beside the check in _clickNextAndWait: if the two ever
+      // disagree we are reading a page twice, and a duplicate read is exactly
+      // what makes a short book look like a finished one.
+      final shown = currentPage(html);
+      if (shown != 0 && shown != page) {
+        return SyncResult(_serialised(byAccount, complete: false),
+            reachedList: true,
+            rejected: rejected,
+            error: 'Sync lost its place at page $page of $total (the portal '
+                'is showing page $shown). Run Sync again; nothing already on '
+                'the phone was changed.',
+            complete: false);
+      }
+
+      final parsed = AgentListParser.parse(html);
+      rejected += parsed.rejected;
+      for (final r in parsed.accounts) {
         byAccount.putIfAbsent(r.accountNumber, () => r);
       }
+
+      // A listing page with no readable rows at all means the table did not
+      // render, not that the agent has an empty page in the middle of his book.
+      // Treating it as read is how a blank page silently closes ten customers.
+      if (parsed.accounts.isEmpty && parsed.rejected == 0) {
+        return SyncResult(_serialised(byAccount, complete: false),
+            reachedList: true,
+            rejected: rejected,
+            error: 'Page $page of $total came back empty — the portal did not '
+                'finish loading it. Run Sync again.',
+            complete: false);
+      }
+
       onProgress?.call(page, total, byAccount.length);
       if (page == total) {
         walked = page;
         break;
       }
 
-      final advance = await _clickNextAndWait(pageTimeout);
+      final advance =
+          await _clickNextAndWait(pageTimeout, expectPage: page + 1);
       if (advance != PageAdvance.moved) {
         // Finacle's stale-token guard stops the table rendering, which looks
         // exactly like a stall. Probe for it so the agent is told what actually
@@ -352,6 +394,7 @@ class PortalSyncEngine {
         final blocked = await _isBlockedPage();
         return SyncResult(_serialised(byAccount, complete: false),
             reachedList: true,
+            rejected: rejected,
             error: blocked
                 ? 'The portal blocked navigation at page $page of $total. '
                     'Log in again, then run Sync.'
@@ -364,6 +407,7 @@ class PortalSyncEngine {
       if (await _isSessionExpired()) {
         return SyncResult(_serialised(byAccount, complete: false),
             reachedList: true,
+            rejected: rejected,
             error: 'Session expired at page $page of $total — synced what '
                 'loaded. Run Sync again.',
             complete: false);
@@ -375,10 +419,11 @@ class PortalSyncEngine {
     if (walked < total) {
       return SyncResult(_serialised(byAccount, complete: false),
           reachedList: true,
+          rejected: rejected,
           error: 'Sync ended at page $walked of $total — run it again.',
           complete: false);
     }
-    return SyncResult(_serialised(byAccount));
+    return SyncResult(_serialised(byAccount), rejected: rejected);
   }
 
   /// Stamp each account with its 1-based position in the portal listing.
@@ -439,6 +484,23 @@ class PortalSyncEngine {
     return _waitForTable(const Duration(seconds: 20));
   }
 
+  /// How many account rows the portal puts on one listing page.
+  ///
+  /// Counted off the rendered page rather than assumed, because it is only
+  /// used to turn a serial into a page number, and being wrong there sends
+  /// every jump to the wrong page. Falls back to 10 (the observed value) when
+  /// there are no rows to count.
+  Future<int> _rowsPerPage() async {
+    const js = '(function(){return String(document.querySelectorAll('
+        '\'[id^="HREF_CustomAgentRDAccountFG.ACCOUNT_NUMBER_ALL_ARRAY"]\''
+        ').length);})();';
+    final n = int.tryParse(
+            _unwrap(await controller.runJavaScriptReturningResult(js))
+                .trim()) ??
+        0;
+    return n > 0 ? n : 10;
+  }
+
   /// Account number shown in row [i] of the current list page.
   Future<String> _accountNumberAt(int i) async {
     final js = '''
@@ -452,7 +514,8 @@ class PortalSyncEngine {
   }
 
   /// Click the row link for [accountNumber] if it is on the current page.
-  Future<bool> _clickAccountAnchor(String accountNumber, Duration timeout) async {
+  Future<bool> _clickAccountAnchor(
+      String accountNumber, Duration timeout) async {
     _pageLoad = Completer<void>();
     final ok = _unwrap(await controller.runJavaScriptReturningResult('''
       (function(){
@@ -708,7 +771,11 @@ class PortalSyncEngine {
     final total = totalPages(await currentPageHtml());
 
     if (serialHint != null && serialHint > 0) {
-      final page = ((serialHint - 1) ~/ 10) + 1;
+      // Rows per page comes from the page itself. It was hardcoded to 10, so a
+      // deployment that shows any other page size sent every jump to the wrong
+      // page — and the fallback for a missed jump is a full 47-page scan.
+      final perPage = await _rowsPerPage();
+      final page = ((serialHint - 1) ~/ perPage) + 1;
       if (page >= 1 && page <= total) {
         onProgress?.call('Opening page $page…');
         await _gotoPage(page, pageTimeout);
@@ -858,7 +925,8 @@ class PortalSyncEngine {
     // --- Correctness net: sequential scan for anything still missing --------
     final remaining = accountNumbers.difference(found);
     if (remaining.isNotEmpty) {
-      await _gotoPage(1, pageTimeout); // reset to the top (no-op if already there)
+      await _gotoPage(
+          1, pageTimeout); // reset to the top (no-op if already there)
       for (var page = 1; page <= total; page++) {
         await selectPayMode(mode);
         found.addAll(await _selectMatchingOnPage(remaining));
@@ -868,7 +936,8 @@ class PortalSyncEngine {
         if (await _clickNextAndWait(pageTimeout) != PageAdvance.moved) break;
         if (await _isSessionExpired()) {
           return ListPrepResult(found, accountNumbers.length,
-              error: 'Session expired at page $page — selected ${found.length}.');
+              error:
+                  'Session expired at page $page — selected ${found.length}.');
         }
       }
     }
@@ -876,7 +945,8 @@ class PortalSyncEngine {
     await selectPayMode(mode);
     final saved = await saveSelection(pageTimeout);
     return ListPrepResult(found, accountNumbers.length,
-        saved: saved, error: saved ? null : 'Could not click Save on the portal.');
+        saved: saved,
+        error: saved ? null : 'Could not click Save on the portal.');
   }
 
   // --- Installment entry (step 6) ------------------------------------------
@@ -920,7 +990,6 @@ class PortalSyncEngine {
     ''';
     return _unwrap(await controller.runJavaScriptReturningResult(js));
   }
-
 
   Future<void> _selectInstallmentRow(int i, Duration timeout) async {
     _pageLoad = Completer<void>();
@@ -1034,8 +1103,8 @@ class PortalSyncEngine {
     ''';
     final raw = _unwrap(await controller.runJavaScriptReturningResult(js));
     try {
-      return (jsonDecode(raw) as Map).map(
-          (k, v) => MapEntry(k as String, (v as String).trim()));
+      return (jsonDecode(raw) as Map)
+          .map((k, v) => MapEntry(k as String, (v as String).trim()));
     } catch (_) {
       return const {};
     }
@@ -1206,7 +1275,8 @@ class PortalSyncEngine {
         return String(v).trim();
       })();
     ''';
-    final raw = _unwrap(await controller.runJavaScriptReturningResult(js)).trim();
+    final raw =
+        _unwrap(await controller.runJavaScriptReturningResult(js)).trim();
     if (raw.isEmpty) return null;
     // "1,400.50" -> 1400.5 -> 1400. Commas are thousands separators; the dot is
     // a decimal point. Rupees are what the report prints.
@@ -1245,8 +1315,7 @@ class PortalSyncEngine {
   /// Pull a DOP list reference (mode prefix C / DC / NDC + ≥6 digits) out of a
   /// page. Longest-prefix wins so "NDC…" isn't clipped to "C…". Pure + testable.
   static String? parseReference(String html) {
-    final m =
-        RegExp(r'(?<![A-Z0-9])(NDC|DC|C)(\d{6,})').firstMatch(html);
+    final m = RegExp(r'(?<![A-Z0-9])(NDC|DC|C)(\d{6,})').firstMatch(html);
     return m == null ? null : '${m.group(1)}${m.group(2)}';
   }
 
@@ -1386,7 +1455,14 @@ class PortalSyncEngine {
   /// and the table never came back". Collapsing the two made a stalled sync
   /// indistinguishable from a finished one, so a run that died on page 3 of 47
   /// was reported to the agent as a success. Keep them apart.
-  Future<PageAdvance> _clickNextAndWait(Duration timeout) async {
+  /// Click "Next" and confirm we actually arrived at [expectPage].
+  ///
+  /// The confirmation is the point. A rendered table alone proves nothing —
+  /// the page we were already on has one — so a portal that silently drops the
+  /// click reads as a successful move, and the walk finishes "complete" holding
+  /// one page of a 47-page book.
+  Future<PageAdvance> _clickNextAndWait(Duration timeout,
+      {int? expectPage}) async {
     for (var attempt = 0; attempt < 3; attempt++) {
       _pageLoad = Completer<void>();
       final clicked =
@@ -1397,12 +1473,27 @@ class PortalSyncEngine {
       }
       await _awaitLoad(timeout);
       await _settle();
-      // Confirm the table actually rendered before declaring success.
-      if (await _waitForTable(const Duration(seconds: 20))) {
+      // Confirm the table rendered AND the portal moved to the page we asked
+      // for, not merely that a table is on screen.
+      if (await _waitForTable(_tableWait(timeout), expectPage: expectPage)) {
         return PageAdvance.moved;
       }
     }
-    return PageAdvance.stalled; // clicked, never rendered — a real failure
+    return PageAdvance.stalled; // clicked, never moved — a real failure
+  }
+
+  /// How long to wait for the table after a click, derived from the caller's
+  /// page timeout rather than fixed at 20s.
+  ///
+  /// It is spent up to three times per page, so a hardcoded 20 meant a single
+  /// stalled page cost a full minute before the agent was told anything — and
+  /// made the failure path untestable at any sensible speed. A third of the
+  /// page budget, floored so a slow portal still gets a fair chance.
+  static Duration _tableWait(Duration pageTimeout) {
+    final third = pageTimeout ~/ 3;
+    if (third < const Duration(seconds: 2)) return const Duration(seconds: 2);
+    if (third > const Duration(seconds: 20)) return const Duration(seconds: 20);
+    return third;
   }
 
   Future<void> _awaitLoad(Duration timeout) async {
@@ -1439,10 +1530,19 @@ class PortalSyncEngine {
   }
 
   /// Poll until the account table is present (handles late-rendering DOM).
-  Future<bool> _waitForTable(Duration timeout) async {
+  ///
+  /// [expectPage], when given, additionally requires the portal's own
+  /// "Page X of N" label to read X == expectPage. Without it this returns true
+  /// for the page we were ALREADY on, which is how a dropped Next click used to
+  /// pass for a successful move. See [currentPage].
+  Future<bool> _waitForTable(Duration timeout, {int? expectPage}) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      if (_hasAccountTable(await currentPageHtml())) return true;
+      final html = await currentPageHtml();
+      if (_hasAccountTable(html) &&
+          (expectPage == null || currentPage(html) == expectPage)) {
+        return true;
+      }
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
     return false;

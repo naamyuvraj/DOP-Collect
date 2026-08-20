@@ -138,9 +138,9 @@ class _MainShellState extends State<MainShell> {
         circle: true,
         before: () => _goTab(3),
         title: 'Lists — build them',
-        body: 'At month-end, auto-build your ₹20,000 lists (most valuable '
-            'customers first) or make one by hand. The "New" button is bottom-'
-            'left.',
+        body: 'At month-end, build each ₹20,000 list by hand — tap "New" '
+            'bottom-left, then pick the customers whose cash you are actually '
+            'carrying and set how many months each one is paying.',
       ),
       TourStep(
         key: _navKeys[3],
@@ -203,8 +203,8 @@ class _MainShellState extends State<MainShell> {
           collections: widget.collections,
           lots: widget.lots,
           revision: _accountsRevision),
-      // One "Lists" tab: saved lists + an Auto-build entry (which pushes the
-      // batch builder). Groups and Lists used to be two tabs for one concept.
+      // One "Lists" tab: saved lists plus the manual builder. Groups and Lists
+      // used to be two tabs for one concept.
       SavedListsScreen(
           key: ValueKey('lists-$_dataVersion'),
           accounts: widget.repo,

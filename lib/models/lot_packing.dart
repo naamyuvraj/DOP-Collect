@@ -2,45 +2,29 @@ import 'lot.dart';
 import 'rd_account.dart';
 import 'summaries.dart';
 
-/// Auto list-making: turn the accounts that need collecting into a set of
-/// ₹[cap]-capped lots ("queues"), most-unpaid first, in one go.
+/// The rules a collection list obeys — its size, its order, and which accounts
+/// are already spoken for.
+///
+/// This used to BUILD lists too: one tap packed the whole book into as many
+/// ₹20,000 lots as it took. That is gone. Auto-build decided, on the agent's
+/// behalf and out of sight, which customers went on which list — and it decided
+/// it from the portal's next-due dates alone, so it could not know that a
+/// customer had already handed over three months' cash at the door and put him
+/// down for one installment anyway. A list is a document he signs for at the
+/// counter; he now assembles every one of them by hand in the list builder,
+/// which is the only place that ever showed him what he was committing to.
+///
+/// What remains is the part the manual builder and the collect sheet still
+/// need: the portal's limits, the priority order the builder offers as a
+/// default sort, and [listedThisCycle].
 ///
 /// Deliberately knows NOTHING about the field collection ledger. A list is a
 /// portal document — the accounts he intends to deposit against, in the order
-/// the counter wants them — and he builds it himself, adding and removing
-/// names before he submits. Tying it to who had already handed over cash meant
-/// two independent systems could disagree about what belonged on a list, and
-/// each answer was wrong in a different way. Collections are now purely his
-/// own field record; lists are purely the portal's. Neither reads the other.
+/// the counter wants them. Collections are purely his own field record.
 ///
 /// Kept pure (no DB, no `DateTime.now()`) so it's unit-testable and
 /// deterministic — the screen passes in `now`.
 class LotPacking {
-  /// Accounts to collect this cycle: due this month or overdue (not paid
-  /// ahead) and not already on a list for this cycle — sorted by
-  /// [priorityCompare] (on-time-and-owing first, then overdue, then value).
-  ///
-  /// "Already collected" is deliberately NOT a stored flag. It used to be
-  /// `status == deposited`, which nothing ever reset: an account collected in
-  /// August stayed excluded in September, October and forever after, so
-  /// auto-build silently shrank every month. Both halves are now derived —
-  /// paid-ahead comes from the portal's own next-due date, and the
-  /// don't-list-twice guard comes from [alreadyListed] (see [listedThisCycle]),
-  /// which expires on its own when the cycle turns over.
-  static List<RdAccount> eligible(
-    List<RdAccount> accounts,
-    DateTime now, {
-    Set<String> alreadyListed = const <String>{},
-  }) {
-    final out = accounts
-        .where((a) =>
-            !alreadyListed.contains(a.accountNumber) &&
-            AccountFilter.monthsBehind(a, now) >= 0)
-        .toList();
-    out.sort((a, b) => priorityCompare(a, b, now));
-    return out;
-  }
-
   /// Does this list still lay claim to its accounts?
   ///
   /// It used to be `lot.createdAt` in the current calendar month, full stop. Two
@@ -59,8 +43,8 @@ class LotPacking {
   ///     handed in yet; that list is a claim on those accounts until it is.
   ///   * Submitted -> blocks for the month it was actually FILED in
   ///     (submittedAt, falling back to createdAt). Beyond that the portal has
-  ///     moved each account's due date forward, and the `monthsBehind >= 0`
-  ///     filter in [eligible] is the real guard.
+  ///     moved each account's due date forward, and the customer genuinely
+  ///     owes again.
   static bool _stillBlocks(Lot lot, DateTime now) {
     if (!lot.isSubmitted) return true;
     final filed = lot.filedAt;
@@ -70,16 +54,17 @@ class LotPacking {
   /// Account numbers already sitting on a list built for [now]'s cycle — the
   /// replacement for the old sticky "deposited" mark. Between building a list
   /// and the next portal sync the account still *looks* due (its next-due date
-  /// hasn't moved yet), so without this a re-run would pack it a second time.
-  /// A list from a previous month is ignored: that money is a closed cycle and
-  /// the customer owes again.
+  /// hasn't moved yet), so the collect sheet uses this to show that customer as
+  /// settled rather than as still owing. A list from a previous month is
+  /// ignored: that money is a closed cycle and the customer owes again.
   static Set<String> listedThisCycle(List<Lot> lots, DateTime now) => {
         for (final lot in lots)
           if (_stillBlocks(lot, now))
             for (final item in lot.items) item.accountNumber,
       };
 
-  /// Order for building lists — the accounts you'd bank first at month end:
+  /// The list builder's default sort — the accounts you'd bank first at month
+  /// end:
   /// **owed-and-on-time** (due this month, reliable), then **overdue** (still
   /// owes), then **most valuable** (highest installment) within a tier.
   /// Paid-ahead accounts sort LAST — they don't owe anything this cycle, so
@@ -108,59 +93,4 @@ class LotPacking {
 
   /// Postal rule: the rupee ceiling on one list.
   static const int defaultCap = 20000;
-
-  /// Greedily pack [accounts] (one installment each) into consecutive lots,
-  /// preserving the caller's order (from [eligible] that's on-time-owing first).
-  /// Each lot respects TWO
-  /// portal limits:
-  ///   - **≤ [maxAccountsPerList] accounts** (all modes), and
-  ///   - **≤ [cap] amount for CASH only** — cheque modes have no amount cap.
-  /// Returns unsaved [Lot]s.
-  static List<Lot> pack(
-    List<RdAccount> accounts,
-    DateTime now, {
-    int cap = 20000,
-    String mode = 'Cash',
-  }) {
-    // Cash caps the rupee total; DOP / Non-DOP cheque do not.
-    final capsAmount = !mode.toLowerCase().contains('cheque');
-    final lots = <Lot>[];
-    var current = <LotItem>[];
-    var running = 0;
-
-    void flush() {
-      if (current.isNotEmpty) {
-        lots.add(Lot(createdAt: now, mode: mode, items: current));
-        current = <LotItem>[];
-        running = 0;
-      }
-    }
-
-    for (final a in accounts) {
-      final amt = a.denominationAmount;
-      // Start a new lot when adding this account would break a limit — the
-      // 50-account cap (any mode) or the amount cap (cash only). A lone account
-      // over the amount cap still gets its own lot rather than being dropped.
-      final overAmount = capsAmount && running + amt > cap;
-      final overCount = current.length >= maxAccountsPerList;
-      if (current.isNotEmpty && (overAmount || overCount)) flush();
-      current.add(LotItem(
-        accountNumber: a.accountNumber,
-        customerName: a.customerName,
-        denomination: a.denominationAmount,
-        installments: 1,
-      ));
-      running += amt;
-    }
-    flush();
-    return lots;
-  }
-
-  /// Convenience: eligible + pack in one call.
-  static List<Lot> build(List<RdAccount> accounts, DateTime now,
-          {int cap = 20000,
-          String mode = 'Cash',
-          Set<String> alreadyListed = const <String>{}}) =>
-      pack(eligible(accounts, now, alreadyListed: alreadyListed), now,
-          cap: cap, mode: mode);
 }

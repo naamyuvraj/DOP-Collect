@@ -33,9 +33,10 @@ void main() {
       await repo.replaceAll([acct('A1'), acct('A2')], complete: true);
 
       // A2 matured and closed, so the portal no longer lists it.
-      final closed = await repo.replaceAll([acct('A1')], complete: true);
+      final merge = await repo.replaceAll([acct('A1')], complete: true);
 
-      expect(closed.map((a) => a.accountNumber), ['A2']);
+      expect(merge.closed.map((a) => a.accountNumber), ['A2']);
+      expect(merge.refused, isFalse);
       // Gone from every surface that asks about the live book.
       expect((await repo.all()).map((a) => a.accountNumber), ['A1']);
       expect(await repo.search('C'), hasLength(1));
@@ -79,9 +80,9 @@ void main() {
 
       // A stalled walk holds only a PREFIX of the book. Reading absence there
       // as closure would close almost everyone.
-      final closed = await repo.replaceAll([acct('A1')]);
+      final merge = await repo.replaceAll([acct('A1')]);
 
-      expect(closed, isEmpty);
+      expect(merge.closed, isEmpty);
       expect(await repo.count(), 2);
       expect((await repo.byAccountNumber('A2'))!.isClosed, isFalse);
     });
@@ -122,7 +123,8 @@ void main() {
       // one-month window would restart on every sync, forever.
       final again = await repo.replaceAll([acct('A1')], complete: true);
 
-      expect(again, isEmpty, reason: 'it closed once; it is not news twice');
+      expect(again.closed, isEmpty,
+          reason: 'it closed once; it is not news twice');
       expect((await repo.byAccountNumber('A2'))!.closedAt, firstStamp);
     });
   });
@@ -132,10 +134,30 @@ void main() {
       expect(maturedFrom(DateTime(2026, 8, 19)), DateTime(2026, 7, 19));
       // Across a year boundary.
       expect(maturedFrom(DateTime(2026, 1, 5)), DateTime(2025, 12, 5));
-      // A short month: DateTime normalises the overflow (31 Mar - 1 month is
-      // read as 3 Mar), which shows the account a day or two LONGER. That is
-      // the harmless direction — the alternative hides it early.
-      expect(maturedFrom(DateTime(2026, 3, 31)), DateTime(2026, 3, 3));
+      // A short month. `DateTime(2026, 2, 31)` overflows to 3 MARCH, which is
+      // LATER than the window should start, not earlier — so this used to hide
+      // a recent closure rather than show it a little longer. The day is
+      // clamped to the target month instead.
+      expect(maturedFrom(DateTime(2026, 3, 31)), DateTime(2026, 2, 28));
+      expect(maturedFrom(DateTime(2026, 3, 30)), DateTime(2026, 2, 28));
+      expect(maturedFrom(DateTime(2024, 3, 31)), DateTime(2024, 2, 29),
+          reason: 'leap February');
+    });
+
+    test('the window only ever moves forwards', () async {
+      // The overflow made it non-monotonic: an account closed on 1 March was
+      // listed on 29 March, GONE on the 30th and 31st, and back again on
+      // 1 April. A record that reappears after vanishing reads as a bug in the
+      // book, which is the one thing this list must never look like.
+      final closed = DateTime(2026, 3, 1, 12);
+      bool visible(DateTime today) => !closed.isBefore(maturedFrom(today));
+      for (final day in [29, 30, 31]) {
+        expect(visible(DateTime(2026, 3, day)), isTrue,
+            reason: 'still inside the month on the ${day}th');
+      }
+      expect(visible(DateTime(2026, 4, 1)), isTrue);
+      expect(visible(DateTime(2026, 4, 2)), isFalse,
+          reason: 'one calendar month later, and it stays gone');
     });
 
     test('lists recent closures, newest first, and nothing else', () async {

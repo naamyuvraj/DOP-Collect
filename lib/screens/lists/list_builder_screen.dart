@@ -52,8 +52,8 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
   bool get _isCheque => _mode.toLowerCase().contains('cheque');
 
   int get _count => _selected.length;
-  int get _total => _selected.entries
-      .fold(0, (s, e) => s + (_byNumber[e.key]?.denominationAmount ?? 0) * e.value);
+  int get _total => _selected.entries.fold(
+      0, (s, e) => s + (_byNumber[e.key]?.denominationAmount ?? 0) * e.value);
 
   @override
   void initState() {
@@ -80,7 +80,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
   }
 
   /// Apply the chosen order. Null = smart priority (most valuable + most
-  /// reliable — paid-ahead / on-time first), shared with the auto-packer.
+  /// reliable — paid-ahead / on-time first).
   List<RdAccount> _applySort(List<RdAccount> list) {
     if (_sort == null) {
       final now = DateTime.now();
@@ -92,10 +92,12 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
   void _setInstallments(RdAccount a, int value) {
     final denom = a.denominationAmount;
     final current = _selected[a.accountNumber] ?? 0;
-    final prospective = _total - denom * current + denom * (value < 0 ? 0 : value);
+    final prospective =
+        _total - denom * current + denom * (value < 0 ? 0 : value);
     final addingNew = current == 0 && value > 0;
     if (addingNew && _selected.length >= ListBuilderScreen.maxAccounts) {
-      _warn('A list can hold at most ${ListBuilderScreen.maxAccounts} accounts.');
+      _warn(
+          'A list can hold at most ${ListBuilderScreen.maxAccounts} accounts.');
       return;
     }
     // Amount cap is CASH-only; cheque lists have no rupee limit.
@@ -113,8 +115,8 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
     });
   }
 
-  void _warn(String msg) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(msg)));
+  void _warn(String msg) => ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(duration: const Duration(seconds: 3), content: Text(msg)));
 
   Future<void> _create() async {
     if (_selected.isEmpty) return;
@@ -182,14 +184,16 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
     ));
     unawaited(Analytics.track('lot_created',
         {'accounts': items.length, 'amount': _total, 'mode': _mode}));
-    // Saving the list is what marks these accounts collected for this cycle —
-    // auto-build reads the saved lists back (LotPacking.listedThisCycle) rather
-    // than a per-account flag, so the mark expires when the month does.
+    // Saving the list is what marks these accounts spoken-for this cycle — the
+    // collect sheet reads the saved lists back (LotPacking.listedThisCycle)
+    // rather than a per-account flag, so the mark expires when the month does.
     if (!mounted) return;
     Navigator.of(context).pop(true);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(duration: const Duration(seconds: 3), content: Text('List created · ${items.length} accounts · '
-          '${inr(_total)} · $_mode')),
+      SnackBar(
+          duration: const Duration(seconds: 3),
+          content: Text('List created · ${items.length} accounts · '
+              '${inr(_total)} · $_mode')),
     );
   }
 
@@ -324,8 +328,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
 
   Widget _headerStat(String label, String value) => Row(
         children: [
-          Text('$label : ',
-              style: AppTheme.body(14, color: AppTheme.inkMuted)),
+          Text('$label : ', style: AppTheme.body(14, color: AppTheme.inkMuted)),
           Text(value, style: AppTheme.display(18, weight: FontWeight.w600)),
         ],
       );
@@ -380,8 +383,7 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
                   children: [
                     Flexible(
                       child: Text(a.customerName,
-                          style:
-                              AppTheme.display(16, weight: FontWeight.w600),
+                          style: AppTheme.display(16, weight: FontWeight.w600),
                           overflow: TextOverflow.ellipsis),
                     ),
                     if (a.serial > 0)
@@ -394,7 +396,8 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
                 Text('#${a.accountNumber}',
                     style: AppTheme.body(12, color: AppTheme.inkMuted)),
                 const SizedBox(height: 4),
-                Text('Inst. ${inr(a.denominationAmount)} '
+                Text(
+                    'Inst. ${inr(a.denominationAmount)} '
                     '(${a.monthsPaid} paid) · due ${a.dueDateIso}',
                     style: AppTheme.body(12, color: AppTheme.inkMuted)),
               ],
@@ -480,7 +483,8 @@ class _ChequeEntryScreenState extends State<ChequeEntryScreen> {
     for (final r in widget.rows) {
       final acc = r.account.accountNumber;
       if (_chq[acc]!.text.trim().isEmpty || _bank[acc]!.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(duration: Duration(seconds: 3), 
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            duration: Duration(seconds: 3),
             content: Text(
                 'Enter the cheque number and bank account for every account.')));
         return;
@@ -524,8 +528,8 @@ class _ChequeEntryScreenState extends State<ChequeEntryScreen> {
                 _field(_chq[a.accountNumber]!, 'Cheque number',
                     TextInputType.number),
                 const SizedBox(height: 8),
-                _field(_bank[a.accountNumber]!, 'Bank account number (on cheque)',
-                    TextInputType.number),
+                _field(_bank[a.accountNumber]!,
+                    'Bank account number (on cheque)', TextInputType.number),
               ],
             ),
           );

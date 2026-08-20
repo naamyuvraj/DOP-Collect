@@ -21,7 +21,7 @@ import 'lot_detail_screen.dart';
 import 'lot_preview_screen.dart';
 import 'lot_report.dart';
 
-/// Lists tab (the app's single home for lists): auto-build month-end lists,
+/// Lists tab (the app's single home for lists): build month-end lists,
 /// make one by hand, and manage saved lists — open, print, share on WhatsApp,
 /// or prepare on the DOP portal. Each list is a Recurring Deposit Installment
 /// schedule for the post office.
@@ -116,7 +116,6 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
     if (made == true) _reload();
   }
 
-  /// Auto-build: pack every account still to collect into ready ₹20,000 lists.
   /// A floating action pill (rounded, shadowed) — shared by "New" and
   /// "Submit on Portal" so they match on the bottom-left stack.
   Widget _pill(String label, IconData icon, VoidCallback onTap,
@@ -129,8 +128,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
         // Same hard face as every other button. This used to paint its own
         // blurred drop shadow — the glass language the palette replaced — so
         // it read as soft and flat beside the pressables around it.
-        decoration: AppTheme.card(
-            fill: color, radius: 27, offset: AppTheme.buttonFace),
+        decoration:
+            AppTheme.card(fill: color, radius: 27, offset: AppTheme.buttonFace),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -204,7 +203,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
   /// DateTime through every caller.
   static String _relDay(String day) {
     try {
-      return Lot.relativeDay(DateFormat('dd-MMM-yyyy').parse(day), DateTime.now());
+      return Lot.relativeDay(
+          DateFormat('dd-MMM-yyyy').parse(day), DateTime.now());
     } catch (_) {
       return day; // unparseable — show it as-is rather than lose the header
     }
@@ -355,8 +355,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
 
   Widget _listsView(List<Lot> unsubmitted) {
     final items = <Widget>[
-      _batchFilter(unsubmitted, _listsDay,
-          (v) => setState(() => _listsDay = v)),
+      _batchFilter(
+          unsubmitted, _listsDay, (v) => setState(() => _listsDay = v)),
     ];
 
     if (unsubmitted.isEmpty) {
@@ -365,8 +365,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
           'Tap "New" to make this month\'s ₹20,000 lists, then submit them on '
               'the portal.'));
     } else {
-      for (final entry in Lot.groupByDay(_onlyDay(unsubmitted, _listsDay)).map(
-          (g) => MapEntry(g.day, g.lots))) {
+      for (final entry in Lot.groupByDay(_onlyDay(unsubmitted, _listsDay))
+          .map((g) => MapEntry(g.day, g.lots))) {
         items.add(_dayHeader(entry.key, entry.value));
         for (final lot in entry.value) {
           items.add(Padding(
@@ -386,13 +386,14 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
 
   Widget _downloadsView(List<Lot> submitted) {
     if (submitted.isEmpty) {
-      return _emptyMsg('No downloads yet',
+      return _emptyMsg(
+          'No downloads yet',
           'Lists you submit on the portal appear here — download each, or a '
               'whole day\'s batch, to submit at the post office.');
     }
     final items = <Widget>[
-      _batchFilter(submitted, _downloadsDay,
-          (v) => setState(() => _downloadsDay = v)),
+      _batchFilter(
+          submitted, _downloadsDay, (v) => setState(() => _downloadsDay = v)),
     ];
     for (final entry in Lot.groupByDay(_onlyDay(submitted, _downloadsDay))) {
       items.add(_batchHeader(entry.day, entry.lots)); // day + "Download all"
@@ -425,7 +426,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
       return Lot.relativeDay(lot.filedAt, now);
     }
 
-    Widget chip(String text, bool active, VoidCallback onTap) => GestureDetector(
+    Widget chip(String text, bool active, VoidCallback onTap) =>
+        GestureDetector(
           onTap: onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
@@ -515,9 +517,9 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                 children: [
                   Text('Submit on Portal',
                       style: AppTheme.body(12.5,
-                          weight: FontWeight.w800,
-                          color: AppTheme.green,
-                          spacing: 10)
+                              weight: FontWeight.w800,
+                              color: AppTheme.green,
+                              spacing: 10)
                           .copyWith(
                               decoration: TextDecoration.underline,
                               decorationColor: AppTheme.green)),
@@ -547,7 +549,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
             const SizedBox(height: 6),
             Text(body,
                 textAlign: TextAlign.center,
-                style: AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4)),
+                style:
+                    AppTheme.body(13, color: AppTheme.inkMuted, height: 1.4)),
           ],
         ),
       ),
@@ -577,7 +580,8 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: AppTheme.panel(AppTheme.greenSoft, radius: 8),
-                    child: Text(lot.mode, style: AppTheme.label(AppTheme.green)),
+                    child:
+                        Text(lot.mode, style: AppTheme.label(AppTheme.green)),
                   ),
                   const SizedBox(width: 14),
                   Expanded(

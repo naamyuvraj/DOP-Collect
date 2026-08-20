@@ -22,11 +22,16 @@ void main() {
       () async {
     final repo = MemoryAccountRepository();
 
-    // First sync brings the account in.
-    await repo.replaceAll([base('A1', monthsPaid: 10, serial: 7)]);
+    // First sync brings the account in, already carrying a status. Nothing in
+    // the app writes `status` any more — the collections ledger replaced it —
+    // but a merge must still never blank a field the portal parse does not
+    // carry, so it is seeded here and checked after the re-sync below.
+    await repo.replaceAll([
+      base('A1', monthsPaid: 10, serial: 7)
+          .copyWith(status: CollectionStatus.deposited)
+    ]);
 
-    // Local state accrues: marked deposited + Deep Sync detail filled.
-    await repo.setStatus('A1', CollectionStatus.deposited);
+    // Deep Sync detail accrues on top.
     await repo.applyDetail(AccountDetail(
       accountNumber: 'A1',
       totalDeposit: 12345,

@@ -4,19 +4,15 @@ import 'package:dop_collect/models/lot.dart';
 import 'package:dop_collect/models/lot_packing.dart';
 import 'package:dop_collect/models/rd_account.dart';
 
-/// Foundation for the portal submission work: the two packing limits
-/// (50 accounts/list, ₹20k cash-only) and Lot/LotItem persistence of the new
-/// cheque + reference fields.
+/// Foundation for the portal submission work: the order the list builder
+/// offers by default, and Lot/LotItem persistence of the cheque + reference
+/// fields.
+///
+/// The two limit tests that were here drove `LotPacking.pack`, which went with
+/// auto-build. The limits themselves are still enforced — by the list builder,
+/// against its own `ListBuilderScreen.lotCap` / `maxAccounts`.
 void main() {
   final now = DateTime(2026, 7, 30);
-
-  RdAccount acct(String n, int denom) => RdAccount(
-        accountNumber: n,
-        customerName: 'C$n',
-        denominationAmount: denom,
-        nextDueDate: now,
-        monthsPaid: 10,
-      );
 
   group('priority order (most valuable + reliable first)', () {
     RdAccount at(String n, int denom, DateTime due) => RdAccount(
@@ -36,44 +32,6 @@ void main() {
       // On-time owers first, then overdue, then paid-ahead (by value within).
       expect(list.map((a) => a.accountNumber).toList(),
           ['ontime6k', 'overdue15k', 'ahead6k', 'ahead3k']);
-    });
-  });
-
-  group('LotPacking limits', () {
-    test('cash caps the rupee total at ₹20,000', () {
-      // 5 × ₹6,000 = ₹30,000. Cash → 3 per lot (₹18k), then 2.
-      final lots = LotPacking.pack(
-        [for (var i = 0; i < 5; i++) acct('$i', 6000)],
-        now,
-      );
-      expect(lots.length, 2);
-      expect(lots[0].totalAmount, lessThanOrEqualTo(20000));
-      expect(lots.every((l) => l.totalAmount <= 20000), true);
-    });
-
-    test('cheque modes have NO amount cap, only the 50-account cap', () {
-      // 60 × ₹1,000 = ₹60,000 in DOP Cheque mode → split by count (50 + 10),
-      // NOT by ₹20,000.
-      final lots = LotPacking.pack(
-        [for (var i = 0; i < 60; i++) acct('$i', 1000)],
-        now,
-        mode: 'DOP Cheque',
-      );
-      expect(lots.length, 2);
-      expect(lots[0].count, 50);
-      expect(lots[1].count, 10);
-      expect(lots[0].totalAmount, 50000); // well over ₹20k — allowed for cheque
-    });
-
-    test('cash also honours the 50-account cap when amounts are tiny', () {
-      // 55 × ₹100 = ₹5,500 (never hits ₹20k) → still splits at 50.
-      final lots = LotPacking.pack(
-        [for (var i = 0; i < 55; i++) acct('$i', 100)],
-        now,
-      );
-      expect(lots.length, 2);
-      expect(lots[0].count, 50);
-      expect(lots[1].count, 5);
     });
   });
 

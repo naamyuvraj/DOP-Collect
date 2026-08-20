@@ -1,0 +1,16 @@
+{
+  "name": "js",
+  "version": "1.0.0",
+  "description": "These run the **real** JavaScript the app injects into the portal WebView — the scripts are parsed straight out of `lib/screens/portal/sync_screen.dart` and `lib/data/portal/portal_sync.dart` by `extract.js`, so the tests track the shipping code and will break loudly if a script is renamed or restructured.",
+  "main": "dom_repro.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

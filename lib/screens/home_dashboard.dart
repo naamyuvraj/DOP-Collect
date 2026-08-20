@@ -157,11 +157,16 @@ class _HomeDashboardState extends State<HomeDashboard> {
               _section(
                 title: 'Attention',
                 children: [
-                  _sum('Defaulters', AppTheme.red,
-                      AccountFilter.defaulters, s),
+                  _sum('Defaulters', AppTheme.red, AccountFilter.defaulters, s),
                   const SizedBox(height: 10),
-                  _sum('Freezing soon (6 mo)', AppTheme.red,
-                      AccountFilter.aboutToFreeze, s, rank: 1),
+                  // "of which" is not decoration. Freezing soon is every
+                  // account 6+ months behind, so it is a strict SUBSET of
+                  // Defaulters — the same customers, counted again. Two plain
+                  // totals stacked in one panel read as two separate problems
+                  // and invite adding them together.
+                  _sum('of which freezing soon (6 mo+)', AppTheme.red,
+                      AccountFilter.aboutToFreeze, s,
+                      rank: 1),
                 ],
               ),
               // New Accounts — always visible.
@@ -200,13 +205,14 @@ class _HomeDashboardState extends State<HomeDashboard> {
               width: 44,
               height: 44,
               clipBehavior: Clip.antiAlias,
-              decoration: BoxDecoration(
-                  color: AppTheme.black, shape: BoxShape.circle),
+              decoration:
+                  BoxDecoration(color: AppTheme.black, shape: BoxShape.circle),
               child: _photoBytes == null
                   ? Center(
                       child: Text(_initials(),
                           style: AppTheme.display(16,
-                              weight: FontWeight.w800, color: AppTheme.onAccent)),
+                              weight: FontWeight.w800,
+                              color: AppTheme.onAccent)),
                     )
                   : Image.memory(_photoBytes!,
                       fit: BoxFit.cover, gaplessPlayback: true),
@@ -332,8 +338,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
       decoration: AppTheme.card(),
       child: Column(
         children: [
-          Icon(Icons.cloud_sync_rounded,
-              size: 48, color: AppTheme.inkFaint),
+          Icon(Icons.cloud_sync_rounded, size: 48, color: AppTheme.inkFaint),
           const SizedBox(height: 14),
           Text('No accounts yet',
               style: AppTheme.display(18, weight: FontWeight.w800)),
@@ -357,8 +362,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.sync_rounded,
-                      color: AppTheme.onAccent, size: 20),
+                  Icon(Icons.sync_rounded, color: AppTheme.onAccent, size: 20),
                   const SizedBox(width: 8),
                   Text('Sync Collection',
                       style: AppTheme.body(15,
@@ -442,8 +446,7 @@ class _HomeDashboardState extends State<HomeDashboard> {
 
   Widget _glassHeading(String text) => Padding(
         padding: const EdgeInsets.only(left: 4),
-        child: Text(text,
-            style: AppTheme.display(17, weight: FontWeight.w800)),
+        child: Text(text, style: AppTheme.display(17, weight: FontWeight.w800)),
       );
 
   Widget _section({
@@ -496,5 +499,4 @@ class _HomeDashboardState extends State<HomeDashboard> {
       onView: () => _openFilter(f),
     );
   }
-
 }

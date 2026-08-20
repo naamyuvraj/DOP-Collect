@@ -21,13 +21,18 @@ VIEW v_accounts columns:
 - account_number TEXT, customer_name TEXT
 - denomination_amount INTEGER  (monthly installment, rupees)
 - months_paid INTEGER
-- status TEXT ('pending' | 'deposited')  -- manual tick, usually ignore
 - next_due TEXT 'YYYY-MM-DD', due_ym TEXT 'YYYY-MM', due_day INTEGER 1..31
 - fortnight TEXT ('first' = day<=15 | 'second' = day>=16)
 - months_behind INTEGER  (now - due, in months)
 - bucket TEXT ('deposited' = behind<=-1 | 'pending' = behind==0 | 'defaulter' = behind>=1)
 - about_to_freeze INTEGER (1 if behind>=6), advanced_paid INTEGER (1 if behind<=-2)
-- is_maturity INTEGER (1 if near maturity), is_new INTEGER (1 if opened recently)
+- is_maturity INTEGER (1 if 2 or fewer installments remain before the end of
+  the term; the term is 60 months, or 120 for an account continued past 5 years)
+- opening_on TEXT 'YYYY-MM-DD' — when the account opened. Exact when a detail
+  fetch has stored it, otherwise derived from next due minus months paid.
+- is_new INTEGER (1 if opened in the CURRENT calendar month). For any other
+  window answer from opening_on, e.g. the last 3 months is
+  `opening_on >= date('now','localtime','start of month','-2 months')`.
 - est_deposit INTEGER (denomination_amount * months_paid)
 - arrears_amount INTEGER (denomination * months behind, min one installment)
 - total_deposit INTEGER (exact, may be NULL), opening_date TEXT (may be NULL)

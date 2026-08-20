@@ -258,6 +258,7 @@ class _SyncScreenState extends State<SyncScreen> {
   ''';
 
   int _captchaTries = 0;
+
   /// Set when a page load asks for a captcha solve while one is already running.
   bool _captchaAgain = false;
 
@@ -381,8 +382,8 @@ class _SyncScreenState extends State<SyncScreen> {
         }
         return;
       }
-      final ok = _decode(
-          await _controller.runJavaScriptReturningResult(_fillCaptchaJs(guess)));
+      final ok = _decode(await _controller
+          .runJavaScriptReturningResult(_fillCaptchaJs(guess)));
       if (!ok.contains('true')) {
         if (manual) _snack('Captcha box not found to fill · $dbg');
         return;
@@ -431,7 +432,8 @@ class _SyncScreenState extends State<SyncScreen> {
       }
       if (mounted) {
         if (dailyAttempts >= 4) {
-          _snack('Captcha filled: $guess — daily auto-login limit reached. Tap Login.');
+          _snack(
+              'Captcha filled: $guess — daily auto-login limit reached. Tap Login.');
         } else {
           _snack('Captcha filled: $guess — tap Login.');
         }
@@ -676,7 +678,6 @@ class _SyncScreenState extends State<SyncScreen> {
     if (mounted) Navigator.of(context).pop(true);
   }
 
-
   /// What did not submit, and what to do about it.
   ///
   /// Deliberately a dialog he has to dismiss, not a snackbar: the batch pops its
@@ -685,7 +686,8 @@ class _SyncScreenState extends State<SyncScreen> {
   /// ends up re-submitting by hand without knowing which ones.
   Future<void> _showBatchSummary({
     required int paid,
-    required List<({String label, String reason, bool paymentUnknown})> failures,
+    required List<({String label, String reason, bool paymentUnknown})>
+        failures,
   }) async {
     final unknown = failures.where((f) => f.paymentUnknown).toList();
     final safe = failures.where((f) => !f.paymentUnknown).toList();
@@ -729,7 +731,8 @@ class _SyncScreenState extends State<SyncScreen> {
               Text(
                 'The lists that did not go are still in Lists, ready to submit '
                 'again.',
-                style: AppTheme.body(12, color: AppTheme.inkFaint, height: 1.35),
+                style:
+                    AppTheme.body(12, color: AppTheme.inkFaint, height: 1.35),
               ),
             ],
           ),
@@ -817,8 +820,8 @@ class _SyncScreenState extends State<SyncScreen> {
           onDiag: (r) => diag = 'report: $r');
       for (final e in report.entries) {
         if (!needed.contains(e.key)) continue;
-        await widget.repo
-            .applyDetail(AccountDetail(accountNumber: e.key, lastDepositDate: e.value));
+        await widget.repo.applyDetail(
+            AccountDetail(accountNumber: e.key, lastDepositDate: e.value));
         bulk++;
       }
       if (bulk > 0) {
@@ -839,8 +842,8 @@ class _SyncScreenState extends State<SyncScreen> {
         onAccount: (d) => widget.repo.applyDetail(d),
         shouldStop: () => _stopFill || !mounted,
         onDiag: (r) => diag = r,
-        onProgress: (done, target) => setState(() =>
-            _progress = 'Filling in details $done of $target… '
+        onProgress: (done, target) =>
+            setState(() => _progress = 'Filling in details $done of $target… '
                 '(${needed.length} left overall)'),
       );
       if (!mounted) return;
@@ -913,8 +916,8 @@ class _SyncScreenState extends State<SyncScreen> {
         accountNumbers: widget.prepareAccounts!,
         mode: widget.prepareMode ?? 'C',
         serialByAccount: serials,
-        onProgress: (page, total, selected) => setState(
-            () => _progress = 'Page $page · $selected selected'),
+        onProgress: (page, total, selected) =>
+            setState(() => _progress = 'Page $page · $selected selected'),
       );
       if (!mounted) return;
       if (res.selected.isEmpty) {
@@ -968,8 +971,8 @@ class _SyncScreenState extends State<SyncScreen> {
         installmentsByAccount: installments,
         chequeByAccount: cheques,
         shouldStop: () => _stopFill || !mounted,
-        onProgress: (done, total) => setState(
-            () => _progress = 'Keyed $done of $total installments…'),
+        onProgress: (done, total) =>
+            setState(() => _progress = 'Keyed $done of $total installments…'),
       );
     } catch (e) {
       fill = InstallmentFillResult(0, 0, error: '$e');
@@ -977,7 +980,8 @@ class _SyncScreenState extends State<SyncScreen> {
     if (!mounted) return;
     setState(() => _filling = false);
     if (!fill.ok) {
-      _snack('Could not key installments${fill.error == null ? '' : ' · ${fill.error}'}. '
+      _snack(
+          'Could not key installments${fill.error == null ? '' : ' · ${fill.error}'}. '
           'Enter them on the portal instead.');
       return;
     }
@@ -1088,8 +1092,7 @@ class _SyncScreenState extends State<SyncScreen> {
     }
     final expected = _installmentsFor(lot).keys.toSet();
     final onScreen = await _engine.installmentScreenAccounts();
-    if (onScreen.length != expected.length ||
-        !onScreen.containsAll(expected)) {
+    if (onScreen.length != expected.length || !onScreen.containsAll(expected)) {
       return 'the portal\'s accounts don\'t match this list';
     }
     return null;
@@ -1121,7 +1124,8 @@ class _SyncScreenState extends State<SyncScreen> {
               '"Pay All Saved Installments" there yourself — the app never pays '
               'for you. ${lot.count} account${lot.count == 1 ? '' : 's'} · '
               '₹${lot.totalNetAmount} · ${lot.mode}.',
-              style: AppTheme.body(12.5, color: AppTheme.inkMuted, height: 1.35),
+              style:
+                  AppTheme.body(12.5, color: AppTheme.inkMuted, height: 1.35),
             ),
             const SizedBox(height: 12),
             Row(
@@ -1171,8 +1175,8 @@ class _SyncScreenState extends State<SyncScreen> {
     });
     try {
       final result = await _engine.syncAllPages(
-        onProgress: (page, total, count) =>
-            setState(() => _progress = 'Page $page of $total · $count accounts'),
+        onProgress: (page, total, count) => setState(
+            () => _progress = 'Page $page of $total · $count accounts'),
       );
       if (result.accounts.isEmpty) {
         _snack(result.error ?? 'No accounts found.');
@@ -1188,8 +1192,9 @@ class _SyncScreenState extends State<SyncScreen> {
       // got to. Passing the flag through is the whole difference between
       // "closed accounts finally leave the book" and "a stalled sync empties
       // it".
-      final closed =
-          await widget.repo.replaceAll(result.accounts, complete: result.complete);
+      final merge = await widget.repo
+          .replaceAll(result.accounts, complete: result.complete);
+      final closed = merge.closed;
 
       // ...but a partial run is NOT a sync. Stamping last_sync would silence the
       // "you haven't synced" nag on a run that failed, and `sync_done` is what
@@ -1227,8 +1232,23 @@ class _SyncScreenState extends State<SyncScreen> {
                   'Matured Accounts.'
               : ' ${closed.length} accounts have closed — see Settings → '
                   'Matured Accounts.';
+      // The guard fired: the walk claimed to be complete but wanted to close a
+      // chunk of the book. Nothing was closed. Say so plainly — this is the one
+      // message that must not read like an ordinary sync.
+      if (merge.refused) {
+        _snack('Sync looked wrong: it would have closed '
+            '${merge.refusedClosures} accounts at once, so none were closed. '
+            'Your book is unchanged. Run Sync again.');
+        if (mounted) Navigator.of(context).pop(true);
+        return;
+      }
+      // Rows the portal showed but this app could not read. The agent is being
+      // shown fewer accounts than he has, and that must never be silent.
+      final dropped = result.rejected == 0
+          ? ''
+          : ' ${result.rejected} row(s) could not be read and were skipped.';
       _snack(result.error ??
-          'Synced ${result.accounts.length} accounts.$closedNote'
+          'Synced ${result.accounts.length} accounts.$closedNote$dropped'
               '${closed.isEmpty ? ' Run Deep Sync for last-deposit dates.' : ''}');
       // Fast list sync only. Exact per-account figures (last deposit etc.) are
       // fetched separately via the "Deep Sync" button.
@@ -1299,7 +1319,8 @@ class _SyncScreenState extends State<SyncScreen> {
 
   void _snack(String m) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(duration: const Duration(seconds: 3), content: Text(m)));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(duration: const Duration(seconds: 3), content: Text(m)));
   }
 
   @override

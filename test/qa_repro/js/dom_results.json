@@ -1,0 +1,50 @@
+[
+  {
+    "id": "J2-1",
+    "desc": "menu anchor WITHOUT name/id=Enquire: the <td> is clicked, the link is not",
+    "ok": true,
+    "note": "script returns \"true\" (caller believes it navigated) but the <td> got the click; anchor never fired"
+  },
+  {
+    "id": "J2-2",
+    "desc": "the same DOM WITH name*=\"Enquire\" is handled correctly by _clickSelector",
+    "ok": true,
+    "note": "fast path is fine — the defect only bites when the anchor lacks name/id"
+  },
+  {
+    "id": "J2-3",
+    "desc": "document order proves the <td> is always reached before its own anchor",
+    "ok": true,
+    "note": "querySelectorAll order = [cell,link]; td.closest('a') === null, so the fallback clicks the cell"
+  },
+  {
+    "id": "J1-1",
+    "desc": "captcha fill dispatches no keydown/keypress and never focuses the field",
+    "ok": true,
+    "note": "dispatched [input,change,keyup,blur] — a portal handler bound to keypress/keydown, or one that requires focus, never runs"
+  },
+  {
+    "id": "J1-2",
+    "desc": "a portal that enables Login on keypress stays disabled after our fill",
+    "ok": true,
+    "note": "login button still disabled → _loginJs returns \"false\" for all 10 polls → falls through to \"tap Login\""
+  },
+  {
+    "id": "J3-1",
+    "desc": "a 120x22 spacer/banner gif on a NON-login page scores high enough to be OCR'd",
+    "ok": true,
+    "note": "dbg=\"1 imgs; top 120x22 s4; used 120x22 x3\" → scores 4 (size 3 + wide 1) ≥ 3, so 3 canvases are rendered and 3 ML Kit OCR passes run on a decorative gif"
+  },
+  {
+    "id": "J3-2",
+    "desc": "and the resulting junk read is written into any input matching [id*=captcha]",
+    "ok": true,
+    "note": "selector [id*=\"captcha\" i] matched a non-captcha input and overwrote it"
+  },
+  {
+    "id": "C3-1",
+    "desc": "credsFilled returns \"false\" while the Keystore read is still in flight",
+    "ok": true,
+    "note": "empty fields → gate says false → _autofillCaptcha returns with NO retry scheduled"
+  }
+]

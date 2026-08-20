@@ -3,6 +3,18 @@ import 'package:html/parser.dart' as html_parser;
 
 import '../../models/rd_account.dart';
 
+/// One page of the listing, plus what could not be read from it.
+///
+/// [rejected] counts data rows that looked like accounts but carried a cell
+/// this parser could not turn into a real value. They are DROPPED rather than
+/// guessed at — see [AgentListParser.parse].
+class ParsedPage {
+  const ParsedPage(this.accounts, {this.rejected = 0});
+  final List<RdAccount> accounts;
+  final int rejected;
+  static const empty = ParsedPage(<RdAccount>[]);
+}
+
 /// Parses the DOP "Agent Inquire and Update" account table (Finacle
 /// `AgentRDActSummaryAllListing`) into [RdAccount]s.
 ///
@@ -18,15 +30,32 @@ import '../../models/rd_account.dart';
 /// so it survives column reordering and only needs [_HeaderMatch] tuning if the
 /// portal relabels a column.
 class AgentListParser {
-  /// Parse one page of the account list. Pagination is handled by the sync
-  /// engine, which concatenates pages.
-  static List<RdAccount> parsePage(String htmlSource) {
+  /// Parse one page of the account list, keeping only rows that are wholly
+  /// readable. Pagination is handled by the sync engine, which concatenates
+  /// pages.
+  ///
+  /// A row is REJECTED when its due date will not parse or its denomination
+  /// reads as zero. Both used to fall back to a sentinel — `DateTime(2000)` and
+  /// `0` — and the sentinel then behaved like real data:
+  ///
+  ///   * a 01-01-2000 due date makes the account ~320 months overdue, so it
+  ///     lands in Defaulters AND About to Freeze and adds its denomination
+  ///     times 320 (~Rs 3,19,000 on a Rs 1,000 account) to the To Collect
+  ///     total, and
+  ///   * a zero denomination makes `CollectionProgress.complete` true the
+  ///     moment it is created (`0 >= 0`), so the customer shows as fully paid
+  ///     for the cycle and never appears on the round.
+  ///
+  /// Dropping the row loses one account until the next sync. Keeping it
+  /// silently corrupts the dashboard totals and hides a customer from
+  /// collection, which is worse and far harder to notice.
+  static ParsedPage parse(String htmlSource) {
     final doc = html_parser.parse(htmlSource);
     final table = _findDataTable(doc);
-    if (table == null) return const [];
+    if (table == null) return ParsedPage.empty;
 
     final rows = table.querySelectorAll('tr');
-    if (rows.isEmpty) return const [];
+    if (rows.isEmpty) return ParsedPage.empty;
 
     int? headerRowIndex;
     Map<_Field, int?>? cols;
@@ -44,26 +73,43 @@ class AgentListParser {
         break;
       }
     }
-    if (headerRowIndex == null || cols == null || cols[_Field.account] == null) {
-      return const [];
+    if (headerRowIndex == null ||
+        cols == null ||
+        cols[_Field.account] == null) {
+      return ParsedPage.empty;
     }
 
     final out = <RdAccount>[];
+    var rejected = 0;
     for (final row in rows.skip(headerRowIndex + 1)) {
       final cells = _cells(row).map((c) => c.text.trim()).toList();
       final acct = _digits(_at(cells, cols[_Field.account]));
       if (!_looksLikeAccount(acct)) continue;
 
+      // Anything that was not a data row at all was skipped above. From here
+      // on the row IS an account, so an unreadable cell is a real failure and
+      // gets counted rather than papered over with a sentinel.
+      final due = _date(_at(cells, cols[_Field.dueDate]));
+      final denomination = _money(_at(cells, cols[_Field.denomination]));
+      if (due == null || denomination <= 0) {
+        rejected++;
+        continue;
+      }
+
       out.add(RdAccount(
         accountNumber: acct,
         customerName: _at(cells, cols[_Field.name])?.trim() ?? '',
-        denominationAmount: _money(_at(cells, cols[_Field.denomination])),
-        nextDueDate: _date(_at(cells, cols[_Field.dueDate])),
+        denominationAmount: denomination,
+        nextDueDate: due,
         monthsPaid: _intVal(_at(cells, cols[_Field.monthsPaid])),
       ));
     }
-    return out;
+    return ParsedPage(out, rejected: rejected);
   }
+
+  /// Accounts only — the shape most callers want.
+  static List<RdAccount> parsePage(String htmlSource) =>
+      parse(htmlSource).accounts;
 
   // --- Table location ------------------------------------------------------
 
@@ -148,16 +194,30 @@ class AgentListParser {
   }
 
   /// Handles DOP date formats: 30-08-2026, 30/08/2026, 09-Aug-2026, 2026-08-09.
-  static DateTime _date(String? raw) {
-    if (raw == null || raw.trim().isEmpty) return DateTime(2000);
+  ///
+  /// Null when the cell is empty or in none of those shapes. It used to answer
+  /// `DateTime(2000)`, which is not a missing date — it is a date ~320 months
+  /// in the past, and every arrears calculation downstream believed it.
+  static DateTime? _date(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
     final s = raw.trim();
     const months = {
-      'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
-      'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+      'jan': 1,
+      'feb': 2,
+      'mar': 3,
+      'apr': 4,
+      'may': 5,
+      'jun': 6,
+      'jul': 7,
+      'aug': 8,
+      'sep': 9,
+      'oct': 10,
+      'nov': 11,
+      'dec': 12,
     };
     // dd-MMM-yyyy
-    final m1 =
-        RegExp(r'^(\d{1,2})[-/ ]([A-Za-z]{3})[A-Za-z]*[-/ ](\d{4})').firstMatch(s);
+    final m1 = RegExp(r'^(\d{1,2})[-/ ]([A-Za-z]{3})[A-Za-z]*[-/ ](\d{4})')
+        .firstMatch(s);
     if (m1 != null) {
       final mon = months[m1.group(2)!.toLowerCase()];
       if (mon != null) {
@@ -176,7 +236,7 @@ class AgentListParser {
       return DateTime(int.parse(m3.group(1)!), int.parse(m3.group(2)!),
           int.parse(m3.group(3)!));
     }
-    return DateTime(2000);
+    return null;
   }
 }
 
@@ -185,7 +245,13 @@ enum _Field { account, name, denomination, monthsPaid, dueDate }
 /// Header-text patterns per field (lowercase substring match). Confirmed
 /// against a real capture; extend if a deployment relabels a column.
 class _HeaderMatch {
-  static const account = ['account no', 'account number', 'acc no', 'a/c', 'account'];
+  static const account = [
+    'account no',
+    'account number',
+    'acc no',
+    'a/c',
+    'account'
+  ];
   static const name = ['account name', 'depositor', 'customer name', 'name'];
   static const denomination = ['denomination', 'installment amount', 'deno'];
   static const monthsPaid = ['month paid', 'paid upto', 'inst paid', 'paid'];

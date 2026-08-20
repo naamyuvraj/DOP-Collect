@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import '../models/rd_account.dart';
@@ -14,11 +16,36 @@ import 'portal/agent_detail_parser.dart';
 ///
 /// Calendar month rather than 30 days so it means what the agent means: closed
 /// on the 3rd, visible until the 3rd of next month, whatever the month's
-/// length. `DateTime` normalises an overflowing day itself (31 Mar - 1 month
-/// reads as 3 Mar), which errs towards showing the account a day or two longer
-/// — the harmless direction.
-DateTime maturedFrom(DateTime now) =>
-    DateTime(now.year, now.month - 1, now.day);
+/// length.
+///
+/// The day is CLAMPED to the target month's length rather than left to
+/// `DateTime`'s overflow. `DateTime(2026, 2, 31)` is not 28 February, it is
+/// 3 March — LATER than the window should start — so on 30 and 31 March the
+/// window began after 1 March, an account closed on the 1st vanished from the
+/// list, and then reappeared on 1 April when the window slid back. A month-long
+/// window that runs backwards reads as the app losing records.
+DateTime maturedFrom(DateTime now) {
+  final y = now.month == 1 ? now.year - 1 : now.year;
+  final m = now.month == 1 ? 12 : now.month - 1;
+  final lastDay = DateTime(y, m + 1, 0).day; // day 0 of next month = this one's
+  return DateTime(y, m, now.day > lastDay ? lastDay : now.day);
+}
+
+/// What a merge actually did to the book.
+///
+/// [closed] are the accounts this call stamped closed. [refusedClosures] is the
+/// number it declined to close because there were too many of them at once —
+/// see [AccountRepository.closureCeiling]. The two are mutually exclusive: a
+/// refused merge closes nothing at all.
+class MergeReport {
+  const MergeReport({this.closed = const [], this.refusedClosures = 0});
+  final List<RdAccount> closed;
+  final int refusedClosures;
+
+  /// True when the guard fired and the closures were held back.
+  bool get refused => refusedClosures > 0;
+  static const none = MergeReport();
+}
 
 /// Read/write access to RD accounts. Screens depend on this interface only, so
 /// the storage backend (SQLite on device, in-memory for the web preview) and
@@ -27,7 +54,6 @@ abstract class AccountRepository {
   Future<List<RdAccount>> all();
   Future<List<RdAccount>> search(String query);
   Future<RdAccount?> byAccountNumber(String accountNumber);
-  Future<void> setStatus(String accountNumber, CollectionStatus status);
 
   /// Set (or clear, with null/empty) one account's own ASLAAS number.
   Future<void> setAslaas(String accountNumber, String? aslaas);
@@ -65,10 +91,26 @@ abstract class AccountRepository {
   /// An account that reappears is un-closed — a portal that briefly hid a row
   /// must not cost the agent a customer.
   ///
-  /// Returns the accounts closed by THIS call (empty unless [complete]), so the
-  /// caller can tell the agent what just left his book.
-  Future<List<RdAccount>> replaceAll(List<RdAccount> accounts,
+  /// Returns what happened — see [MergeReport].
+  Future<MergeReport> replaceAll(List<RdAccount> accounts,
       {bool complete = false});
+
+  /// Most accounts one finished sync may close before the result is treated as
+  /// a fault rather than a month of maturities.
+  ///
+  /// A COMPLETE sync closes everything it did not see, so the correctness of
+  /// the whole book rests on the walk having genuinely read every page. That is
+  /// a great deal of weight for one boolean to carry, and when it was wrong the
+  /// cost was hundreds of customers leaving the book in a single tap. This is
+  /// the second line: a real month closes a handful of matured accounts, so
+  /// anything on a different scale is a broken sync, not a busy month.
+  ///
+  /// Five per cent, with a floor of ten so a small book (or a genuinely quiet
+  /// one) is not held hostage by a percentage. The asymmetry is the point — a
+  /// wrong refusal costs one message and a second Sync, a wrong closure costs
+  /// the ledger's only record of who those customers were.
+  static int closureCeiling(int liveBefore) =>
+      math.max(10, (liveBefore * 0.05).ceil());
 
   /// Accounts closed on or after [from], newest closure first. Backs the
   /// Settings → Matured Accounts list; see [maturedFrom] for the window.
@@ -127,17 +169,6 @@ class SqfliteAccountRepository implements AccountRepository {
   }
 
   @override
-  Future<void> setStatus(String accountNumber, CollectionStatus status) async {
-    final db = await _db.database;
-    await db.update(
-      'accounts',
-      {'status': status.name},
-      where: 'account_number = ?',
-      whereArgs: [accountNumber],
-    );
-  }
-
-  @override
   Future<void> setAslaas(String accountNumber, String? aslaas) async {
     final db = await _db.database;
     final v = aslaas?.trim();
@@ -193,10 +224,11 @@ class SqfliteAccountRepository implements AccountRepository {
   }
 
   @override
-  Future<List<RdAccount>> replaceAll(List<RdAccount> accounts,
+  Future<MergeReport> replaceAll(List<RdAccount> accounts,
       {bool complete = false}) async {
     final db = await _db.database;
     final closed = <RdAccount>[];
+    var refused = 0;
     await db.transaction((txn) async {
       // Preload existing rows so we can preserve status + detail on merge.
       final existing = <String, Map<String, Object?>>{
@@ -244,30 +276,41 @@ class SqfliteAccountRepository implements AccountRepository {
       if (complete) {
         final seen = {for (final a in accounts) a.accountNumber};
         final now = DateTime.now();
-        for (final row in existing.values) {
-          final number = row['account_number'] as String;
-          if (seen.contains(number)) continue;
-          if (row['closed_at'] != null) continue; // already closed, keep the date
-          batch.update(
-            'accounts',
-            {
-              'closed_at': now.toIso8601String(),
-              // Drop the short code. A complete sync renumbers the surviving
-              // book 1..N, so a closed account holding its old serial would
-              // answer to the same "#47" as a live customer — and `serialHint`
-              // would jump Deep Sync to the wrong portal page.
-              'serial': 0,
-            },
-            where: 'account_number = ?',
-            whereArgs: [number],
-          );
-          closed.add(RdAccount.fromMap(
-              {...row, 'closed_at': now.toIso8601String(), 'serial': 0}));
+        final live =
+            existing.values.where((r) => r['closed_at'] == null).toList();
+        final missing = [
+          for (final row in live)
+            if (!seen.contains(row['account_number'] as String)) row
+        ];
+        // The guard. A month closes a handful of matured accounts; a sync that
+        // wants to close a fifth of the book has not found a busy month, it has
+        // misread the portal. Close nothing, and let the caller say so.
+        if (missing.length > AccountRepository.closureCeiling(live.length)) {
+          refused = missing.length;
+        } else {
+          for (final row in missing) {
+            final number = row['account_number'] as String;
+            batch.update(
+              'accounts',
+              {
+                'closed_at': now.toIso8601String(),
+                // Drop the short code. A complete sync renumbers the surviving
+                // book 1..N, so a closed account holding its old serial would
+                // answer to the same "#47" as a live customer — and `serialHint`
+                // would jump Deep Sync to the wrong portal page.
+                'serial': 0,
+              },
+              where: 'account_number = ?',
+              whereArgs: [number],
+            );
+            closed.add(RdAccount.fromMap(
+                {...row, 'closed_at': now.toIso8601String(), 'serial': 0}));
+          }
         }
       }
       await batch.commit(noResult: true);
     });
-    return closed;
+    return MergeReport(closed: closed, refusedClosures: refused);
   }
 
   @override
@@ -337,12 +380,6 @@ class MemoryAccountRepository implements AccountRepository {
       if (a.accountNumber == accountNumber) return a;
     }
     return null;
-  }
-
-  @override
-  Future<void> setStatus(String accountNumber, CollectionStatus status) async {
-    final i = _items.indexWhere((a) => a.accountNumber == accountNumber);
-    if (i != -1) _items[i] = _items[i].copyWith(status: status);
   }
 
   /// copyWith can't null a field out, so clearing one means rebuilding the row.
@@ -419,7 +456,7 @@ class MemoryAccountRepository implements AccountRepository {
   }
 
   @override
-  Future<List<RdAccount>> replaceAll(List<RdAccount> accounts,
+  Future<MergeReport> replaceAll(List<RdAccount> accounts,
       {bool complete = false}) async {
     for (final a in accounts) {
       final i = _items.indexWhere((x) => x.accountNumber == a.accountNumber);
@@ -446,23 +483,30 @@ class MemoryAccountRepository implements AccountRepository {
       }
     }
 
-    if (!complete) return const [];
+    if (!complete) return MergeReport.none;
     final seen = {for (final a in accounts) a.accountNumber};
     final now = DateTime.now();
+    final liveCount = _items.where((a) => !a.isClosed).length;
+    final missing = [
+      for (var i = 0; i < _items.length; i++)
+        if (!_items[i].isClosed && !seen.contains(_items[i].accountNumber)) i
+    ];
+    // The same guard as the SQLite store — the preview must not disagree.
+    if (missing.length > AccountRepository.closureCeiling(liveCount)) {
+      return MergeReport(refusedClosures: missing.length);
+    }
     final closed = <RdAccount>[];
-    for (var i = 0; i < _items.length; i++) {
-      final a = _items[i];
-      if (seen.contains(a.accountNumber) || a.isClosed) continue;
-      _items[i] = a.copyWith(closedAt: now, serial: 0);
+    for (final i in missing) {
+      _items[i] = _items[i].copyWith(closedAt: now, serial: 0);
       closed.add(_items[i]);
     }
-    return closed;
+    return MergeReport(closed: closed);
   }
 
   @override
-  Future<List<RdAccount>> maturedSince(DateTime from) async =>
-      [..._items.where((a) => a.isClosed && !a.closedAt!.isBefore(from))]
-        ..sort((a, b) => b.closedAt!.compareTo(a.closedAt!));
+  Future<List<RdAccount>> maturedSince(DateTime from) async => [
+        ..._items.where((a) => a.isClosed && !a.closedAt!.isBefore(from))
+      ]..sort((a, b) => b.closedAt!.compareTo(a.closedAt!));
 
   @override
   Future<int> count() async => _items.where((a) => !a.isClosed).length;
