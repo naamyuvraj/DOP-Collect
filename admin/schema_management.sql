@@ -63,3 +63,21 @@ insert into public.app_config (key, value) values
   ('self_serve_billing', 'false'::jsonb),
   ('max_devices',        '3'::jsonb)
 on conflict (key) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- Admin session epoch — "sign out everywhere" for the dashboard.
+--
+-- Every admin session cookie carries the epoch it was minted under, and the
+-- dashboard gate refuses anything older than this value. Raising it (via
+-- DELETE /api/auth?all=1) invalidates every outstanding session at once.
+--
+-- Before this existed there was no way to revoke a session at all: the nonce
+-- inside the cookie was never recorded, so a copied cookie stayed valid for its
+-- full seven days and the only remedy was rotating AUTH_SECRET and redeploying.
+--
+-- Not a secret — it is an integer that says "sessions older than this are
+-- void" — so the existing "anon read config" policy is fine over it.
+-- ---------------------------------------------------------------------------
+insert into public.app_config (key, value) values
+  ('admin_session_epoch', '0'::jsonb)
+on conflict (key) do nothing;

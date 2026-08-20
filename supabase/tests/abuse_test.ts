@@ -223,6 +223,106 @@ Deno.test("S4: the owner can still update their own row", async () => {
   assertEquals(db.tables.devices[0].agent_name, "New Name");
 });
 
+// ---------------------------------------------------------------------------
+// S5 — forging telemetry for someone else's device
+// ---------------------------------------------------------------------------
+// The ownership check guarded `kind: "device"` only. `events` and `key_usage`
+// took `device_id` straight from the body, so a stranger could file events
+// against a verified agent's phone. That is not cosmetic: the dashboard reads
+// the most recent `sync_done` as that agent's BOOK SIZE, and counts OTP logins
+// as billable.
+
+Deno.test("S5: events cannot be filed against a verified agent's device", async () => {
+  const db = await seeded();
+  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1" });
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(ingest, {
+    kind: "event",
+    row: { device_id: "dev-mine", event: "sync_done", props: { accounts: 3 } },
+  }); // no token
+
+  assertEquals(res.status, 403);
+  assertEquals(res.json.error, "not_your_device");
+  assertEquals(db.tables.events.length, 0);
+});
+
+Deno.test("S5: another agent's token does not unlock this device either", async () => {
+  const db = await seeded();
+  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1" });
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(ingest, {
+    kind: "event",
+    row: { device_id: "dev-mine", event: "sync_done", props: { accounts: 3 } },
+    token: OTHER_TOKEN,
+  });
+
+  assertEquals(res.status, 403);
+  assertEquals(db.tables.events.length, 0);
+});
+
+Deno.test("S5: the header id wins over a body that claims another device", async () => {
+  const db = await seeded();
+  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1" });
+  begin(db, { env: BASE_ENV });
+
+  // An unverified phone naming a verified one in the body. It is allowed to
+  // write — as ITSELF, which is what the header says.
+  const res = await post(
+    ingest,
+    { kind: "event", row: { device_id: "dev-mine", event: "app_open" } },
+    { "x-device-id": "dev-stranger" },
+  );
+
+  assertEquals(res.json.ok, true);
+  assertEquals(db.tables.events.length, 1);
+  assertEquals(db.tables.events[0].device_id, "dev-stranger");
+});
+
+Deno.test("S5: the owner's own events still go through", async () => {
+  const db = await seeded();
+  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1" });
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(ingest, {
+    kind: "event",
+    row: { device_id: "dev-mine", event: "sync_done", props: { accounts: 465 } },
+    token: TOKEN,
+  }, { "x-device-id": "dev-mine" });
+
+  assertEquals(res.json.ok, true);
+  assertEquals(db.tables.events.length, 1);
+});
+
+Deno.test("S5: an unverified phone reports freely — first run is unchanged", async () => {
+  const db = await seeded();
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(
+    ingest,
+    { kind: "event", row: { device_id: "dev-fresh", event: "app_open" } },
+    { "x-device-id": "dev-fresh" },
+  );
+
+  assertEquals(res.json.ok, true);
+  assertEquals(db.tables.events.length, 1);
+});
+
+Deno.test("S5: key_usage is guarded the same way", async () => {
+  const db = await seeded();
+  db.tables.devices.push({ id: "dev-mine", account_id: "acct-1" });
+  begin(db, { env: BASE_ENV });
+
+  const res = await post(ingest, {
+    kind: "key_usage",
+    row: { device_id: "dev-mine", key_index: 2, model: "m", ok: true },
+  });
+
+  assertEquals(res.status, 403);
+  assertEquals(db.tables.key_usage.length, 0);
+});
+
 Deno.test("S4: a fresh install with no claim yet still reports normally", async () => {
   // Nothing to protect before verification — first-run telemetry is unchanged.
   const db = await seeded();

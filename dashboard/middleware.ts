@@ -7,6 +7,7 @@ import {
   securityHeaders,
   withinRate,
 } from "@/lib/guard";
+import { sessionEpoch } from "@/lib/sessionEpoch";
 
 const COOKIE = "dop_admin";
 const DEFAULT_SECRET = "dev-secret";
@@ -15,15 +16,26 @@ const DEFAULT_SECRET = "dev-secret";
 const PUBLIC_FILE =
   /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|txt|xml|json|webmanifest|woff2?|ttf|otf|map)$/i;
 
-// Verify the signed session token (nonce.exp.sig) using Web Crypto — the Node
-// `crypto` module isn't available in the Edge middleware runtime. Kept in sync
-// with lib/auth.ts (same HMAC-SHA256 over `nonce.exp`).
-async function verify(token: string | undefined, secret: string): Promise<boolean> {
+// Verify the signed session token (nonce.epoch.exp.sig) using Web Crypto — the
+// Node `crypto` module isn't available in the Edge middleware runtime. Kept in
+// sync with lib/auth.ts (same HMAC-SHA256 over `nonce.epoch.exp`).
+//
+// This is also where revocation is ENFORCED. `epoch` is the value of
+// app_config.admin_session_epoch when the cookie was minted; raising that value
+// signs every outstanding session out. The check lives here and not in the
+// in-route `isAuthed()` guards because reading the epoch is async and those are
+// sync — and because this gate runs first on every request anyway.
+async function verify(
+  token: string | undefined,
+  secret: string,
+  minEpoch: number
+): Promise<boolean> {
   if (!token) return false;
   const parts = token.split(".");
-  if (parts.length !== 3) return false;
-  const [nonce, exp, sig] = parts;
-  if (!nonce || !exp || !sig || Number(exp) < Date.now()) return false;
+  if (parts.length !== 4) return false;
+  const [nonce, epoch, exp, sig] = parts;
+  if (!nonce || !epoch || !exp || !sig || Number(exp) < Date.now()) return false;
+  if (!Number.isFinite(Number(epoch)) || Number(epoch) < minEpoch) return false;
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
@@ -34,7 +46,7 @@ async function verify(token: string | undefined, secret: string): Promise<boolea
   const s = await crypto.subtle.sign(
     "HMAC",
     key,
-    new TextEncoder().encode(`${nonce}.${exp}`)
+    new TextEncoder().encode(`${nonce}.${epoch}.${exp}`)
   );
   const expected = [...new Uint8Array(s)]
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -73,9 +85,16 @@ export async function middleware(req: NextRequest) {
   // broken image. On the login screen, which is the one page guaranteed to be
   // unauthenticated and the first thing anyone sees.
   //
-  // Safe to let through: these are files in public/, which are served to the
-  // world by definition, and no route ends in one of these extensions.
-  if (pathname.startsWith("/_next") || PUBLIC_FILE.test(pathname)) return pass();
+  // `/api/` is excluded explicitly, and that exclusion is the whole point of
+  // this line. The extension list is a claim about what lives in public/, but
+  // it reads as a claim about the URL — so the first route anyone adds ending
+  // in .json, .txt or .xml would become world-readable, silently, with no
+  // change to this file. An admin endpoint must never be one rename away from
+  // being public.
+  const isAsset =
+    !pathname.startsWith("/api/") &&
+    (pathname.startsWith("/_next") || PUBLIC_FILE.test(pathname));
+  if (isAsset) return pass();
 
   // 1. CSRF. Every state-changing request must say it came from here.
   if (isMutating(req.method) && !sameOrigin(req)) {
@@ -105,7 +124,11 @@ export async function middleware(req: NextRequest) {
   const ok =
     !!secret &&
     secret !== DEFAULT_SECRET &&
-    (await verify(req.cookies.get(COOKIE)?.value, secret));
+    (await verify(
+      req.cookies.get(COOKIE)?.value,
+      secret,
+      await sessionEpoch()
+    ));
   if (ok) return pass();
 
   // An unauthenticated API call gets a 401, not a redirect to an HTML page —

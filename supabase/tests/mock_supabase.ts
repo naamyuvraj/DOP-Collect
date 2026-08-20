@@ -34,7 +34,7 @@ export function newDb(seed: Partial<Db["tables"]> = {}): Db {
     tables: {
       app_config: [], accounts: [], device_sessions: [], devices: [],
       otp_codes: [], otp_requests: [], orders: [], payments: [],
-      plans: [], subscriptions: [],
+      plans: [], subscriptions: [], events: [], key_usage: [],
       ...seed,
     } as Record<string, Row[]>,
     unique: { payments: ["ref"] },

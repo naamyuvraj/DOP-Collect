@@ -76,32 +76,62 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 /**
- * A fresh, per-session signed token: `nonce.exp.sig` where
- * sig = HMAC-SHA256(AUTH_SECRET, `nonce.exp`). Unique per login (nonce) and
- * time-bound (exp), so the cookie is NOT the raw secret and rotating
- * AUTH_SECRET invalidates every existing session. Null if misconfigured.
+ * A fresh, per-session signed token: `nonce.epoch.exp.sig` where
+ * sig = HMAC-SHA256(AUTH_SECRET, `nonce.epoch.exp`). Unique per login (nonce),
+ * time-bound (exp), and revocable (epoch). The cookie is NOT the raw secret,
+ * and rotating AUTH_SECRET still invalidates every existing session. Null if
+ * misconfigured.
+ *
+ * [epoch] is the value from `sessionEpoch()` at the moment of login. Raising
+ * that value is what "sign out everywhere" does — see lib/sessionEpoch.ts.
  *
  * Defaults to [SESSION_DAYS]. Pass the cookie the matching maxAge — see
  * [SESSION_SECONDS].
  */
-export function mintToken(ttlDays = SESSION_DAYS): string | null {
+export function mintToken(epoch = 0, ttlDays = SESSION_DAYS): string | null {
   const secret = authSecret();
   if (!secret) return null;
   const nonce = randomBytes(16).toString("hex");
   const exp = Date.now() + ttlDays * 86400_000;
-  const body = `${nonce}.${exp}`;
+  const body = `${nonce}.${Math.floor(epoch)}.${exp}`;
   return `${body}.${sign(secret, body)}`;
 }
 
-/** Verify a token's signature + expiry (constant-time). */
-export function verifyToken(token: string | undefined | null): boolean {
+/** The epoch a token was minted under, or null if it is not a valid token. */
+export function tokenEpoch(token: string | undefined | null): number | null {
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length !== 4) return null;
+  const n = Number(parts[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Verify a token's signature + expiry (constant-time), and — when [minEpoch]
+ * is supplied — that it was not minted before the last "sign out everywhere".
+ *
+ * The epoch check is OPTIONAL here on purpose. Reading the current epoch is an
+ * async database call, and the twenty in-route `isAuthed()` guards are sync;
+ * making them async to re-check something the gate has already checked would
+ * be churn for no gain. `middleware.ts` runs on every request and passes it —
+ * that is where revocation is enforced. These guards remain what they always
+ * were: defence in depth against a route that somehow escapes the matcher.
+ */
+export function verifyToken(
+  token: string | undefined | null,
+  minEpoch?: number,
+): boolean {
   const secret = authSecret();
   if (!secret || !token) return false;
   const parts = token.split(".");
-  if (parts.length !== 3) return false;
-  const [nonce, exp, sig] = parts;
-  if (!nonce || !exp || !sig || Number(exp) < Date.now()) return false;
-  return timingSafeEqual(sign(secret, `${nonce}.${exp}`), sig);
+  if (parts.length !== 4) return false;
+  const [nonce, epoch, exp, sig] = parts;
+  if (!nonce || !epoch || !exp || !sig || Number(exp) < Date.now()) return false;
+  if (!timingSafeEqual(sign(secret, `${nonce}.${epoch}.${exp}`), sig)) {
+    return false;
+  }
+  if (minEpoch !== undefined && Number(epoch) < minEpoch) return false;
+  return true;
 }
 
 export const PENDING_COOKIE = "dop_admin_pending";

@@ -70,9 +70,41 @@ Deno.serve(async (req) => {
     if ((await bump(`${device}:d`, 86400)) > 5000) return json({ ok: false, error: "rate" }, 429);
     if ((await bump(`ip:${ip}`, 3600)) > 3000) return json({ ok: false, error: "rate" }, 429);
 
+    // --- Ownership, for every kind ------------------------------------------
+    // The device id is a random uuid the app makes up, so it proves nothing on
+    // its own. Once an install verifies its phone the `otp` function stamps
+    // `account_id` on the devices row; from then on only a live session for
+    // that account may write AS that device.
+    //
+    // This used to guard `kind: "device"` alone. `events` and `key_usage` took
+    // `device_id` straight from the BODY, so anyone who found this endpoint
+    // could attribute events to any device they liked — and the dashboard reads
+    // `sync_done` as an agent's book size and counts OTP logins as billable.
+    // Same rule, all three kinds, and the id now comes from the header.
+    const owns = async (id: string): Promise<boolean> => {
+      if (!id) return true;
+      const { data: existing } = await sb
+        .from("devices").select("account_id").eq("id", id).maybeSingle();
+      const claimed =
+        (existing as { account_id?: string | null } | null)?.account_id;
+      if (!claimed) return true; // never verified — still anonymous telemetry
+      const token = String(bodyToken ?? "");
+      if (!token) return false;
+      const { data: sess } = await sb
+        .from("device_sessions").select("account_id, revoked_at")
+        .eq("token_hash", await sha256(token)).maybeSingle();
+      return !!sess && !sess.revoked_at && sess.account_id === claimed;
+    };
+
     if (kind === "event") {
+      // The HEADER id, not the body's. A row that says it came from someone
+      // else's phone is exactly what this is here to stop.
+      const id = device === "anon" ? clip(row.device_id, 64) : device;
+      if (!(await owns(String(id ?? "")))) {
+        return json({ ok: false, error: "not_your_device" }, 403);
+      }
       const { error } = await sb.from("events").insert({
-        device_id: clip(row.device_id, 64),
+        device_id: id,
         event: clip(row.event, 64),
         props: row.props && typeof row.props === "object" ? row.props : {},
         app_version: clip(row.app_version, 32),
@@ -85,29 +117,11 @@ Deno.serve(async (req) => {
       const id = clip(row.id, 64);
       if (!id) return json({ ok: false, error: "id required" }, 400);
 
-      // --- Ownership -------------------------------------------------------
-      // The device id is a random uuid the app makes up, so it proves nothing:
-      // anyone holding the anon key could name someone else's id and rewrite
-      // their name, mobile and agent id. That row is what the admin panel reads
-      // an agent's identity from, so a forged write is not just noise.
-      //
-      // Once an install verifies its phone, the `otp` function stamps
-      // `account_id` on this row — that is the point it stops being anonymous
-      // telemetry and starts being an identity. From then on, only a live
-      // session for the SAME account may write it. Rows with no account_id yet
-      // (a fresh install reporting app_open, an agent still onboarding) stay
-      // open, so nothing about first-run changes.
-      const { data: existing } = await sb
-        .from("devices").select("account_id").eq("id", id).maybeSingle();
-      const claimed = (existing as { account_id?: string | null } | null)?.account_id;
-      if (claimed) {
-        const token = String(bodyToken ?? "");
-        const { data: sess } = token
-          ? await sb.from("device_sessions").select("account_id, revoked_at")
-              .eq("token_hash", await sha256(token)).maybeSingle()
-          : { data: null };
-        const ok = sess && !sess.revoked_at && sess.account_id === claimed;
-        if (!ok) return json({ ok: false, error: "not_your_device" }, 403);
+      // The devices row is what the admin panel reads an agent's identity
+      // from — name, mobile, agent id — so a forged write here is not just
+      // noise. See `owns` above for the rule.
+      if (!(await owns(String(id)))) {
+        return json({ ok: false, error: "not_your_device" }, 403);
       }
 
       // agent_id / sol_id (post-office branch) power per-agent + per-region
@@ -155,8 +169,12 @@ Deno.serve(async (req) => {
         return json({ ok: false, error: up.error.message }, 500);
       }
     } else if (kind === "key_usage") {
+      const id = device === "anon" ? clip(row.device_id, 64) : device;
+      if (!(await owns(String(id ?? "")))) {
+        return json({ ok: false, error: "not_your_device" }, 403);
+      }
       const { error } = await sb.from("key_usage").insert({
-        device_id: clip(row.device_id, 64),
+        device_id: id,
         key_index: Number(row.key_index) || 0,
         model: clip(row.model, 64),
         ok: !!row.ok,

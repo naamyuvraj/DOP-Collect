@@ -19,6 +19,7 @@ import {
   verifyAdminCode,
 } from "@/lib/adminOtp";
 import { admin, dbConfigured } from "@/lib/supabase";
+import { bumpSessionEpoch, sessionEpoch } from "@/lib/sessionEpoch";
 
 /**
  * Login, in two steps when the second factor is configured.
@@ -39,7 +40,11 @@ import { admin, dbConfigured } from "@/lib/supabase";
  */
 export async function POST(req: NextRequest) {
   const expected = adminId();
-  const token = mintToken();
+  // Stamp the session with the epoch current at login. Raising the epoch (see
+  // DELETE ?all=1) is what signs every outstanding session out — without it a
+  // cookie copied off a laptop was good for its full seven days and the only
+  // remedy was rotating AUTH_SECRET and redeploying.
+  const token = mintToken(await sessionEpoch());
   // Fail closed if the dashboard isn't properly configured — never fall back to
   // the "dopadmin" / "dev-secret" defaults.
   if (!expected || !token) {
@@ -167,7 +172,33 @@ function grantSession(token: string) {
   return res;
 }
 
-export async function DELETE() {
+/**
+ * Log out.
+ *
+ *   DELETE              -> this browser only: drop the cookie.
+ *   DELETE ?all=1       -> everywhere: raise the session epoch, which
+ *                          invalidates every cookie in existence including
+ *                          this one. For a laptop left somewhere.
+ *
+ * "Everywhere" needs a live session of its own — it is reached through the
+ * middleware gate like any other non-public route, so an unauthenticated caller
+ * never gets here. If the epoch cannot be written, say so: reporting a
+ * revocation that did not happen is worse than reporting the failure.
+ */
+export async function DELETE(req: NextRequest) {
+  const all = req.nextUrl.searchParams.get("all") === "1";
+  if (all) {
+    const epoch = await bumpSessionEpoch();
+    if (epoch === null) {
+      return NextResponse.json(
+        { ok: false, error: "revoke_failed" },
+        { status: 503 }
+      );
+    }
+    const res = NextResponse.json({ ok: true, revokedAll: true, epoch });
+    res.cookies.set(COOKIE, "", { path: "/", maxAge: 0 });
+    return res;
+  }
   const res = NextResponse.json({ ok: true });
   res.cookies.set(COOKIE, "", { path: "/", maxAge: 0 });
   return res;
