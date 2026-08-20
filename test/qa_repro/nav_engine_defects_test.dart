@@ -34,7 +34,7 @@ void main() {
     });
   });
 
-  group('N1 (FIXED) — a dropped click is retried, not hammered', () {
+  group('DEFECT N1 — a silently dropped click becomes a click storm', () {
     test('the portal drops every click: how many does the engine fire?',
         () async {
       boot(dashboardHtml);
@@ -57,7 +57,10 @@ void main() {
       expect(portal.totalClicks, lessThanOrEqualTo(4),
           reason: 'DEFECT N1: the engine re-clicks the same link on every '
               'slice of every hop with no backoff and no cap');
-    });
+    }, skip: 'DEFECT N1 — un-skip when navigateToAccountList backs off. A '
+        'first attempt (capped clicks + backoff) made the guard-page case hang '
+        'for the whole step timeout instead of giving up quietly, and could '
+        'not be verified against the real portal, so it was reverted.');
   });
 
   // NOTE (QA): the guard-page path was measured, NOT stormed — the engine
@@ -70,7 +73,7 @@ void main() {
   // report as an inspection finding with the EVIDENCE test below as its record.
 
   group('EVIDENCE — measurements the engineer will want (always run)', () {
-    test('dropped click: click count and wall clock stay bounded', () async {
+    test('dropped-click storm: click count and wall clock', () async {
       boot(dashboardHtml);
       portal.onEnquireClick = (p) => engine.notifyPageFinished();
       final sw = Stopwatch()..start();
@@ -79,9 +82,8 @@ void main() {
       // ignore: avoid_print
       print('    EVIDENCE N1: totalClicks=${portal.totalClicks} '
           'elapsed=${sw.elapsedMilliseconds}ms');
-      expect(portal.totalClicks, lessThanOrEqualTo(4),
-          reason: 'the storm is fixed: a dropped click is retried within a '
-              'hard ceiling, so this now records the ceiling holding');
+      expect(portal.totalClicks, greaterThan(4),
+          reason: 'documents the storm; delete when N1 is fixed');
     });
 
     test('guard page: engine gives up quietly, no blocked-page probe is issued',
