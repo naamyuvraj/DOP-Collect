@@ -8,9 +8,15 @@ import 'remote_config.dart';
 ///
 /// MainActivity turns it ON at onCreate, so the app is protected from its first
 /// frame — before any Dart has run, and before RemoteConfig has been read.
-/// Everything here can only relax it. The app can never start unprotected and
-/// get locked down a moment later, and a phone that cannot reach the config
-/// falls back to the cached value, or to blocked if it has never had one.
+/// Everything here can only relax it, so the app can never start unprotected
+/// and get locked down a moment later.
+///
+/// NOTE the fleet default is PERMISSIVE: `allow_screenshots` defaults to true,
+/// so a phone that has never reached the config unblocks itself once Dart runs.
+/// That is deliberate — an agent who needs to send a screenshot of a problem
+/// should not have to wait on a config fetch — but it means the block is only
+/// as good as the dashboard flag. The portal WebViews do not rely on it; they
+/// call [forceOn] regardless.
 class ScreenSecurity {
   ScreenSecurity._();
   static const _ch = MethodChannel('dop_collect/app');

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import '../../data/account_repository.dart';
 import '../../data/credentials.dart';
 import '../../data/portal/portal.dart';
 import '../../data/portal/portal_sync.dart';
+import '../../services/screen_security.dart';
 import '../../theme/app_theme.dart';
 
 /// Deep Sync: after login, crawls each account's detail page to pull opening
@@ -36,6 +38,12 @@ class _DeepSyncScreenState extends State<DeepSyncScreen> {
   @override
   void initState() {
     super.initState();
+    // Same live DOP banking login as SyncScreen, same password typed into it —
+    // so the same capture block, for as long as this screen is up. This screen
+    // was missed when SyncScreen was hardened: with screenshots allowed (the
+    // fleet default), a screen recorder or the recents thumbnail would catch a
+    // filled-in banking login here.
+    unawaited(ScreenSecurity.forceOn());
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent(DeepSyncScreen._desktopUa)
@@ -48,6 +56,13 @@ class _DeepSyncScreenState extends State<DeepSyncScreen> {
       ..loadRequest(Uri.parse(Portal.agentLoginUrl));
     _engine = PortalSyncEngine(_controller);
     _credsReady = Credentials.load().then((c) => _creds = c);
+  }
+
+  @override
+  void dispose() {
+    // Back to whatever the fleet setting says, however we left this screen.
+    unawaited(ScreenSecurity.applySaved());
+    super.dispose();
   }
 
   // Credentials are only ever typed on the real portal origin — the guard is
