@@ -21,6 +21,11 @@ import '../../services/analytics.dart';
 import '../../data/portal/portal_sync.dart';
 import '../../theme/app_theme.dart';
 
+/// Narrates the login phase into the same trace sink as the page walk. Every
+/// report of "it just sits there" happens BEFORE the walk starts, so the walk's
+/// own tracing never sees it — this is the only view of that phase.
+void _t(String m) => PortalSyncEngine.trace?.call(m);
+
 /// One-touch Sync. The WebView identifies as desktop Chrome (the legacy portal
 /// breaks under a mobile UA), auto-fills the saved Agent ID/password so only the
 /// captcha is typed, then on Sync it auto-navigates to the account list and
@@ -110,6 +115,17 @@ class _SyncScreenState extends State<SyncScreen> {
   bool _stopFill = false;
   bool _autoStarted = false;
   bool _solvingCaptcha = false;
+
+  /// True from the moment Log in is clicked until the portal has answered.
+  ///
+  /// The captcha solver runs on EVERY page-finish, and the portal's reply to a
+  /// login POST is itself a page-finish — so the solver would wake up, read the
+  /// fresh captcha on that reply, and click Log in again on top of a login
+  /// still in flight. Two submits, the second carrying a different captcha.
+  /// That is the whole of "it fills the right captcha but the login fails":
+  /// the app was racing itself, and each lap spent one of the four daily
+  /// attempts that stand between the agent and Finacle's account lockout.
+  bool _loginInFlight = false;
   bool _awaitingRef = false; // installments keyed; waiting for agent's Pay All
   String? _progress;
   Timer? _keepAliveTimer;
@@ -126,7 +142,8 @@ class _SyncScreenState extends State<SyncScreen> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setUserAgent(SyncScreen._desktopUa)
       ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (_) {
+        onPageFinished: (url) {
+          _t('page finished: $url');
           _engine.notifyPageFinished();
           unawaited(_resolveAutoLoginOutcome());
           _autofillIfLogin();
@@ -141,8 +158,26 @@ class _SyncScreenState extends State<SyncScreen> {
       ..loadRequest(Uri.parse(Portal.agentLoginUrl));
     _engine = PortalSyncEngine(_controller);
     _credsReady = Credentials.load().then((c) => _creds = c);
+    // The portal gives an authenticated session five minutes of idle
+    // (`#sessionTimeout` = 300 on every capture), so a two-minute nudge is the
+    // right cadence for a screen the agent is just looking at.
+    //
+    // It must NEVER fire during a sync. The keep-alive control is a form
+    // submit, so clicking it navigates — and a navigation posted on top of the
+    // page walk's own post is what made Finacle answer "You clicked on a link
+    // or a button when your previous click was still being processed", treat
+    // the out-of-sequence token as a replay, and end the session. That is the
+    // "sync reaches the account list, then says Session expired" report: the
+    // keep-alive was killing the thing it existed to protect. A walk needs no
+    // help anyway — every page it turns is itself a post, and a post is what
+    // resets the idle timer.
+    //
+    // Guarded twice on purpose: `_busy` covers everything this screen starts,
+    // and `PortalSyncEngine.isDriving` covers the engine's own operations
+    // whichever screen started them.
     _keepAliveTimer = Timer.periodic(const Duration(minutes: 2), (_) {
-      if (mounted) _engine.keepSessionAlive();
+      if (!mounted || _busy || _engine.isDriving) return;
+      unawaited(_engine.keepSessionAlive());
     });
   }
 
@@ -248,6 +283,116 @@ class _SyncScreenState extends State<SyncScreen> {
     })();
   ''';
 
+  /// Snapshot of the login form's device-fingerprint fields. The portal fills
+  /// these from its own JS after the page loads; a submit that beats them is
+  /// the leading suspect for "the first login of a session is always rejected".
+  static const _formStateJs = r'''
+    (function(){
+      function L(id){var e=document.getElementById(id);
+        return e?String(e.value||'').length:-1;}
+      function V(id){var e=document.getElementById(id);
+        return e?String(e.value||'') : '?';}
+      return 'dnaDone='+V('isDNADone')
+        +' deviceDNA='+L('deviceDNA')
+        +' fingerprint='+L('MACHINE_FINGER_PRINT')
+        +' mesc='+L('mesc')
+        +' iter='+V('mescIterationCount')
+        +' dnaError='+V('dnaError');
+    })();
+  ''';
+
+  /// Decide whether the login we just submitted was accepted, and say why not.
+  ///
+  /// Tied to one attempt on purpose: it waits for the portal to answer, then
+  /// reads the page ONCE. Being late here is not a cosmetic problem — the
+  /// day's failure count is what keeps the app clear of Finacle's ten-failed-
+  /// attempt account lockout, so a verdict attached to the wrong page is worse
+  /// than no verdict.
+  Future<void> _judgeLoginAttempt(String guess) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    var onLogin = true;
+    while (DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      try {
+        onLogin = _decode(
+                await _controller.runJavaScriptReturningResult(_onLoginPageJs))
+            .contains('true');
+      } catch (_) {
+        continue; // mid-navigation; the context will come back
+      }
+      if (!onLogin) break;
+    }
+    _loginInFlight = false;
+    if (!mounted) return;
+    if (!onLogin) {
+      await AppSettings.resetDailyAutoLoginCount();
+      _loginClicks = 0;
+      _t('auto-login: accepted ("$guess") — the day\'s failure count is cleared');
+      return;
+    }
+    final n = await AppSettings.incrementDailyAutoLoginCount();
+    final why =
+        _decode(await _controller.runJavaScriptReturningResult(_loginErrorJs));
+    _t('auto-login: REJECTED ("$guess") — day\'s failures now $n of 4 -> $why');
+    unawaited(_autoCapture('login_rejected'));
+  }
+
+  /// Whatever the login page is saying after a rejected submit — Finacle puts
+  /// its reason in a message block, and we were throwing it away.
+  static const _loginErrorJs = r'''
+    (function(){
+      function t(e){return e?(e.innerText||e.textContent||'')
+        .replace(/\s+/g,' ').trim():'';}
+      var out=[];
+      var sels='[role=alert], #MessageDisplay_TABLE, .orangebg, .redbg,'
+        +' .errorbg, span[class*="error" i], div[class*="error" i],'
+        +' font[color="red"], .validationError';
+      var els=document.querySelectorAll(sels);
+      for(var i=0;i<els.length;i++){
+        var s=t(els[i]);
+        if(s && s.length>2 && out.indexOf(s)===-1) out.push(s);
+      }
+      return out.length ? out.slice(0,3).join(' | ') : '(no message on page)';
+    })();
+  ''';
+
+  /// A cheap fingerprint of the captcha image currently on the page.
+  ///
+  /// The login page refreshes its captcha from an image `onload` handler
+  /// (`<img id="TEXTIMAGE" onload="captchaRefresh()">`). If that fires after we
+  /// have read the picture, the code we are holding answers an image the server
+  /// has already thrown away — so the submission is rejected with a captcha
+  /// that looks perfectly correct on screen. That is the "right captcha, still
+  /// fails" report: it costs one of the day's four auto-login attempts and then
+  /// quietly succeeds on the retry.
+  ///
+  /// Downscaled to 32x16 so this costs nothing to recompute; we only need to
+  /// know whether the picture CHANGED, not what it says.
+  static const _captchaSigJs = r'''
+    (function(){
+      var img = document.querySelector('#IMAGECAPTCHA')
+             || document.querySelector('img[id*="captcha" i]');
+      if(!img || !img.complete || !(img.naturalWidth||img.width)) return '';
+      try{
+        var c=document.createElement('canvas'); c.width=32; c.height=16;
+        var x=c.getContext('2d'); x.drawImage(img,0,0,32,16);
+        var d=x.getImageData(0,0,32,16).data, h=0;
+        for(var i=0;i<d.length;i+=4){ h=(h*31 + d[i])|0; }
+        return String(h);
+      }catch(e){ return 'taint'; }
+    })();
+  ''';
+
+  Future<String> _captchaSignature() async {
+    try {
+      return _decode(
+          await _controller.runJavaScriptReturningResult(_captchaSigJs));
+    } catch (_) {
+      return '';
+    }
+  }
+
   String _fillCaptchaJs(String code) => '''
     (function(){
       var f=document.querySelector('[name*="VERIFICATION_CODE" i]')
@@ -300,12 +445,34 @@ class _SyncScreenState extends State<SyncScreen> {
     if (!_autoLoginPending) return;
     _autoLoginPending = false;
     try {
-      final stillHere = _decode(
+      var stillHere = _decode(
           await _controller.runJavaScriptReturningResult(_onLoginPageJs));
       if (stillHere.contains('true')) {
-        await AppSettings.incrementDailyAutoLoginCount();
+        // Do not charge a failure off the FIRST page-finish. That event fires
+        // at document load, so a login that is succeeding can still be showing
+        // the login page at this instant — and charging it is how the day's
+        // budget reached 4/4 while every login was actually working. Give the
+        // navigation a moment and ask again; only a page that is STILL the
+        // login form after that is a real rejection.
+        await Future<void>.delayed(const Duration(seconds: 3));
+        if (!mounted) return;
+        stillHere = _decode(
+            await _controller.runJavaScriptReturningResult(_onLoginPageJs));
+      }
+      if (stillHere.contains('true')) {
+        final n = await AppSettings.incrementDailyAutoLoginCount();
+        // Read what the portal is actually complaining about. Two plausible
+        // causes have already been ruled out by measurement — the captcha
+        // image is unchanged at submit, and the device fingerprint is fully
+        // populated — so stop theorising and keep the page that said no.
+        final why = _decode(
+            await _controller.runJavaScriptReturningResult(_loginErrorJs));
+        _t('auto-login: REJECTED by the portal (day\'s failures now $n of 4) '
+            '-> $why');
+        unawaited(_autoCapture('login_rejected'));
       } else {
         await AppSettings.resetDailyAutoLoginCount();
+        _t('auto-login: accepted — the day\'s failure count is cleared');
       }
     } catch (_) {
       // Could not read the page. Charge the attempt: over-counting costs one
@@ -373,6 +540,32 @@ class _SyncScreenState extends State<SyncScreen> {
       _captchaAgain = true;
       return;
     }
+    // A login is already with the portal. Whatever page just finished is its
+    // answer, not a new login form to fill in — leave it alone until the
+    // attempt has been judged.
+    if (_loginInFlight) {
+      _t('captcha: skipped — a login is already in flight');
+      return;
+    }
+    // ONLY on the login page. This fires on every page-finish, so during a
+    // 48-page walk it ran the whole image scorer plus three ML Kit OCR passes
+    // on every page — against a scorer loose enough to accept a 120x22 spacer
+    // gif. That is CPU spent competing with the page walk on exactly the
+    // low-end handsets where pages already stall, and it can never find a
+    // captcha, because there is no captcha to find outside the login screen.
+    if (!manual) {
+      const probe = r"""
+        (function(){
+          return document.querySelector(
+            'input[name="AuthenticationFG.VERIFICATION_CODE"]')
+            ? 'true' : 'false';
+        })();
+      """;
+      final onLogin =
+          _decode(await _controller.runJavaScriptReturningResult(probe));
+      if (!onLogin.contains('true')) return;
+    }
+
     _solvingCaptcha = true;
     if (manual) _captchaTries = 0;
     try {
@@ -392,6 +585,7 @@ class _SyncScreenState extends State<SyncScreen> {
       final dbg = (res['dbg'] as String?) ?? '';
 
       if (variants.isEmpty && loading && _captchaTries < 6) {
+        _t('captcha: image still loading, retry ${_captchaTries + 1}/6 ($dbg)');
         _captchaTries++;
         _solvingCaptcha = false;
         Future.delayed(const Duration(milliseconds: 600), () {
@@ -439,11 +633,14 @@ class _SyncScreenState extends State<SyncScreen> {
       // submit counts toward the 2-per-screen lockout guard (a failed find /
       // disabled button is never burned).
       if (plausible == null) {
+        _t('captcha: OCR gave "$guess" — not plausible, waiting for a human');
         if (mounted) {
           _snack('Captcha read as "$guess" — check it, then tap Login.');
         }
         return;
       }
+      final sigAtSolve = await _captchaSignature();
+      _t('captcha: solved as "$guess"');
 
       // Gate the auto-submit on the credentials being present. A wrong captcha
       // costs one attempt out of ten; an empty login costs the same attempt and
@@ -451,6 +648,8 @@ class _SyncScreenState extends State<SyncScreen> {
       final credsIn = _decode(
           await _controller.runJavaScriptReturningResult(_credsFilledJs));
       if (!credsIn.contains('true')) {
+        _t('auto-submit: BLOCKED — the login fields read back empty. This is '
+            'C3: the captcha timer beat the Keystore read, and nothing retries.');
         if (mounted) {
           _snack('Captcha filled: $guess — add your Agent ID and password, '
               'then tap Login.');
@@ -459,23 +658,66 @@ class _SyncScreenState extends State<SyncScreen> {
       }
 
       final dailyAttempts = await AppSettings.dailyAutoLoginCount();
+      _t('auto-submit: loginClicks=$_loginClicks dailyAttempts=$dailyAttempts');
       if (_loginClicks < 4 && dailyAttempts < 4) {
         for (var attempt = 0; attempt < 10; attempt++) {
           await Future<void>.delayed(const Duration(milliseconds: 500));
           if (!mounted) return;
+          // The picture must still be the one we read. If the portal swapped
+          // it under us, our code is now an answer to an image the server has
+          // discarded — submitting it burns one of the day's four attempts on
+          // a login that cannot possibly succeed.
+          // What state is the FORM in at the moment we submit? The first
+          // auto-login of a session is consistently rejected and the second
+          // accepted, with the captcha demonstrably unchanged — so something
+          // else on this page is not ready. The portal fills a device
+          // fingerprint from its own JS (deviceDNA, MACHINE_FINGER_PRINT,
+          // isDNADone); submitting before that finishes is the obvious
+          // candidate. Log it rather than guess again.
+          final formState = _decode(
+              await _controller.runJavaScriptReturningResult(_formStateJs));
+          _t('auto-submit: form at submit -> $formState');
+          final sigNow = await _captchaSignature();
+          if (sigAtSolve.isNotEmpty &&
+              sigNow.isNotEmpty &&
+              sigNow != sigAtSolve) {
+            _t('auto-submit: ABORTED — the captcha image changed after we read '
+                'it ($sigAtSolve -> $sigNow). Re-solving instead of spending '
+                'an attempt on a stale code.');
+            _solvingCaptcha = false;
+            _captchaTries = 0;
+            unawaited(
+                Future<void>.delayed(const Duration(milliseconds: 400), () {
+              if (mounted) _autofillCaptcha();
+            }));
+            return;
+          }
           final clicked =
               _decode(await _controller.runJavaScriptReturningResult(_loginJs));
           if (clicked.contains('true')) {
             _loginClicks++;
-            // Not counted here. The counter guards Finacle's ten-FAILED-attempt
-            // lockout, and we do not yet know whether this one failed —
-            // _resolveAutoLoginOutcome decides when the next page lands.
-            _autoLoginPending = true;
+            _t('auto-submit: Log in clicked on poll $attempt');
             if (mounted) _snack('Captcha $guess — logging in…');
+            // Judge THIS attempt, here, rather than from the next page-finish
+            // callback. That callback fires for every load and resolved
+            // asynchronously, so with a settle delay it ended up scoring
+            // whatever page happened to be showing later — both a failed and a
+            // successful attempt were logged "accepted", and the counter that
+            // protects the agent from Finacle's ten-failure lockout stopped
+            // counting failures at all.
+            _autoLoginPending = false;
+            _loginInFlight = true;
+            unawaited(_judgeLoginAttempt(guess));
             return;
           }
         }
       }
+      _t(_loginClicks >= 4 || dailyAttempts >= 4
+          ? 'auto-submit: NOT ATTEMPTED — the day\'s auto-login budget is '
+              'spent (loginClicks=$_loginClicks dailyAttempts=$dailyAttempts). '
+              'The form is filled; a human tap will still work.'
+          : 'auto-submit: gave up — the Log in button never enabled in 10 '
+              'polls (J1: our fill sends no keydown/keypress, no focus)');
       if (mounted) {
         if (dailyAttempts >= 4) {
           _snack(
@@ -485,6 +727,7 @@ class _SyncScreenState extends State<SyncScreen> {
         }
       }
     } catch (e) {
+      _t('captcha: threw $e');
       if (manual) _snack('Captcha auto-fill failed: $e');
     } finally {
       _solvingCaptcha = false;
@@ -515,7 +758,12 @@ class _SyncScreenState extends State<SyncScreen> {
   /// keypad after load.
   Future<void> _autofillIfLogin() async {
     await _credsReady; // never lose the race to a fast page load again
-    if (!_creds.hasAny) return;
+    if (!_creds.hasAny) {
+      _t('autofill: SKIPPED — no credentials stored (id="${_creds.agentId}", '
+          'password ${_creds.password.isEmpty ? "empty" : "present"})');
+      return;
+    }
+    _t('autofill: typing agent id + password');
     final idVal = jsonEncode(_creds.agentId);
     final pwVal = jsonEncode(_creds.password);
     final js = '''
@@ -544,6 +792,18 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _maybeAutoStart() async {
     if (_busy || _autoStarted) return;
     final authed = await _engine.isAuthenticated();
+    _t('auto-start: authenticated=$authed (A1: probed once, no settle)');
+    if (authed) {
+      // We are inside the portal, so Finacle has accepted a login and cleared
+      // its own failed-attempt counter. Ours must clear too, and it must clear
+      // for a MANUAL login as well — the old code only ever reset when the app
+      // itself had clicked, so an agent who typed his own password stayed
+      // stuck at "daily auto-login limit reached" for the rest of the day
+      // while logging in perfectly well by hand.
+      _autoLoginPending = false;
+      _loginClicks = 0;
+      unawaited(AppSettings.resetDailyAutoLoginCount());
+    }
     if (authed && !_busy && !_autoStarted) {
       _autoStarted = true;
       if (widget.isBatch) {
@@ -1225,6 +1485,9 @@ class _SyncScreenState extends State<SyncScreen> {
             () => _progress = 'Page $page of $total · $count accounts'),
       );
       if (result.accounts.isEmpty) {
+        // Nothing read at all. Keep the page that caused it — a failed sync
+        // costs a real login, so it must leave evidence behind.
+        await _autoCapture('empty');
         _snack(result.error ?? 'No accounts found.');
         return;
       }
@@ -1293,8 +1556,31 @@ class _SyncScreenState extends State<SyncScreen> {
       final dropped = result.rejected == 0
           ? ''
           : ' ${result.rejected} row(s) could not be read and were skipped.';
+      // Accounts that have reached their 60-month term: the portal still lists
+      // them but leaves the due date blank, so they are not collectible and not
+      // errors. Said separately from `dropped` because the two call for
+      // completely different reactions — one is a month's maturities, the other
+      // is the app failing to read his book.
+      // Record the matured rows BEFORE composing the message, so what the
+      // agent is told matches what he will find under Settings → Matured
+      // Accounts. These used to be counted and discarded: the book held fewer
+      // customers than the portal listed, and on a first sync they did not even
+      // appear as closures, because there was nothing yet to close.
+      final maturedStored = result.maturedRows.isEmpty
+          ? 0
+          : await widget.repo.recordMatured(result.maturedRows);
+      // Point at Settings only when something was actually written there —
+      // telling him to go and look at an empty list is worse than saying
+      // nothing. `maturedStored` is 0 when every matured row was already
+      // recorded on an earlier sync.
+      final matured = result.matured == 0
+          ? ''
+          : maturedStored == 0
+              ? ' ${result.matured} account(s) have reached term.'
+              : ' ${result.matured} account(s) have reached term — '
+                  'see Settings → Matured Accounts.';
       _snack(result.error ??
-          'Synced ${result.accounts.length} accounts.$closedNote$dropped'
+          'Synced ${result.accounts.length} accounts.$closedNote$matured$dropped'
               '${closed.isEmpty ? ' Run Deep Sync for last-deposit dates.' : ''}');
       // Fast list sync only. Exact per-account figures (last deposit etc.) are
       // fetched separately via the "Deep Sync" button.
@@ -1370,12 +1656,12 @@ class _SyncScreenState extends State<SyncScreen> {
   /// What the page LOOKS like, so a capture is self-describing even if the
   /// person sending it does not know what they were on.
   static String _pageKind(String html) {
-    if (html.contains('Session is Expired') || html.contains('Session Expired')) {
+    if (html.contains('Session is Expired') ||
+        html.contains('Session Expired')) {
       return 'session_expired';
     }
     if (html.contains('AuthenticationFG.ACCESS_CODE')) return 'login';
-    if (RegExp(r'Page\s+\d+\s+of\s+\d+', caseSensitive: false)
-        .hasMatch(html)) {
+    if (RegExp(r'Page\s+\d+\s+of\s+\d+', caseSensitive: false).hasMatch(html)) {
       return 'account_list';
     }
     if (html.contains('Enquire')) return 'dashboard';
@@ -1389,6 +1675,27 @@ class _SyncScreenState extends State<SyncScreen> {
   /// paste into a chat — so the one artefact that makes a scraping bug
   /// diagnosable in minutes instead of guesses was the one thing that could not
   /// be got off the phone. The clipboard copy stays as a fallback.
+  /// Save the current page to the app cache without opening a share sheet.
+  ///
+  /// Called automatically when a sync fails to reach the list. Each attempt
+  /// costs a real login against Finacle's ten-failed-attempt lockout, so a
+  /// failure that leaves nothing behind to look at is an expensive way to
+  /// learn nothing — which is most of this project's debugging history. The
+  /// file stays in the app's private cache; nothing is uploaded or shared.
+  Future<void> _autoCapture(String why) async {
+    try {
+      final html = _decode(await _controller
+          .runJavaScriptReturningResult('document.documentElement.outerHTML'));
+      if (html.isEmpty) return;
+      final dir = await getTemporaryDirectory();
+      final name = 'autocapture__${_pageKind(html)}__$why.html';
+      await File('${dir.path}/$name').writeAsString(html);
+      _t('captured the failing page: $name (${html.length} chars)');
+    } catch (e) {
+      _t('auto-capture failed: $e');
+    }
+  }
+
   Future<void> _copyHtml() async {
     try {
       final html = _decode(await _controller
