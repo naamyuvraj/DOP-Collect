@@ -169,34 +169,50 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   Widget _details(RdAccount a) {
     final term = _termYears ?? a.termYears;
     return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
-            children: [
-              _headerCard(a),
-              const SizedBox(height: 14),
-              if (!a.hasExactDetail) _exactDetailPrompt(a),
-              _maturityCard(a, term),
-              const SizedBox(height: 12),
-              _tileGrid([
-                _tile('Monthly RD', inr(a.denominationAmount)),
-                _tile('Month Paid', '${a.monthsPaid}'),
-                _tile('Short Code', a.serial > 0 ? '${a.serial}' : '—'),
-                _tile('Rate', '${a.annualRate}%'),
-                _tile('Total Deposited', inr(a.depositedAmount)),
-                _tile('Next Due', a.dueDateLabel),
-                _tile('Opened On', a.openingDateLabel),
-                _tile('Last Deposit', a.lastDepositLabel),
-                _tile('Pending', '${a.installmentsToMaturity}'),
-                // This account's OWN ASLAAS (the portal keeps a different one
-                // per account). Falls back to the old agency-wide setting only
-                // until this account's real number is known.
-                _tile('ASLAAS', _aslaasOf(a), onTap: () => _editAslaas(a)),
-              ]),
-              const SizedBox(height: 18),
-              _collectionCard(a),
-              // Edit Profile / Add Collection / WhatsApp CTAs were all
-              // "coming soon" no-ops — hidden until they actually do something,
-              // so every tap here isn't teaching him the buttons are decorative.
-            ],
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+      children: [
+        _headerCard(a),
+        const SizedBox(height: 14),
+        if (!a.hasExactDetail) _exactDetailPrompt(a),
+        _maturityCard(a, term),
+        const SizedBox(height: 12),
+        _tileGrid([
+          _tile('Monthly RD', inr(a.denominationAmount)),
+          _tile('Month Paid', '${a.monthsPaid}'),
+          _tile('Short Code', a.serial > 0 ? '${a.serial}' : '—'),
+          _tile('Rate', '${a.annualRate}%'),
+          _tile('Total Deposited', inr(a.depositedAmount)),
+          // A matured account carries a PLACEHOLDER next-due date — the
+          // portal leaves that cell blank once the term ends, so the
+          // stored value is just the day the sync noticed. Everything
+          // derived from it is therefore invented: the opening date is
+          // computed backwards from it, and so is the pending count.
+          //
+          // Say "Not available" rather than print a confident wrong
+          // date. The real opening date does exist on the portal's own
+          // account page, so Deep Sync can fill it in — and once it has,
+          // `openingDate` is set and the true value is shown here.
+          _tile('Next Due', a.isClosed ? '—' : a.dueDateLabel),
+          _tile(
+              'Opened On',
+              a.openingDate != null
+                  ? a.openingDateLabel
+                  : a.isClosed
+                      ? 'Not available'
+                      : a.openingDateLabel),
+          _tile('Last Deposit', a.lastDepositLabel),
+          _tile('Pending', a.isClosed ? '—' : '${a.installmentsToMaturity}'),
+          // This account's OWN ASLAAS (the portal keeps a different one
+          // per account). Falls back to the old agency-wide setting only
+          // until this account's real number is known.
+          _tile('ASLAAS', _aslaasOf(a), onTap: () => _editAslaas(a)),
+        ]),
+        const SizedBox(height: 18),
+        _collectionCard(a),
+        // Edit Profile / Add Collection / WhatsApp CTAs were all
+        // "coming soon" no-ops — hidden until they actually do something,
+        // so every tap here isn't teaching him the buttons are decorative.
+      ],
     );
   }
 
@@ -219,13 +235,15 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    _stepBtn(Icons.remove, AppTheme.red, () => _setTerm(term - 1)),
+                    _stepBtn(
+                        Icons.remove, AppTheme.red, () => _setTerm(term - 1)),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Text('$term Year',
                           style: AppTheme.display(18, weight: FontWeight.w800)),
                     ),
-                    _stepBtn(Icons.add, AppTheme.green, () => _setTerm(term + 1)),
+                    _stepBtn(
+                        Icons.add, AppTheme.green, () => _setTerm(term + 1)),
                   ],
                 ),
                 if (_termYears != null && _termYears != a.termYears) ...[
@@ -250,7 +268,8 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                 const SizedBox(height: 6),
                 _kv('Paid Amount', inr(paid)),
                 const SizedBox(height: 6),
-                Text('Maturity Amount', style: AppTheme.label(AppTheme.inkMuted)),
+                Text('Maturity Amount',
+                    style: AppTheme.label(AppTheme.inkMuted)),
                 const SizedBox(height: 2),
                 FittedBox(
                   fit: BoxFit.scaleDown,
@@ -296,8 +315,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       decoration: AppTheme.panel(AppTheme.blueSoft, radius: 16),
       child: Row(
         children: [
-          Icon(Icons.cloud_download_outlined,
-              color: AppTheme.accent, size: 22),
+          Icon(Icons.cloud_download_outlined, color: AppTheme.accent, size: 22),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -392,13 +410,15 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
           Row(
             children: [
               Expanded(
-                child: _miniStat('Collected',
+                child: _miniStat(
+                    'Collected',
                     deposited ? inr(a.denominationAmount) : inr(0),
                     AppTheme.green),
               ),
               Container(width: 1, height: 34, color: AppTheme.divider),
               Expanded(
-                child: _miniStat('Pending',
+                child: _miniStat(
+                    'Pending',
                     deposited ? inr(0) : inr(a.denominationAmount),
                     AppTheme.red),
               ),
@@ -415,7 +435,8 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       children: [
         Text(label, style: AppTheme.body(12, color: AppTheme.inkMuted)),
         const SizedBox(height: 4),
-        Text(value, style: AppTheme.display(19, weight: FontWeight.w800, color: color)),
+        Text(value,
+            style: AppTheme.display(19, weight: FontWeight.w800, color: color)),
       ],
     );
   }

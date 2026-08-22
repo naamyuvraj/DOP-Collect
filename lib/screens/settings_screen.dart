@@ -18,7 +18,6 @@ import 'debug_breakdown.dart';
 import 'onboarding_login.dart';
 import 'paywall_screen.dart';
 import 'khata_backup_screen.dart';
-import 'matured_accounts_screen.dart';
 import 'privacy_screen.dart';
 import 'rd_rates_screen.dart';
 import 'portal/sync_screen.dart';
@@ -155,28 +154,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _btn('Sync Collection', _sync, primary: true),
           _btn('Deep Sync · last deposit', _deepSync, primary: true),
           _btn('Get ASLAAS numbers', _getAslaas, primary: true),
-          _btn(
-              'Matured Accounts',
-              () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => MaturedAccountsScreen(
-                      repo: widget.repo, collections: widget.collections)))),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
-            child: Text(
-                'Accounts that closed in the last month, and their khata.',
-                style: AppTheme.body(12, color: AppTheme.inkFaint)),
-          ),
+          // Matured Accounts lived here and is now on the home screen, under
+          // Portfolio → Maturity, where finished accounts sit beside the ones
+          // about to finish. One place for maturity, and it is the place he
+          // already looks.
 
           const SizedBox(height: 8),
           _heading('TOOLS'),
           _btn(
               'Interest Calculator',
-              () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const CalculatorScreen()))),
+              () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const CalculatorScreen()))),
           _btn(
               'RD Interest Rates',
-              () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const RdRatesScreen()))),
+              () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RdRatesScreen()))),
 
           const SizedBox(height: 8),
           _heading('APP'),
@@ -187,8 +179,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // needs to KNOW is on that screen, one tap below.
           _btn(
               'Subscription',
-              () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const PaywallScreen()))),
+              () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const PaywallScreen()))),
           if (widget.onTour != null)
             _btn('Take a tour', () => widget.onTour!()),
           _btn(
@@ -197,8 +189,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (_) => const KhataBackupScreen()))),
           _btn(
               'Privacy & Safety',
-              () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => const PrivacyScreen()))),
+              () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const PrivacyScreen()))),
           if (_versionTaps >= 7)
             _btn(
                 'Data breakdown (debug)',

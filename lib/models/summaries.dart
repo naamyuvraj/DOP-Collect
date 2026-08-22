@@ -85,6 +85,16 @@ enum AccountFilter {
       (a.nextDueDate.year * 12 + a.nextDueDate.month);
 
   bool test(RdAccount a, DateTime now) {
+    // A CLOSED account has run its term. Its stored `nextDueDate` is only a
+    // placeholder — the portal never tells us a real one for a matured
+    // account — so every date-derived bucket below would be answering a
+    // question about a date nobody chose. Left unguarded, a matured customer
+    // computes as `behind == 0` and lands in Pending, i.e. on the collection
+    // round, which is the one place he must never appear.
+    //
+    // He belongs to Maturity and nothing else. Not `all` either: `all` backs
+    // the book's headline count, and the book is the live customers.
+    if (a.isClosed) return this == maturity;
     final behind = monthsBehind(a, now);
     // Pending/Deposited/Defaulter are derived from the portal Next Due Date
     // (matches the core app), not local collection marking:

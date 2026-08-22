@@ -2,17 +2,62 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 
 import '../../models/rd_account.dart';
+import 'portal_dom.dart';
+
+/// An account the portal lists with **no next installment due** — it has run
+/// its full term.
+///
+/// Deliberately NOT an [RdAccount]: that model requires a `nextDueDate`, and
+/// the absence of one is exactly what makes this row matured. Inventing a date
+/// to fit the model is what the old `DateTime(2000)` sentinel did, and it put
+/// accounts 320 months in arrears and inflated the dashboard by lakhs. The
+/// caller stamps these closed with the sync date instead, which is a fact it
+/// actually knows.
+class MaturedRow {
+  const MaturedRow({
+    required this.accountNumber,
+    required this.customerName,
+    required this.denominationAmount,
+    required this.monthsPaid,
+  });
+  final String accountNumber;
+  final String customerName;
+  final int denominationAmount;
+  final int monthsPaid;
+}
 
 /// One page of the listing, plus what could not be read from it.
 ///
 /// [rejected] counts data rows that looked like accounts but carried a cell
 /// this parser could not turn into a real value. They are DROPPED rather than
 /// guessed at — see [AgentListParser.parse].
+///
+/// [matured] is different and must not be lumped in with it: the portal leaves
+/// "Next RD Installment Due Date" **blank** once an account reaches its
+/// 60-month term, and on a real capture that was 2 rows in 10. Those are
+/// perfectly good rows about perfectly real customers; the parser used to count
+/// them as failures, which made a routine month of maturities look like the
+/// table had gone bad.
 class ParsedPage {
-  const ParsedPage(this.accounts, {this.rejected = 0});
+  const ParsedPage(this.accounts,
+      {this.rejected = 0, this.maturedRows = const <MaturedRow>[]});
   final List<RdAccount> accounts;
   final int rejected;
+
+  /// The matured rows themselves. They used to be counted and thrown away,
+  /// which meant the agent's book silently held fewer customers than the
+  /// portal did, with nothing on screen to say which ones were missing.
+  final List<MaturedRow> maturedRows;
+  int get matured => maturedRows.length;
   static const empty = ParsedPage(<RdAccount>[]);
+
+  /// True when the page yielded nothing at all — no accounts, no rejects, no
+  /// maturities. That means the table did not render, which is a failure; a
+  /// page that yielded only maturities is a success and must not read as one.
+  bool get isEmpty => accounts.isEmpty && rejected == 0 && matured == 0;
+
+  /// Every data row the page held, however it was classified.
+  int get rows => accounts.length + rejected + matured;
 }
 
 /// Parses the DOP "Agent Inquire and Update" account table (Finacle
@@ -51,6 +96,15 @@ class AgentListParser {
   /// collection, which is worse and far harder to notice.
   static ParsedPage parse(String htmlSource) {
     final doc = html_parser.parse(htmlSource);
+    // Finacle labels every cell with a stable per-field id. Use those when they
+    // are there; fall back to reading the table by column position when they
+    // are not.
+    final structured = _parseByRowIds(doc);
+    if (structured != null) return structured;
+    return _parseByTable(doc);
+  }
+
+  static ParsedPage _parseByTable(dom.Document doc) {
     final table = _findDataTable(doc);
     if (table == null) return ParsedPage.empty;
 
@@ -81,6 +135,7 @@ class AgentListParser {
 
     final out = <RdAccount>[];
     var rejected = 0;
+    final maturedRows = <MaturedRow>[];
     for (final row in rows.skip(headerRowIndex + 1)) {
       final cells = _cells(row).map((c) => c.text.trim()).toList();
       final acct = _digits(_at(cells, cols[_Field.account]));
@@ -89,10 +144,26 @@ class AgentListParser {
       // Anything that was not a data row at all was skipped above. From here
       // on the row IS an account, so an unreadable cell is a real failure and
       // gets counted rather than papered over with a sentinel.
-      final due = _date(_at(cells, cols[_Field.dueDate]));
+      final rawDue = _clean(_at(cells, cols[_Field.dueDate]) ?? '');
+      final due = _date(rawDue);
       final denomination = _money(_at(cells, cols[_Field.denomination]));
-      if (due == null || denomination <= 0) {
+      if (denomination <= 0) {
         rejected++;
+        continue;
+      }
+      if (due == null) {
+        // Blank means the account has reached term, not that the cell failed
+        // to parse. Keep the row — see [ParsedPage.maturedRows].
+        if (rawDue.isEmpty) {
+          maturedRows.add(MaturedRow(
+            accountNumber: acct,
+            customerName: _at(cells, cols[_Field.name])?.trim() ?? '',
+            denominationAmount: denomination,
+            monthsPaid: _intVal(_at(cells, cols[_Field.monthsPaid])),
+          ));
+        } else {
+          rejected++;
+        }
         continue;
       }
 
@@ -104,12 +175,106 @@ class AgentListParser {
         monthsPaid: _intVal(_at(cells, cols[_Field.monthsPaid])),
       ));
     }
-    return ParsedPage(out, rejected: rejected);
+    return ParsedPage(out, rejected: rejected, maturedRows: maturedRows);
   }
 
   /// Accounts only — the shape most callers want.
   static List<RdAccount> parsePage(String htmlSource) =>
       parse(htmlSource).accounts;
+
+  // --- Structured read (preferred) -----------------------------------------
+
+  /// Read the rows straight off Finacle's own per-field element ids.
+  ///
+  /// Every cell on the listing carries a stable id of the form
+  /// `HREF_CustomAgentRDAccountFG.<FIELD>_ALL_ARRAY[i]` — the account number on
+  /// an `<a>`, the rest on `<span class="searchsimpletext">`. Reading those is
+  /// strictly better than reading by column position: it does not care what
+  /// order the columns are in, whether the leading "Select" checkbox column is
+  /// there, or how the headers are worded. Column-position parsing is kept as
+  /// the fallback for the day the portal is rebuilt and these ids change.
+  ///
+  /// Returns null when the page carries no such ids at all, so the caller can
+  /// fall back rather than mistake "different markup" for "no accounts".
+  static ParsedPage? _parseByRowIds(dom.Document doc) {
+    const prefix = PortalDom.rowIdPrefix;
+    final byId = <String, String>{};
+    for (final el in [
+      ...doc.querySelectorAll('a'),
+      ...doc.querySelectorAll('span'),
+    ]) {
+      final id = el.id;
+      if (id.startsWith(prefix)) byId[id] = _clean(el.text);
+    }
+    if (byId.isEmpty) return null;
+
+    String? cell(String field, int i) => byId['$prefix$field[$i]'];
+
+    // Row indices are 0-based and contiguous, but read them off the ids rather
+    // than assuming — a page with fewer than the usual ten rows is the last one.
+    final indices = <int>{};
+    final idxRe =
+        RegExp('^${RegExp.escape(prefix)}${PortalDom.accountNumberArray}'
+            r'\[(\d+)\]$');
+    for (final id in byId.keys) {
+      final m = idxRe.firstMatch(id);
+      if (m != null) indices.add(int.parse(m.group(1)!));
+    }
+    if (indices.isEmpty) return null;
+
+    final ordered = indices.toList()..sort();
+    final out = <RdAccount>[];
+    var rejected = 0;
+    final maturedRows = <MaturedRow>[];
+
+    for (final i in ordered) {
+      final acct = _digits(cell(PortalDom.accountNumberArray, i));
+      if (!_looksLikeAccount(acct)) continue;
+
+      final denomination = _money(cell(PortalDom.depositAmountArray, i));
+      final rawDue = cell(PortalDom.nextDueDateArray, i) ?? '';
+      final due = _date(rawDue);
+
+      // A denomination that will not read is a broken row — every arrears sum
+      // downstream is denomination times months, so a zero there quietly marks
+      // the customer fully paid and drops him off the round.
+      if (denomination <= 0) {
+        rejected++;
+        continue;
+      }
+      // A BLANK due date is not a broken row. The portal empties that cell when
+      // an account has reached term, so this is the parser being told "nothing
+      // further is due", not the parser failing.
+      if (due == null) {
+        if (rawDue.trim().isEmpty) {
+          maturedRows.add(MaturedRow(
+            accountNumber: acct,
+            customerName: cell(PortalDom.accountNameArray, i)?.trim() ?? '',
+            denominationAmount: denomination,
+            monthsPaid: _intVal(cell(PortalDom.monthPaidUptoArray, i)),
+          ));
+        } else {
+          rejected++;
+        }
+        continue;
+      }
+
+      out.add(RdAccount(
+        accountNumber: acct,
+        customerName: cell(PortalDom.accountNameArray, i)?.trim() ?? '',
+        denominationAmount: denomination,
+        nextDueDate: due,
+        monthsPaid: _intVal(cell(PortalDom.monthPaidUptoArray, i)),
+      ));
+    }
+    return ParsedPage(out, rejected: rejected, maturedRows: maturedRows);
+  }
+
+  /// Collapse the portal's whitespace, including the `&nbsp;` it puts in an
+  /// empty due-date cell — which arrives as U+00A0 and is not caught by
+  /// `String.trim()` in every position we care about.
+  static String _clean(String s) =>
+      s.replaceAll(' ', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
 
   // --- Table location ------------------------------------------------------
 

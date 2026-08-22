@@ -70,7 +70,26 @@ class _AccountListScreenState extends State<AccountListScreen> {
   }
 
   void _reload() {
-    _future = _query.isEmpty ? widget.repo.all() : widget.repo.search(_query);
+    if (_query.isNotEmpty) {
+      _future = widget.repo.search(_query);
+      return;
+    }
+    // The Maturity list is the one place an account that has FINISHED belongs
+    // alongside the ones about to. `repo.all()` returns live accounts only, so
+    // without this the accounts that actually reached term — the whole point of
+    // the bucket — were the ones you could not see here.
+    //
+    // Safe to mix only because Maturity sits under Portfolio, which is
+    // informational. It is not a collection round, and each finished account
+    // renders with a "Matured" chip so it cannot be mistaken for one to visit.
+    if (widget.filter == AccountFilter.maturity) {
+      _future = Future.wait([
+        widget.repo.all(),
+        widget.repo.maturedSince(maturedFrom(DateTime.now())),
+      ]).then((r) => [...r[0], ...r[1]]);
+      return;
+    }
+    _future = widget.repo.all();
   }
 
   /// Debounce the SQLite search so it doesn't fire on every keystroke on a
@@ -88,8 +107,23 @@ class _AccountListScreenState extends State<AccountListScreen> {
   }
 
   List<RdAccount> _apply(List<RdAccount> all) {
-    final filtered =
-        widget.filter == null ? all : widget.filter!.filter(all, DateTime.now());
+    // A closed account has no next installment, so the "installments left"
+    // rule cannot speak for it — it has already arrived. Keep it regardless of
+    // what the filter computes, and let the filter judge the live ones.
+    if (widget.filter == AccountFilter.maturity) {
+      final now = DateTime.now();
+      final live = all.where((a) => !a.isClosed).toList();
+      final done = all.where((a) => a.isClosed).toList();
+      final filtered = [
+        ...done,
+        ...AccountFilter.maturity.filter(live, now),
+      ];
+      if (_sort == null) return filtered;
+      return [...filtered]..sort(_sort!.comparator);
+    }
+    final filtered = widget.filter == null
+        ? all
+        : widget.filter!.filter(all, DateTime.now());
     if (_sort == null) return filtered;
     return [...filtered]..sort(_sort!.comparator);
   }
@@ -196,8 +230,8 @@ class _AccountListScreenState extends State<AccountListScreen> {
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
                       curve: Curves.easeOut,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 7),
                       decoration: m == current
                           ? AppTheme.card(
                               fill: AppTheme.black,

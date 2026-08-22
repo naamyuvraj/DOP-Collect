@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../data/account_repository.dart';
 import '../data/collection_repository.dart';
@@ -24,7 +23,8 @@ import 'portfolio_screen.dart';
 /// and check what the customer paid in, short enough that it never becomes a
 /// second, stale book.
 class MaturedAccountsScreen extends StatefulWidget {
-  const MaturedAccountsScreen({super.key, required this.repo, this.collections});
+  const MaturedAccountsScreen(
+      {super.key, required this.repo, this.collections});
 
   final AccountRepository repo;
 
@@ -102,7 +102,6 @@ class _MaturedAccountsScreenState extends State<MaturedAccountsScreen> {
       );
 
   Widget _row(RdAccount a) {
-    final closedOn = DateFormat('dd-MMM-yyyy').format(a.closedAt!);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
       child: Material(
@@ -147,12 +146,10 @@ class _MaturedAccountsScreenState extends State<MaturedAccountsScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 9, vertical: 4),
-                      decoration:
-                          AppTheme.panel(AppTheme.greenSoft, radius: 8),
+                      decoration: AppTheme.panel(AppTheme.greenSoft, radius: 8),
                       child: Text('Closed',
                           style: AppTheme.body(12,
-                              weight: FontWeight.w800,
-                              color: AppTheme.green)),
+                              weight: FontWeight.w800, color: AppTheme.green)),
                     ),
                   ],
                 ),
@@ -162,7 +159,12 @@ class _MaturedAccountsScreenState extends State<MaturedAccountsScreen> {
                 // month) is exactly the bug this screen exists to end.
                 Row(
                   children: [
-                    _fact('Closed on', closedOn),
+                    // No "Closed on". That date is when the SYNC noticed the
+                    // account was gone, not when it matured — the portal never
+                    // tells us the latter. Printing a precise-looking date for
+                    // something we do not know invites it being read back as
+                    // fact at a counter, and it is the same mistake the old
+                    // DateTime(2000) due-date sentinel made.
                     _fact('Paid in', inr(a.depositedAmount)),
                     _fact('Installments', '${a.monthsPaid}'),
                   ],
@@ -181,8 +183,7 @@ class _MaturedAccountsScreenState extends State<MaturedAccountsScreen> {
           children: [
             Text(label, style: AppTheme.label(AppTheme.inkFaint)),
             const SizedBox(height: 3),
-            Text(value,
-                style: AppTheme.body(13.5, weight: FontWeight.w700)),
+            Text(value, style: AppTheme.body(13.5, weight: FontWeight.w700)),
           ],
         ),
       );

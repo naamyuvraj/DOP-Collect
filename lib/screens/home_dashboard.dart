@@ -48,7 +48,15 @@ class _HomeDashboardState extends State<HomeDashboard> {
   @override
   void initState() {
     super.initState();
-    _future = widget.repo.all();
+    // Matured accounts too. `repo.all()` is live-only, so without this the
+    // Maturity card counted 7 while its own list showed 10 — the card and the
+    // screen it opens disagreed, which is worse than either number alone.
+    // Every other bucket filters them out anyway: a closed account is not
+    // behind, not due, and not new.
+    _future = Future.wait([
+      widget.repo.all(),
+      widget.repo.maturedSince(maturedFrom(DateTime.now())),
+    ]).then((r) => [...r[0], ...r[1]]);
     _loadProfile();
   }
 
@@ -79,7 +87,15 @@ class _HomeDashboardState extends State<HomeDashboard> {
     // Block body so the closure returns void, not the Future (setState rejects
     // a returned Future).
     setState(() {
-      _future = widget.repo.all();
+      // Matured accounts too. `repo.all()` is live-only, so without this the
+      // Maturity card counted 7 while its own list showed 10 — the card and the
+      // screen it opens disagreed, which is worse than either number alone.
+      // Every other bucket filters them out anyway: a closed account is not
+      // behind, not due, and not new.
+      _future = Future.wait([
+        widget.repo.all(),
+        widget.repo.maturedSince(maturedFrom(DateTime.now())),
+      ]).then((r) => [...r[0], ...r[1]]);
     });
     AppSettings.lastSyncMs().then((v) {
       if (mounted) setState(() => _lastSyncMs = v);

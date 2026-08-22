@@ -4,6 +4,7 @@ import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import '../models/rd_account.dart';
 import 'database.dart';
+import 'portal/agent_list_parser.dart';
 import 'portal/agent_detail_parser.dart';
 
 /// Start of the window in which a closed account is still shown under
@@ -115,6 +116,21 @@ abstract class AccountRepository {
   /// Accounts closed on or after [from], newest closure first. Backs the
   /// Settings → Matured Accounts list; see [maturedFrom] for the window.
   Future<List<RdAccount>> maturedSince(DateTime from);
+
+  /// Record accounts the portal still lists but with no next installment due —
+  /// they have run their full term. Stored CLOSED, so they show under
+  /// Settings → Matured Accounts and are excluded from the round and from
+  /// every dashboard total.
+  ///
+  /// Without this they were counted by the parser and then dropped, so the
+  /// book quietly held fewer customers than the portal did and there was
+  /// nothing on screen naming which ones were missing. On a first sync into an
+  /// empty book they did not even show as closures, because there was nothing
+  /// there to close.
+  ///
+  /// Returns how many rows were newly recorded (an account already live in the
+  /// book is left alone — see the implementation for why).
+  Future<int> recordMatured(List<MaturedRow> rows, {DateTime? asOf});
 
   /// Live accounts only.
   Future<int> count();
@@ -326,6 +342,54 @@ class SqfliteAccountRepository implements AccountRepository {
   }
 
   @override
+  Future<int> recordMatured(List<MaturedRow> rows, {DateTime? asOf}) async {
+    if (rows.isEmpty) return 0;
+    final now = asOf ?? DateTime.now();
+    final db = await _db.database;
+    var written = 0;
+    await db.transaction((txn) async {
+      for (final r in rows) {
+        final existing = await txn.query('accounts',
+            where: 'account_number = ?',
+            whereArgs: [r.accountNumber],
+            limit: 1);
+        if (existing.isNotEmpty) {
+          // Already known. Only stamp it closed if it is not already — never
+          // move an existing closure date, or a re-sync would keep pushing the
+          // account back to the top of Matured Accounts every month.
+          if (existing.first['closed_at'] == null) {
+            await txn.update(
+                'accounts', {'closed_at': now.toIso8601String(), 'serial': 0},
+                where: 'account_number = ?', whereArgs: [r.accountNumber]);
+            written++;
+          }
+          continue;
+        }
+        // New to the book and already matured — the case that used to vanish
+        // entirely, because a first sync has nothing to "close".
+        //
+        // `next_due_date` is set to the closure date rather than invented: the
+        // account has no next installment, that is what matured means, and the
+        // Matured Accounts screen never renders this field. Storing it closed
+        // keeps it out of the round and out of every dashboard total.
+        await txn.insert(
+            'accounts',
+            RdAccount(
+              accountNumber: r.accountNumber,
+              customerName: r.customerName,
+              denominationAmount: r.denominationAmount,
+              nextDueDate: now,
+              monthsPaid: r.monthsPaid,
+              closedAt: now,
+            ).toMap(),
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        written++;
+      }
+    });
+    return written;
+  }
+
+  @override
   Future<int> count() async {
     final db = await _db.database;
     final r = await db
@@ -507,6 +571,32 @@ class MemoryAccountRepository implements AccountRepository {
   Future<List<RdAccount>> maturedSince(DateTime from) async => [
         ..._items.where((a) => a.isClosed && !a.closedAt!.isBefore(from))
       ]..sort((a, b) => b.closedAt!.compareTo(a.closedAt!));
+
+  @override
+  Future<int> recordMatured(List<MaturedRow> rows, {DateTime? asOf}) async {
+    final now = asOf ?? DateTime.now();
+    var written = 0;
+    for (final r in rows) {
+      final i = _items.indexWhere((a) => a.accountNumber == r.accountNumber);
+      if (i >= 0) {
+        if (!_items[i].isClosed) {
+          _items[i] = _items[i].copyWith(closedAt: now, serial: 0);
+          written++;
+        }
+        continue;
+      }
+      _items.add(RdAccount(
+        accountNumber: r.accountNumber,
+        customerName: r.customerName,
+        denominationAmount: r.denominationAmount,
+        nextDueDate: now,
+        monthsPaid: r.monthsPaid,
+        closedAt: now,
+      ));
+      written++;
+    }
+    return written;
+  }
 
   @override
   Future<int> count() async => _items.where((a) => !a.isClosed).length;
