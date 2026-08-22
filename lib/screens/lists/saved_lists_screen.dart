@@ -515,11 +515,13 @@ class _SavedListsScreenState extends State<SavedListsScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // `spacing` here is letterSpacing in logical pixels, not a
+                  // gap between widgets. At 10 it pushed 16 characters roughly
+                  // 160px apart, so "Submit on Portal" spread itself across
+                  // the whole row as loose letters.
                   Text('Submit on Portal',
                       style: AppTheme.body(12.5,
-                              weight: FontWeight.w800,
-                              color: AppTheme.green,
-                              spacing: 10)
+                              weight: FontWeight.w800, color: AppTheme.green)
                           .copyWith(
                               decoration: TextDecoration.underline,
                               decorationColor: AppTheme.green)),
