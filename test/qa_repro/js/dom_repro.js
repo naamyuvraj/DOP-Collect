@@ -19,22 +19,31 @@ function dom(html) {
 }
 const run = (d, js) => d.window.eval(js);
 
-// ── D5a ─ _clickLinkByText clicks the wrapping <td>, never the anchor ────────
-check('J2-1', 'menu anchor WITHOUT name/id=Enquire: the <td> is clicked, the link is not', () => {
+// ── J2 (FIXED) ─ _clickLinkByText must resolve DOWN to the anchor ───────────
+check('J2-1', 'menu anchor WITHOUT name/id=Enquire: the anchor is clicked, not its cell', () => {
   const d = dom(`<table><tr>
      <td id="cell"><a id="link" href="/AgentRDActSummaryAllListing">Agent Enquire &amp; Update Screen</a></td>
    </tr></table>`);
   const w = d.window;
-  let navigated = false, tdClicked = false;
+  let navigated = false, tdTargeted = false;
   w.document.getElementById('link').addEventListener('click', () => { navigated = true; });
   w.document.getElementById('cell').addEventListener('click', (e) => {
-    if (e.target.id === 'cell') tdClicked = true;
+    if (e.target.id === 'cell') tdTargeted = true;
   });
   const r = run(d, X.clickLinkByTextJs(X.ENQUIRE_NEEDLES));
   assert(r === 'true', `script reported "${r}", expected "true"`);
-  assert(tdClicked, 'expected the <td> to receive the click');
-  assert(!navigated, 'BUG NOT REPRODUCED: the anchor was actually clicked');
-  return 'script returns "true" (caller believes it navigated) but the <td> got the click; anchor never fired';
+  assert(navigated, 'the anchor should have received the click');
+  assert(!tdTargeted, 'REGRESSION: the <td> was clicked again — see J2-3');
+  return 'querySelector("a") resolves down to the anchor before closest() walks up; the cell is not clicked';
+});
+
+check('J2-1b', 'a text match on something with no control in it is NOT a click', () => {
+  // The other half of the fix. Reporting "true" for a click that cannot
+  // navigate sends the caller off waiting for a page that will never come.
+  const d = dom(`<div><span id="label">Agent Enquire &amp; Update Screen</span></div>`);
+  const r = run(d, X.clickLinkByTextJs(X.ENQUIRE_NEEDLES));
+  assert(r === 'false', `expected "false" for a bare <span>, got "${r}"`);
+  return 'a <span> with no anchor or button inside reports false instead of a phantom success';
 });
 
 check('J2-2', 'the same DOM WITH name*="Enquire" is handled correctly by _clickSelector', () => {
@@ -46,17 +55,17 @@ check('J2-2', 'the same DOM WITH name*="Enquire" is handled correctly by _clickS
   const r = run(d, X.clickSelectorJs('a[name*="Enquire"], a[id*="Enquire"]'));
   assert(r === 'true', 'selector path should click');
   assert(navigated, 'anchor should have been clicked on the fast path');
-  return 'fast path is fine — the defect only bites when the anchor lacks name/id';
+  return 'the fast path was always fine; J2-1 covers the fallback that was not';
 });
 
-check('J2-3', 'document order proves the <td> is always reached before its own anchor', () => {
+check('J2-3', 'document order is why the fix has to look DOWN, not just up', () => {
   const d = dom(`<table><tr><td id="cell"><a id="link">Agent Enquire &amp; Update Screen</a></td></tr></table>`);
   const els = [...d.window.document.querySelectorAll('a, input[type=button], input[type=submit], button, span, td')];
   const ids = els.map(e => e.id);
   assert(ids.indexOf('cell') < ids.indexOf('link'), 'expected td before a');
   const td = d.window.document.getElementById('cell');
   assert(td.closest('a') === null, 'closest() should not find a descendant anchor');
-  return `querySelectorAll order = [${ids}]; td.closest('a') === null, so the fallback clicks the cell`;
+  return `querySelectorAll order = [${ids}] — the cell is always seen first, and td.closest('a') === null, so upward resolution alone can never reach the link`;
 });
 
 // ── D3 ─ captcha fill: which events fire, and does it focus? ─────────────────

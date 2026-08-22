@@ -57,6 +57,11 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Drives the sync engine against tool/mock_portal.py in a REAL Android
+  # WebView. Every sync defect so far has been navigation timing, which no
+  # amount of string-parsing in a unit test can reproduce.
+  integration_test:
+    sdk: flutter
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.13.1
 

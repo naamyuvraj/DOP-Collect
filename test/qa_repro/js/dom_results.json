@@ -1,21 +1,27 @@
 [
   {
     "id": "J2-1",
-    "desc": "menu anchor WITHOUT name/id=Enquire: the <td> is clicked, the link is not",
+    "desc": "menu anchor WITHOUT name/id=Enquire: the anchor is clicked, not its cell",
     "ok": true,
-    "note": "script returns \"true\" (caller believes it navigated) but the <td> got the click; anchor never fired"
+    "note": "querySelector(\"a\") resolves down to the anchor before closest() walks up; the cell is not clicked"
+  },
+  {
+    "id": "J2-1b",
+    "desc": "a text match on something with no control in it is NOT a click",
+    "ok": true,
+    "note": "a <span> with no anchor or button inside reports false instead of a phantom success"
   },
   {
     "id": "J2-2",
     "desc": "the same DOM WITH name*=\"Enquire\" is handled correctly by _clickSelector",
     "ok": true,
-    "note": "fast path is fine — the defect only bites when the anchor lacks name/id"
+    "note": "the fast path was always fine; J2-1 covers the fallback that was not"
   },
   {
     "id": "J2-3",
-    "desc": "document order proves the <td> is always reached before its own anchor",
+    "desc": "document order is why the fix has to look DOWN, not just up",
     "ok": true,
-    "note": "querySelectorAll order = [cell,link]; td.closest('a') === null, so the fallback clicks the cell"
+    "note": "querySelectorAll order = [cell,link] — the cell is always seen first, and td.closest('a') === null, so upward resolution alone can never reach the link"
   },
   {
     "id": "J1-1",

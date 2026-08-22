@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../models/rd_account.dart';
 import 'agent_detail_parser.dart';
 import 'agent_list_parser.dart';
+import 'portal_dom.dart';
 import 'aslaas_report_parser.dart';
 import 'saved_installments_parser.dart';
 
@@ -16,6 +18,59 @@ import 'saved_installments_parser.dart';
 /// tried and the page never came back". The last one is a failure and must not
 /// be mistaken for the second.
 enum PageAdvance { moved, lastPage, stalled }
+
+/// Why the walk could not reach the account list.
+///
+/// This used to be a bare `false`, and the screen rendered every one of these
+/// as "Open Accounts → Agent Inquire and Update, then tap Sync." For a spent
+/// session that advice cannot work — only a fresh login clears a dead token —
+/// so the agent followed it, failed, and repeated. Keep the reasons apart so
+/// the remedy offered is one that can actually succeed.
+enum NavFailure {
+  /// Reached it. Not a failure.
+  none,
+
+  /// The portal's "Your Session is Expired" interstitial. Needs a new login.
+  sessionExpired,
+
+  /// Finacle's stale-transaction-token guard. Also needs a new login.
+  blocked,
+
+  /// We clicked the right things and the list never rendered.
+  stalled,
+
+  /// Login has not happened (or has lapsed back to the login page).
+  notLoggedIn,
+}
+
+/// Outcome of [PortalSyncEngine.navigateToAccountListDetailed].
+class NavResult {
+  const NavResult(this.reached,
+      {this.failure = NavFailure.none, this.hops = 0});
+  final bool reached;
+  final NavFailure failure;
+
+  /// How many navigating clicks the walk spent. Kept for the acceptance tests,
+  /// which assert this stays small — see [PortalSyncEngine._maxNavClicks].
+  final int hops;
+
+  /// What to tell the agent — phrased as the next thing to do, not as a
+  /// diagnosis. He is standing in someone's doorway holding cash.
+  String get message {
+    switch (failure) {
+      case NavFailure.none:
+        return '';
+      case NavFailure.sessionExpired:
+      case NavFailure.notLoggedIn:
+        return 'The portal ended this session. Log in again, then tap Sync.';
+      case NavFailure.blocked:
+        return 'The portal blocked this session. Log in again, then tap Sync.';
+      case NavFailure.stalled:
+        return 'Could not open the account list. Check the signal and tap '
+            'Sync again.';
+    }
+  }
+}
 
 /// Result of an auto-sync attempt.
 class SyncResult {
@@ -37,11 +92,20 @@ class SyncResult {
   /// accounts than the portal holds, and he is told so.
   final int rejected;
 
+  /// Rows that are real accounts with no next installment due — the portal
+  /// leaves that cell blank once an RD reaches its 60-month term. They are not
+  /// corrupt data and they are not [rejected]; they are simply finished, and
+  /// counting them apart is what keeps a book full of maturities from reading
+  /// as a book full of parse failures.
+  final List<MaturedRow> maturedRows;
+  int get matured => maturedRows.length;
+
   const SyncResult(this.accounts,
       {this.reachedList = true,
       this.error,
       this.complete = true,
-      this.rejected = 0});
+      this.rejected = 0,
+      this.maturedRows = const <MaturedRow>[]});
 }
 
 /// Result of preparing a bulk list on the portal (mode + account selection +
@@ -103,11 +167,44 @@ class PortalSyncEngine {
   final WebViewController controller;
   Completer<void>? _pageLoad;
 
+  /// How many operations currently own the page.
+  ///
+  /// The portal is single-threaded from its own point of view: it mints one
+  /// transaction token per navigation and treats a second post arriving before
+  /// the first has rendered as a replay. Anything that navigates must therefore
+  /// take this lock, and anything *optional* that navigates — the keep-alive is
+  /// the only one — must decline to run while it is held.
+  int _pageOwners = 0;
+
+  /// True while a walk (or any navigating operation) owns the page.
+  bool get isDriving => _pageOwners > 0;
+
+  /// Run [body] as the sole owner of the page.
+  Future<T> _drive<T>(Future<T> Function() body) async {
+    _pageOwners++;
+    try {
+      return await body();
+    } finally {
+      _pageOwners--;
+    }
+  }
+
   void notifyPageFinished() {
     final c = _pageLoad;
     if (c != null && !c.isCompleted) {
       c.complete();
     }
+  }
+
+  /// Wait out Finacle's "previous click was still being processed" banner.
+  ///
+  /// The banner is not an error: the portal honoured the FIRST click and the
+  /// page underneath is the right one. It means only that we posted too fast.
+  /// So the correct response is to stop clicking and let it settle — clicking
+  /// again is what escalates this into a dead session.
+  Future<void> _yieldIfBusy(String html) async {
+    if (!PortalDom.isBusyBanner(html)) return;
+    await Future<void>.delayed(const Duration(seconds: 2));
   }
 
   // --- Low-level DOM reads -------------------------------------------------
@@ -129,11 +226,12 @@ class PortalSyncEngine {
   Future<List<RdAccount>> parseCurrentPage() async =>
       AgentListParser.parsePage(await currentPageHtml());
 
-  Future<bool> _isSessionExpired() async {
-    final html = await currentPageHtml();
-    return html.contains('Session is Expired') ||
-        html.contains('Session Expired');
-  }
+  Future<bool> _isSessionExpired() async =>
+      PortalDom.sessionExpiredMarkers.any((await currentPageHtml()).contains);
+
+  /// Which portal screen is on the WebView right now.
+  Future<PortalScreen> currentScreen() async =>
+      PortalDom.classify(await currentPageHtml());
 
   /// Detects Finacle's stale-transaction-token guard page — "Please close this
   /// window and try accessing the application in a new browser window." — shown
@@ -143,8 +241,7 @@ class PortalSyncEngine {
   /// ending after one account.
   Future<bool> _isBlockedPage() async {
     final html = (await currentPageHtml()).toLowerCase();
-    return html.contains('close this window') &&
-        html.contains('new browser window');
+    return PortalDom.blockedMarkers.every(html.contains);
   }
 
   /// Is the account list currently rendered? (has the table + "Page X of N").
@@ -160,22 +257,29 @@ class PortalSyncEngine {
   /// i.e. login succeeded. Detected by the authenticated menu / pagination
   /// controls, which the login page doesn't have.
   Future<bool> isAuthenticated() async {
-    const js =
-        "(function(){return (document.querySelector('#Accounts, a[name=\"HREF_Accounts\"], input[name*=\"GOTO_NEXT\"]')) ? 'true' : 'false';})();";
+    final js = '(function(){return document.querySelector('
+        '${jsonEncode(PortalDom.authenticatedMarker)}) ? "true" : "false";})();';
     return _unwrap(await controller.runJavaScriptReturningResult(js))
         .contains('true');
   }
 
-  static bool _hasAccountTable(String html) {
-    final lower = html.toLowerCase();
-    return (lower.contains('account no') || lower.contains('account name')) &&
-        RegExp(r'Page\s+\d+\s+of\s+\d+', caseSensitive: false).hasMatch(html);
-  }
+  static bool _hasAccountTable(String html) =>
+      PortalDom.classify(html) == PortalScreen.list;
 
   static int totalPages(String html) {
-    final m = RegExp(r'Page\s+\d+\s+of\s+(\d+)', caseSensitive: false)
-        .firstMatch(html);
-    return m != null ? int.parse(m.group(1)!) : 1;
+    final m = PortalDom.pageOfRe.firstMatch(html);
+    return m != null ? int.parse(m.group(2)!) : 1;
+  }
+
+  /// How many accounts the portal says the agent has, off
+  /// "Displaying 1 - 10 of 480 results". 0 when the banner isn't there.
+  ///
+  /// Worth reading because it is an independent check on the walk: 48 pages of
+  /// 10 should be 480, and if the two disagree the walk missed something the
+  /// page-by-page bookkeeping did not notice.
+  static int advertisedTotal(String html) {
+    final m = PortalDom.displayingRe.firstMatch(html);
+    return m != null ? int.parse(m.group(3)!) : 0;
   }
 
   /// Which page the portal says is on screen right now — the X in "Page X of N",
@@ -188,104 +292,416 @@ class PortalSyncEngine {
   /// forty-seven times adds nothing, finishes without error, and reports a
   /// COMPLETE sync holding ten accounts — which then closes the other 455.
   static int currentPage(String html) {
-    final m = RegExp(r'Page\s+(\d+)\s+of\s+\d+', caseSensitive: false)
-        .firstMatch(html);
+    final m = PortalDom.pageOfRe.firstMatch(html);
     return m != null ? int.parse(m.group(1)!) : 0;
   }
 
   // --- Auto-navigation -----------------------------------------------------
 
-  /// Reach the account list from wherever login lands.
+  /// Where the walk narrates what it is doing.
   ///
-  /// Confirmed from real captures, login lands on the **Dashboard**. The path to
-  /// the list is: click "Accounts" (a menu link with id="Accounts") -> then the
-  /// "Agent Enquire & Update Screen" link that appears -> the list (Page 1/47).
-  /// This walks that path, preferring the Enquire link when it's already
-  /// present, and falls back to opening the Accounts menu first.
-  Future<bool> navigateToAccountList({
-    Duration stepTimeout = const Duration(seconds: 45),
-  }) async {
-    for (var hop = 0; hop < 4; hop++) {
-      if (await _onListPage()) return true;
+  /// Every sync defect in this file's history has been a race — a click the
+  /// portal dropped, a page-finish that fired early, a screen misread — and
+  /// none of them leave a trace in a stack. The single most expensive gap in
+  /// diagnosing them has been having no way to see the decisions the walk took
+  /// on the handset, in order, with timings.
+  ///
+  /// Static rather than per-instance on purpose: it can be redirected by a hot
+  /// reload without rebuilding the screen that owns the engine, which is the
+  /// difference between watching a live portal session and having to start one
+  /// over. Silent in release.
+  static void Function(String message)? trace =
+      kDebugMode ? ((m) => debugPrint('[sync] $m')) : null;
 
-      // Arm the page-load wait BEFORE clicking so a fast navigation can't
-      // complete before we start listening.
-      _pageLoad = Completer<void>();
+  static final _traceClock = Stopwatch()..start();
 
-      // The "Agent Enquire & Update Screen" step is the slow one: the portal can
-      // silently drop the click, or the session can lapse, while we wait. So
-      // rather than blocking for the whole timeout, wait in ~11s slices and
-      // AUTO-CLICK the link again each slice it's still loading.
-      const slice = Duration(seconds: 11);
-
-      var clicked = await _clickEnquireLink();
-      // …otherwise open the Accounts menu (stable id) to reveal it.
-      clicked = clicked ||
-          await _clickSelector(
-              '#Accounts, a[name="HREF_Accounts"], #Accounts a');
-
-      if (!clicked) {
-        // NOTHING TO CLICK IS NOT THE SAME AS NOWHERE TO GO. The Enquire link
-        // leaves the DOM the moment its navigation starts, so the commonest
-        // reason there is nothing to click is that we already clicked and the
-        // page is on its way. Breaking here returned false while the list was
-        // still arriving — the agent saw "Could not open the account list" and
-        // then watched the list open behind the message.
-        //
-        // Give an in-flight load the same slice a click would have got, and
-        // only then give up.
-        await _awaitLoad(slice);
-        await _settle();
-        if (await _onListPage()) return true;
-        _pageLoad = null;
-        break;
-      }
-      final tries = (stepTimeout.inSeconds ~/ slice.inSeconds).clamp(1, 5);
-      for (var t = 0; t < tries; t++) {
-        await _awaitLoad(slice);
-        await _settle();
-        if (await _onListPage()) return true;
-        if (await _isSessionExpired()) return false;
-        // Still not there — nudge the Enquire link again and wait another
-        // slice. If it has gone, the navigation it started is probably still
-        // running: fall out to the outer hop, which re-checks the page rather
-        // than treating a missing link as a dead end.
-        _pageLoad = Completer<void>();
-        if (!await _clickEnquireLink()) {
-          _pageLoad = null;
-          break;
-        }
-      }
-    }
-    // One last settle before answering: the walk can arrive here with a load
-    // still painting, and a false here becomes "Could not open the account
-    // list" on a screen that is about to show exactly that list.
-    await _settle();
-    return _onListPage();
+  static void _t(String message) {
+    final f = trace;
+    if (f != null) f('+${_traceClock.elapsedMilliseconds}ms $message');
   }
 
-  /// Click the "Agent Enquire & Update Screen" link — by its stable name/id
-  /// first (exact from the portal DOM), then by visible text. Returns true if
-  /// something was clicked.
+  /// The most navigating clicks one walk to the list may spend.
+  ///
+  /// The path is exactly two clicks (Accounts, then Enquire), so four is one
+  /// full retry plus slack. The ceiling exists because Finacle reads a burst of
+  /// posts on one link as a replay attack and kills the session — the previous
+  /// engine measured **20 clicks in 5.6 s** against a portal that dropped one
+  /// click, which is very likely what was poisoning sessions in the first place.
+  ///
+  /// An earlier attempt at this ceiling was reverted because it charged failed
+  /// *lookups* as clicks, and the Enquire link is legitimately absent until the
+  /// Accounts menu has been opened. Only clicks that actually landed are
+  /// counted here, and the walk now knows which screen it is on, so it never
+  /// reaches for a link that cannot be there yet.
+  static const _maxNavClicks = 4;
+
+  /// How long one click is given to produce a new page.
+  ///
+  /// Measured on the live portal: Accounts answers in ~3.5 s, Enquire in ~17 s.
+  /// Twenty-five gives the slow one real headroom without letting a swallowed
+  /// click eat a whole 75 s budget on its own.
+  static const _clickPatience = Duration(seconds: 25);
+
+  /// Reach the account list from wherever login lands.
+  ///
+  /// Kept returning a bare bool for existing callers;
+  /// [navigateToAccountListDetailed] carries the reason.
+  Future<bool> navigateToAccountList({
+    Duration stepTimeout = const Duration(seconds: 75),
+  }) async =>
+      (await navigateToAccountListDetailed(stepTimeout: stepTimeout)).reached;
+
+  /// Reach the account list, reporting *why* if it could not.
+  ///
+  /// Confirmed from real captures (`recon/live/`), the path is **two** clicks
+  /// and there is an empty screen in the middle of it:
+  ///
+  ///   `RMDashboard` --#Accounts--> `AgentAccountHomePage` --Enquire-->
+  ///   `AgentRDAccountSummaryAll`
+  ///
+  /// `AgentAccountHomePage` has no table, no content and no rows — the old
+  /// walk could not tell it apart from a failed click, so it kept re-clicking
+  /// a link it had already used. Classifying the screen first is what stops
+  /// that: on the dashboard only Accounts is even attempted, and the Enquire
+  /// link is only reached for once it can actually exist.
+  Future<NavResult> navigateToAccountListDetailed({
+    Duration stepTimeout = const Duration(seconds: 75),
+  }) =>
+      _drive(() => _walkToList(stepTimeout));
+
+  Future<NavResult> _walkToList(Duration stepTimeout) async {
+    final deadline = DateTime.now().add(stepTimeout);
+    var clicks = 0;
+    // Doubling gap between clicks. The time budget is unchanged from the old
+    // walk — it is spent waiting rather than hammering the link.
+    var gap = const Duration(milliseconds: 600);
+    var idleRounds = 0;
+    var dumped = false;
+    var wentBack = false;
+
+    _t('walk: start, budget ${stepTimeout.inSeconds}s');
+    while (DateTime.now().isBefore(deadline)) {
+      final html = await currentPageHtml();
+      final screen = PortalDom.classify(html);
+      _t('walk: on ${screen.name} (${html.length} chars, clicks=$clicks)');
+      // A click that navigated and left us on the same screen means the portal
+      // turned it down. Ask it why, once, rather than just clicking again.
+      if (clicks >= 1 && screen != PortalScreen.list && !dumped) {
+        dumped = true;
+        await _traceMessages('after $clicks click(s), still ${screen.name}');
+      }
+
+      switch (screen) {
+        case PortalScreen.list:
+          return NavResult(true, hops: clicks);
+        case PortalScreen.sessionExpired:
+          return NavResult(false,
+              failure: NavFailure.sessionExpired, hops: clicks);
+        case PortalScreen.blocked:
+          return NavResult(false, failure: NavFailure.blocked, hops: clicks);
+        case PortalScreen.login:
+          return NavResult(false,
+              failure: NavFailure.notLoggedIn, hops: clicks);
+        case PortalScreen.fullList:
+          // The print-preview has no menu to click — the only way off it is
+          // the way we came. Without this the walk would spin here doing
+          // nothing until its budget ran out.
+          if (!wentBack) {
+            wentBack = true;
+            _t('walk: on the print-preview, going back to the listing');
+            final from = await _pageSignature();
+            try {
+              await controller.runJavaScript('history.back();');
+              await _waitForPageChange(from, const Duration(seconds: 20));
+            } catch (_) {/* re-classified on the next lap */}
+            continue;
+          }
+          break;
+        case PortalScreen.dashboard:
+        case PortalScreen.accountsHome:
+        case PortalScreen.unknown:
+          break; // keep going
+      }
+
+      // Posted too fast. The portal kept our FIRST click and is rendering it;
+      // clicking again here is exactly how this turns into a dead session.
+      if (PortalDom.isBusyBanner(html)) {
+        _t('walk: portal says it is still busy — backing off, NOT clicking');
+        await _yieldIfBusy(html);
+        continue;
+      }
+
+      // On an unknown screen a load may simply still be painting. Give it the
+      // wait it would have got after a click before deciding anything.
+      if (screen == PortalScreen.unknown) {
+        if (idleRounds++ >= 3) return NavResult(false, hops: clicks);
+        await _awaitLoad(_navSlice(deadline, cap: const Duration(seconds: 8)));
+        await _settle();
+        continue;
+      }
+      idleRounds = 0;
+
+      if (clicks >= _maxNavClicks) break;
+
+      // Fingerprint the page BEFORE clicking. A page-finish event cannot tell
+      // us whether the navigation we just started has arrived — see
+      // [_waitForPageChange] — but a change in this can.
+      final before = await _pageSignature();
+      _pageLoad = Completer<void>();
+      final moved = screen == PortalScreen.dashboard
+          ? await _clickAccountsMenu()
+          : await _clickEnquireLink();
+      _t('walk: clicked ${screen == PortalScreen.dashboard ? "Accounts" : "Enquire"}'
+          ' -> ${moved ? "landed" : "nothing to click"}');
+
+      if (!moved) {
+        // NOTHING TO CLICK IS NOT THE SAME AS NOWHERE TO GO. The Enquire link
+        // leaves the DOM the instant its navigation starts, so the commonest
+        // reason there is nothing to click is that the click already landed
+        // and the page is on its way. Wait it out rather than declaring
+        // failure over a list that is about to appear.
+        await _awaitLoad(_navSlice(deadline, cap: const Duration(seconds: 8)));
+        await _settle();
+        _pageLoad = null;
+        if (await _onListPage()) return NavResult(true, hops: clicks);
+        // Nothing to click and nothing arrived — one more classify round will
+        // pick up an interstitial; `idleRounds` bounds the spinning.
+        if (idleRounds++ >= 3) return NavResult(false, hops: clicks);
+        continue;
+      }
+
+      clicks++;
+      // Wait for the page to BECOME something else, then hold still. This is
+      // what stops the next loop clicking on top of an in-flight navigation —
+      // which is what the four wasted clicks on the live portal actually were.
+      final arrived = await _waitForPageChange(
+          before, _navSlice(deadline, cap: _clickPatience));
+      _pageLoad = null;
+      _t('walk: page ${arrived ? "changed" : "did NOT change"} after click');
+      await _settle();
+      // Back off between clicks, but never past the walk's own deadline — the
+      // agent is waiting, and overshooting the budget is how "it just sits
+      // there" turns into a support call.
+      if (clicks < _maxNavClicks) {
+        final left = deadline.difference(DateTime.now());
+        if (left <= Duration.zero) break;
+        await Future<void>.delayed(gap < left ? gap : left);
+        gap *= 2;
+      }
+    }
+
+    // One last look before answering: the walk can arrive here with a load
+    // still painting, and a false here becomes an error message on a screen
+    // that is about to show exactly the list it says it could not open.
+    await _settle();
+    if (await _onListPage()) return NavResult(true, hops: clicks);
+    if (await _isSessionExpired()) {
+      return NavResult(false, failure: NavFailure.sessionExpired, hops: clicks);
+    }
+    if (await _isBlockedPage()) {
+      return NavResult(false, failure: NavFailure.blocked, hops: clicks);
+    }
+    return NavResult(false, hops: clicks);
+  }
+
+  /// A cheap fingerprint of what the WebView is showing: URL plus document
+  /// size. Two different portal screens never share both.
+  Future<String> _pageSignature() async {
+    const js = '(function(){return location.href + "|" + '
+        'document.documentElement.outerHTML.length + "|" + '
+        'document.readyState;})();';
+    try {
+      return _unwrap(await controller.runJavaScriptReturningResult(js));
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// Is the document finished loading, as far as we can tell?
+  ///
+  /// The signature is `url|length|readyState`. A WebView that cannot answer the
+  /// readyState half — an older implementation, or a test double — must not
+  /// deadlock the walk, so an unreadable answer counts as finished. Being wrong
+  /// that way costs one stale read; being wrong the other way costs the whole
+  /// sync.
+  static bool _documentFinished(String signature) {
+    final parts = signature.split('|');
+    if (parts.length < 3) return true; // cannot tell — do not block on it
+    return parts.last == 'complete';
+  }
+
+  /// Wait until the page genuinely becomes something else.
+  ///
+  /// `onPageFinished` is not a reliable "the navigation you just started has
+  /// arrived" signal on this portal, for two separate reasons, and the walk was
+  /// trusting it for both:
+  ///
+  ///  * **It fires at document load**, before Finacle's deferred scripts have
+  ///    built the left menu. Measured against the live portal, the walk read
+  ///    `AgentAccountHomePage` at 23,393 chars where the finished page is
+  ///    26,039 — it was deciding on a DOM that was ~2,600 characters short.
+  ///  * **The completer can already be resolved** by an earlier navigation's
+  ///    event, so `_awaitLoad` returns instantly and the caller reads the page
+  ///    it was already on.
+  ///
+  /// Both end the same way: the walk concludes "nothing happened", clicks
+  /// again, and that second click cancels the navigation the first one started.
+  /// Repeat until the click ceiling — which is exactly the live trace, four
+  /// clicks that each looked like they did nothing.
+  ///
+  /// So wait for the signature to move instead. Then let it hold still, which
+  /// is the part that catches the deferred scripts.
+  Future<bool> _waitForPageChange(String before, Duration timeout) async {
+    final start = DateTime.now();
+    final deadline = start.add(timeout);
+    // There is NO reliable early signal that a navigation has begun on this
+    // portal, and assuming one cost a whole debugging round. `readyState` was
+    // the obvious candidate and it is wrong: these are form posts, so the old
+    // document stays "complete" until the response starts arriving — and the
+    // Accounts → Enquire step was measured on the live portal taking **over
+    // 17 seconds** to answer. Bailing at three seconds abandoned a navigation
+    // that was perfectly healthy, then clicked again and cancelled it.
+    //
+    // So there is no early bail. Patience is bounded by the caller's budget
+    // and nothing else; a click the portal really did swallow costs one wait
+    // and is then caught by the click ceiling.
+    var changed = false;
+    var last = before;
+    var stableFor = 0;
+    while (DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      final now = await _pageSignature();
+      if (now.isEmpty) continue;
+      if (!changed) {
+        if (now != before) {
+          changed = true;
+          last = now;
+        }
+        continue;
+      }
+      // Changed. Now require the document to be FINISHED and to have stopped
+      // growing. Both halves matter:
+      //
+      //  * `readyState == complete` — measured against the live portal, size
+      //    alone accepted the page at 15,766 chars while it was still loading,
+      //    because a big document plateaus for a moment mid-parse. Note this is
+      //    the honest use of readyState: as "has it finished", never as "has it
+      //    started" — see the note above on why the latter is wrong here.
+      //  * two identical samples — `complete` still precedes the deferred
+      //    scripts that build the left menu, which is the other half of how the
+      //    walk ended up reading a DOM 2,600 characters short.
+      if (!_documentFinished(now)) {
+        stableFor = 0;
+        last = now;
+        continue;
+      }
+      if (now == last) {
+        if (++stableFor >= 2) return true;
+      } else {
+        stableFor = 0;
+        last = now;
+      }
+    }
+    return changed;
+  }
+
+  /// Read back whatever the portal is *saying* on the current page.
+  ///
+  /// A click that navigates and lands back on the same screen means the portal
+  /// refused it — and Finacle always says why, in a message block we were
+  /// throwing away. Without this the walk can only report "it didn't work",
+  /// which is exactly the dead end this file's history is full of.
+  Future<void> _traceMessages(String why) async {
+    const js = r'''
+      (function(){
+        function t(el){
+          return el ? (el.innerText || el.textContent || '')
+            .replace(/\s+/g,' ').trim() : '';
+        }
+        var out = {title: document.title};
+        var msgs = [];
+        var sels = '[role=alert], #MessageDisplay_TABLE, .orangebg, .redbg,'
+          + ' .errorbg, .greenbg, span[class*="error" i], div[class*="error" i]';
+        var els = document.querySelectorAll(sels);
+        for (var i=0;i<els.length;i++){
+          var s = t(els[i]);
+          if (s && s.length > 3 && msgs.indexOf(s) === -1) msgs.push(s);
+        }
+        out.messages = msgs.slice(0, 6);
+        var a = document.querySelector('a[name*="Enquire"], a[id*="Enquire"]');
+        out.enquire = a ? {
+          href: (a.getAttribute('href')||'').slice(0,60),
+          cls: a.className || '',
+          hasOnclick: !!a.getAttribute('onclick')
+        } : null;
+        out.forms = document.forms.length;
+        return JSON.stringify(out);
+      })();
+    ''';
+    try {
+      final raw = _unwrap(await controller.runJavaScriptReturningResult(js));
+      _t('PORTAL SAYS ($why): $raw');
+    } catch (e) {
+      _t('PORTAL SAYS ($why): could not read — $e');
+    }
+  }
+
+  /// How long to wait for one navigation: whatever is left of the walk's
+  /// budget.
+  ///
+  /// This used to be capped at 11 seconds a hop, inherited from the days when
+  /// the wait was a page-finish event and a long one meant "stuck". Measured
+  /// against the live portal, the Accounts → Enquire step alone took **over 17
+  /// seconds** to render — so the cap expired mid-navigation, the walk decided
+  /// nothing had happened, and clicked again, cancelling the load it had been
+  /// waiting for. That is the whole defect.
+  ///
+  /// There is no longer anything to protect against by capping: a click the
+  /// portal swallowed is failed inside three seconds by the starting-window
+  /// check in [_waitForPageChange], and the caller's own deadline still bounds
+  /// the total. So be patient with a navigation that is genuinely in flight.
+  /// [cap] bounds a *speculative* wait — one where we are not sure a
+  /// navigation was even started, so blocking for the whole budget would just
+  /// be the walk hanging. After a click that actually landed, pass no cap.
+  static Duration _navSlice(DateTime deadline, {Duration? cap}) {
+    final left = deadline.difference(DateTime.now());
+    if (left <= Duration.zero) return Duration.zero;
+    if (cap == null || left < cap) return left;
+    return cap;
+  }
+
+  /// Click the top-level "Accounts" menu — the first of the two hops.
+  Future<bool> _clickAccountsMenu() => _clickSelector(PortalDom.accountsMenu);
+
+  /// Click "Agent Enquire & Update Screen" — by its exact name/id from the real
+  /// DOM first, then by visible text. Returns true only if something was
+  /// actually clicked.
   Future<bool> _clickEnquireLink() async {
-    var c = await _clickSelector('a[name*="Enquire"], a[id*="Enquire"]');
-    c = c ||
-        await _clickLinkByText(const [
-          'agent enquire & update',
-          'enquire & update',
-          'enquire and update',
-          'update screen',
-        ]);
-    return c;
+    if (await _clickSelector(PortalDom.enquireLink)) return true;
+    return _clickLinkByText(const [
+      'agent enquire & update',
+      'enquire & update',
+      'enquire and update',
+      'update screen',
+    ]);
   }
 
   /// Click the first element matching a CSS selector. Returns true if one was
   /// clicked.
+  ///
+  /// Disabled controls are skipped rather than reported as clicked — the
+  /// listing's "Previous" button is `disabled` on page 1 and matches several of
+  /// the loose fallback selectors, so a click on it would be a false success.
   Future<bool> _clickSelector(String selector) async {
     final js = '''
       (function() {
-        var el = document.querySelector(${jsonEncode(selector)});
-        if (el) { (el.closest('a') || el).click(); return 'true'; }
+        var els = document.querySelectorAll(${jsonEncode(selector)});
+        for (var i = 0; i < els.length; i++) {
+          var el = els[i];
+          if (el.disabled) continue;
+          (el.closest('a') || el).click();
+          return 'true';
+        }
         return 'false';
       })();
     ''';
@@ -293,6 +709,19 @@ class PortalSyncEngine {
         .contains('true');
   }
 
+  /// Click the first element whose visible text contains one of [needles].
+  ///
+  /// Two things this has to get right, both learned the hard way:
+  ///
+  ///  * **Resolve downward, not just upward.** `querySelectorAll` returns
+  ///    ancestors before descendants, so the `<td>` wrapping the Enquire link
+  ///    is always examined before the link itself — and `closest('a')` only
+  ///    walks *up*, so from that cell it never finds the anchor inside it. The
+  ///    old version therefore clicked the table cell, which navigates nowhere,
+  ///    and returned true.
+  ///  * **Only a real control counts as a click.** If what we ended up on is
+  ///    not an anchor, button or input, nothing navigated, and saying "true"
+  ///    sends the caller off believing the page is changing when it is not.
   Future<bool> _clickLinkByText(List<String> needles) async {
     final js = '''
       (function() {
@@ -303,11 +732,17 @@ class PortalSyncEngine {
           for (var i = 0; i < els.length; i++) {
             var t = (els[i].innerText || els[i].value || els[i].textContent || '')
               .trim().toLowerCase();
-            if (t && t.indexOf(needles[n]) !== -1) {
-              var clickable = els[i].closest('a') || els[i];
-              clickable.click();
-              return 'true';
-            }
+            if (!t || t.indexOf(needles[n]) === -1) continue;
+            // Down first (a container holding the real link), then up (a label
+            // inside one), then the element itself.
+            var target = els[i].querySelector('a, button, input')
+              || els[i].closest('a, button')
+              || els[i];
+            if (target.disabled) continue;
+            var tag = (target.tagName || '').toLowerCase();
+            if (tag !== 'a' && tag !== 'button' && tag !== 'input') continue;
+            target.click();
+            return 'true';
           }
         }
         return 'false';
@@ -322,22 +757,27 @@ class PortalSyncEngine {
   Future<SyncResult> syncAllPages({
     void Function(int page, int totalPages, int accounts)? onProgress,
     Duration pageTimeout = const Duration(seconds: 60),
-  }) async {
-    if (await _isSessionExpired()) {
+  }) =>
+      _drive(() => _syncAllPages(onProgress, pageTimeout));
+
+  Future<SyncResult> _syncAllPages(
+    void Function(int page, int totalPages, int accounts)? onProgress,
+    Duration pageTimeout,
+  ) async {
+    // Classify once rather than re-serialising the DOM for each question. On a
+    // 57 KB listing page, asked 48 times over, that is not a rounding error.
+    var screen = PortalDom.classify(await currentPageHtml());
+    if (screen == PortalScreen.sessionExpired) {
       return const SyncResult([],
           reachedList: false,
-          error: 'Session expired — please log in again.',
+          error: 'The portal ended this session. Log in again, then tap Sync.',
           complete: false);
     }
-    if (!await _onListPage()) {
-      final ok = await navigateToAccountList();
-      if (!ok) {
-        return const SyncResult([],
-            reachedList: false,
-            error:
-                'Could not open the account list. Open Accounts → Agent Inquire '
-                'and Update, then tap Sync.',
-            complete: false);
+    if (screen != PortalScreen.list) {
+      final nav = await _walkToList(const Duration(seconds: 75));
+      if (!nav.reached) {
+        return SyncResult(const [],
+            reachedList: false, error: nav.message, complete: false);
       }
     }
 
@@ -345,7 +785,8 @@ class PortalSyncEngine {
     // be showing and call it page 1 — and a sync LEAVES the list on the last
     // page (see fillDetails). So a second Sync in the same session read page 47,
     // stamped those ten accounts as #1-#10, and every short code from there on
-    // was wrong and collided with the real #1-#10.
+    // was wrong and collided with the real #1-#10. `_gotoPage` no-ops when the
+    // portal already says page 1, so arriving fresh costs nothing.
     if (!await _gotoPage(1, pageTimeout)) {
       // Couldn't rewind — better to sync nothing than to renumber the book from
       // the middle. `serial` is what he reads off a row to find a customer.
@@ -357,13 +798,99 @@ class PortalSyncEngine {
     }
 
     final byAccount = <String, RdAccount>{};
-    final firstHtml = await currentPageHtml();
-    final total = totalPages(firstHtml);
+    var firstHtml = await currentPageHtml();
+    var total = totalPages(firstHtml);
+
+    // FAST PATH: the portal hands over the entire listing in one document via
+    // the listing's "doc" icon. Forty-seven Next clicks become one request —
+    // measured, the page walk was 36 s of a 60 s sync — and the portal sees
+    // forty-seven fewer posts from us, which is its own kind of safety.
+    //
+    // Everything below is written so that FAILING here costs only time. The
+    // shortcut navigates away from the listing, so any path that does not
+    // return must put us back on page 1 before the walk can run.
+    final advertisedNow = advertisedTotal(firstHtml);
+    final full = await _fetchFullListing(advertisedNow);
+    if (full != null) {
+      final parsed = AgentListParser.parse(full);
+      if (!parsed.isEmpty &&
+          (advertisedNow == 0 || parsed.rows >= advertisedNow)) {
+        for (final r in parsed.accounts) {
+          byAccount.putIfAbsent(r.accountNumber, () => r);
+        }
+        onProgress?.call(total, total, byAccount.length);
+        _t('DONE via full listing — ${byAccount.length} accounts '
+            '(${parsed.matured} matured, ${parsed.rejected} rejected, '
+            'portal advertised $advertisedNow)');
+        return SyncResult(_serialised(byAccount),
+            rejected: parsed.rejected, maturedRows: parsed.maturedRows);
+      }
+      _t('full listing parsed short (${parsed.rows} rows) — walking instead');
+    }
+
+    // The shortcut either was not offered or did not add up. Either way we may
+    // no longer be on the listing, so re-establish it from scratch rather than
+    // walking pages from wherever the WebView happens to be sitting.
+    if (PortalDom.classify(await currentPageHtml()) != PortalScreen.list) {
+      if (!(await _walkToList(const Duration(seconds: 75))).reached) {
+        return const SyncResult([],
+            reachedList: false,
+            error: 'Could not reopen the account list. Tap Sync again.',
+            complete: false);
+      }
+    }
+    if (!await _gotoPage(1, pageTimeout)) {
+      return const SyncResult([],
+          reachedList: true,
+          error: 'Could not get back to the first page. Close this and tap '
+              'Sync again.',
+          complete: false);
+    }
+    firstHtml = await currentPageHtml();
+    total = totalPages(firstHtml);
+
+    // "Displaying 1 - 10 of 480 results" — the portal's own count of the book,
+    // arrived at independently of the page bookkeeping. Checked at the end.
+    final advertised = advertisedTotal(firstHtml);
     var walked = 0; // pages actually read — compared against `total` at the end
     var rejected = 0;
+    final maturedRows = <MaturedRow>[];
 
     for (var page = 1; page <= total; page++) {
-      final html = page == 1 ? firstHtml : await currentPageHtml();
+      // Pages after the first were already fetched and validated by
+      // _clickNextAndWait — reuse that document rather than serialising the
+      // same 56 KB a second time.
+      var html =
+          page == 1 ? firstHtml : (_validatedHtml ?? await currentPageHtml());
+      _validatedHtml = null;
+
+      // The portal is telling us it is still digesting a click. The page under
+      // the banner is the one it kept, so wait and re-read rather than acting
+      // on a half-rendered DOM.
+      if (PortalDom.isBusyBanner(html)) {
+        await _yieldIfBusy(html);
+        html = await currentPageHtml();
+      }
+
+      screen = PortalDom.classify(html);
+      if (screen == PortalScreen.sessionExpired) {
+        return SyncResult(_serialised(byAccount, complete: false),
+            reachedList: true,
+            rejected: rejected,
+            maturedRows: maturedRows,
+            error: 'The portal ended this session at page $page of $total — '
+                'kept what loaded. Log in again, then tap Sync.',
+            complete: false);
+      }
+      if (screen == PortalScreen.blocked) {
+        return SyncResult(_serialised(byAccount, complete: false),
+            reachedList: true,
+            rejected: rejected,
+            maturedRows: maturedRows,
+            error: 'The portal blocked this session at page $page of $total. '
+                'Log in again, then tap Sync.',
+            complete: false);
+      }
 
       // The portal's own page label must agree with where we think we are.
       // Belt and braces beside the check in _clickNextAndWait: if the two ever
@@ -374,6 +901,7 @@ class PortalSyncEngine {
         return SyncResult(_serialised(byAccount, complete: false),
             reachedList: true,
             rejected: rejected,
+            maturedRows: maturedRows,
             error: 'Sync lost its place at page $page of $total (the portal '
                 'is showing page $shown). Run Sync again; nothing already on '
                 'the phone was changed.',
@@ -381,7 +909,10 @@ class PortalSyncEngine {
       }
 
       final parsed = AgentListParser.parse(html);
+      _t('page $page/$total: ${parsed.accounts.length} accounts, '
+          '${parsed.matured} matured, ${parsed.rejected} rejected');
       rejected += parsed.rejected;
+      maturedRows.addAll(parsed.maturedRows);
       for (final r in parsed.accounts) {
         byAccount.putIfAbsent(r.accountNumber, () => r);
       }
@@ -389,10 +920,11 @@ class PortalSyncEngine {
       // A listing page with no readable rows at all means the table did not
       // render, not that the agent has an empty page in the middle of his book.
       // Treating it as read is how a blank page silently closes ten customers.
-      if (parsed.accounts.isEmpty && parsed.rejected == 0) {
+      if (parsed.isEmpty) {
         return SyncResult(_serialised(byAccount, complete: false),
             reachedList: true,
             rejected: rejected,
+            maturedRows: maturedRows,
             error: 'Page $page of $total came back empty — the portal did not '
                 'finish loading it. Run Sync again.',
             complete: false);
@@ -406,31 +938,28 @@ class PortalSyncEngine {
 
       final advance =
           await _clickNextAndWait(pageTimeout, expectPage: page + 1);
+      _t('page $page -> ${page + 1}: ${advance.name}');
       if (advance != PageAdvance.moved) {
-        // Finacle's stale-token guard stops the table rendering, which looks
-        // exactly like a stall. Probe for it so the agent is told what actually
-        // happened instead of being handed a short book.
-        final blocked = await _isBlockedPage();
+        // A stall and a poisoned session look identical from here — both leave
+        // the table unrendered — so ask which it was before telling the agent
+        // to do something that cannot work.
+        final after = PortalDom.classify(await currentPageHtml());
+        final dead = after == PortalScreen.sessionExpired ||
+            after == PortalScreen.blocked ||
+            after == PortalScreen.login;
         return SyncResult(_serialised(byAccount, complete: false),
             reachedList: true,
             rejected: rejected,
-            error: blocked
-                ? 'The portal blocked navigation at page $page of $total. '
-                    'Log in again, then run Sync.'
+            maturedRows: maturedRows,
+            error: dead
+                ? 'The portal ended this session at page $page of $total. '
+                    'Log in again, then tap Sync.'
                 : 'Sync stopped at page $page of $total — only '
                     '${byAccount.length} accounts were read. Run Sync again; '
                     'nothing already on the phone was changed.',
             complete: false);
       }
       walked = page + 1;
-      if (await _isSessionExpired()) {
-        return SyncResult(_serialised(byAccount, complete: false),
-            reachedList: true,
-            rejected: rejected,
-            error: 'Session expired at page $page of $total — synced what '
-                'loaded. Run Sync again.',
-            complete: false);
-      }
     }
 
     // Belt and braces: the loop can only end early via the paths above, but a
@@ -439,10 +968,113 @@ class PortalSyncEngine {
       return SyncResult(_serialised(byAccount, complete: false),
           reachedList: true,
           rejected: rejected,
+          maturedRows: maturedRows,
           error: 'Sync ended at page $walked of $total — run it again.',
           complete: false);
     }
-    return SyncResult(_serialised(byAccount), rejected: rejected);
+
+    // Cross-check against the portal's own headline count. The page walk can
+    // be internally consistent and still short — a page that rendered its
+    // table but only half its rows passes every check above. `complete` is
+    // what licenses closing every account we did not see, so it has to clear
+    // this bar too.
+    final seen = byAccount.length + rejected + maturedRows.length;
+    if (advertised > 0 && seen < advertised) {
+      return SyncResult(_serialised(byAccount, complete: false),
+          reachedList: true,
+          rejected: rejected,
+          maturedRows: maturedRows,
+          error: 'Sync read $seen of the $advertised accounts the portal '
+              'lists. Run Sync again; nothing already on the phone was '
+              'changed.',
+          complete: false);
+    }
+
+    _t('walk: DONE — ${byAccount.length} accounts over $total pages '
+        '(${maturedRows.length} matured, $rejected rejected, portal '
+        'advertised $advertised)');
+    return SyncResult(_serialised(byAccount),
+        rejected: rejected, maturedRows: maturedRows);
+  }
+
+  /// Read the whole book from the portal's own print-preview of the listing.
+  ///
+  /// The listing carries a "doc" icon whose href returns EVERY account in one
+  /// document — same table, same per-field element ids, no pagination. That
+  /// replaces forty-seven Next clicks with a single request: measured, the page
+  /// walk was 36 s of a 60 s sync, and it is also forty-seven more posts than
+  /// the portal needs to see from us.
+  ///
+  /// Returns null when the shortcut is not available or does not add up, so the
+  /// caller falls back to the page walk. Two things must hold before the result
+  /// is trusted:
+  ///
+  ///  * the page must classify as [PortalScreen.fullList] — not a stale listing,
+  ///    not an error;
+  ///  * the row count must match what the listing page advertised. A truncated
+  ///    export is far worse than a slow sync, because a COMPLETE sync closes
+  ///    every account it did not see.
+  ///
+  /// Do not click the icon: its onclick opens a popup window the WebView will
+  /// not service. Navigate to its href.
+  Future<String?> _fetchFullListing(int expectRows) async {
+    final js = '(function(){var a=document.querySelector('
+        '${jsonEncode(PortalDom.printPreviewLink)});'
+        'return a && a.href ? a.href : "";})();';
+    final href = _unwrap(await controller.runJavaScriptReturningResult(js));
+    if (href.isEmpty || !href.startsWith('http')) {
+      _t('full listing: no print-preview link on this page');
+      return null;
+    }
+
+    final before = await _pageSignature();
+    await controller.runJavaScript('location.href=${jsonEncode(href)};');
+    final arrived = await _waitForPageChange(before, _clickPatience);
+    if (!arrived) {
+      _t('full listing: navigation did not arrive');
+      return null;
+    }
+
+    final html = await currentPageHtml();
+    final screen = PortalDom.classify(html);
+    if (screen != PortalScreen.fullList) {
+      _t('full listing: got ${screen.name} instead — falling back');
+      return null;
+    }
+    final rows = RegExp(r'ACCOUNT_NUMBER_ALL_ARRAY\[(\d+)\]')
+        .allMatches(html)
+        .map((m) => m.group(1))
+        .toSet()
+        .length;
+    if (expectRows > 0 && rows < expectRows) {
+      _t('full listing: only $rows rows, portal advertised $expectRows — '
+          'falling back to the page walk rather than trusting a short read');
+      return null;
+    }
+    _t('full listing: $rows rows in one request (${html.length} chars)');
+
+    // Go BACK to the paginated listing before handing the data over.
+    //
+    // The print-preview is content only: it carries no Accounts menu, no
+    // Dashboard link and no pagination (verified against the capture — zero
+    // hits for all three). Leaving the WebView parked there strands the
+    // session: `navigateToAccountList` has nothing to click, so Deep Sync and
+    // list preparation, which both start by getting to the listing, would fail
+    // for the rest of the session. The read is worthless if it costs the
+    // agent everything he does next.
+    final backFrom = await _pageSignature();
+    try {
+      await controller.runJavaScript('history.back();');
+      await _waitForPageChange(backFrom, const Duration(seconds: 20));
+    } catch (_) {/* fall through to the check below */}
+    final landed = PortalDom.classify(await currentPageHtml());
+    if (landed != PortalScreen.list) {
+      _t('full listing: back() landed on ${landed.name}, walking to the list');
+      await _walkToList(const Duration(seconds: 75));
+    }
+    _t('full listing: session left on '
+        '${(await currentScreen()).name}');
+    return html;
   }
 
   /// Stamp each account with its 1-based position in the portal listing.
@@ -476,31 +1108,35 @@ class PortalSyncEngine {
   // is capped and resumes on the next sync.
 
   /// Jump the list to [page] (falls back to false if the control isn't found).
+  ///
+  /// Returns true without posting anything when the portal already says we are
+  /// on [page]. That short-circuit matters more than it looks: `syncAllPages`
+  /// rewinds to page 1 before every walk, and it is normally called the instant
+  /// the list finishes arriving on page 1 — so the old unconditional post went
+  /// out on top of a navigation that had only just settled, which is precisely
+  /// the traffic shape that earns Finacle's "previous click was still being
+  /// processed" banner.
   Future<bool> _gotoPage(int page, Duration timeout) async {
+    final here = await currentPageHtml();
+    if (currentPage(here) == page && _hasAccountTable(here)) return true;
+    await _yieldIfBusy(here);
+
     _pageLoad = Completer<void>();
-    final ok = _unwrap(await controller.runJavaScriptReturningResult('''
-      (function(){
-        var inp=document.querySelector('input[name*="REQUESTED_PAGE_NUMBER" i][type="text"]')
-          || document.querySelector('input[name*="PAGE_NO" i][type="text"]')
-          || document.querySelector('input[name*="GOTO_PAGE" i][type="text"]')
-          || document.querySelector('input[name*="PAGE" i][type="text"]');
-        var btn=document.querySelector('input[name*="GOTO_PAGE" i][type="submit"]')
-          || document.querySelector('input[name*="GOTO_PAGE" i][type="button"]')
-          || document.querySelector('input[name*="GOTO_PAGE" i]')
-          || document.querySelector('input[value="Go" i]');
-        if(!inp||!btn) return 'false';
-        inp.value='$page';
-        inp.dispatchEvent(new Event('change',{bubbles:true}));
-        btn.click(); return 'true';
-      })();
-    '''));
+    final js = '(function(){'
+        'var inp=document.querySelector(${jsonEncode(PortalDom.gotoPageField)});'
+        'var btn=document.querySelector(${jsonEncode(PortalDom.gotoPageButton)});'
+        'if(!inp||!btn||btn.disabled) return "false";'
+        'inp.value=${jsonEncode('$page')};'
+        'inp.dispatchEvent(new Event("change",{bubbles:true}));'
+        'btn.click(); return "true";})();';
+    final ok = _unwrap(await controller.runJavaScriptReturningResult(js));
     if (!ok.contains('true')) {
       _pageLoad = null;
       return false;
     }
     await _awaitLoad(timeout);
     await _settle();
-    return _waitForTable(const Duration(seconds: 20));
+    return _waitForTable(const Duration(seconds: 20), expectPage: page);
   }
 
   /// How many account rows the portal puts on one listing page.
@@ -517,7 +1153,18 @@ class PortalSyncEngine {
             _unwrap(await controller.runJavaScriptReturningResult(js))
                 .trim()) ??
         0;
-    return n > 0 ? n : 10;
+    // Sanity-bound it. This is read off whatever page is showing, and the
+    // print-preview of the whole listing renders all 479 rows in one document
+    // — counting those would make `((serial-1) ~/ perPage) + 1` send every
+    // jump to page 1, turning each detail fetch into a full 48-page scan.
+    // A Finacle listing page is tens of rows, never hundreds.
+    if (n <= 0 || n > 50) {
+      if (n > 50) {
+        _t('rowsPerPage: $n is not a listing page (print-preview?) — using 10');
+      }
+      return 10;
+    }
+    return n;
   }
 
   /// Account number shown in row [i] of the current list page.
@@ -1482,7 +2129,20 @@ class PortalSyncEngine {
   /// one page of a 47-page book.
   Future<PageAdvance> _clickNextAndWait(Duration timeout,
       {int? expectPage}) async {
+    var backoff = const Duration(milliseconds: 500);
     for (var attempt = 0; attempt < 3; attempt++) {
+      // Never post on top of the portal. If it is still digesting the last
+      // click it has already told us so, and the page underneath the banner is
+      // the one it kept — re-check before spending a retry on a click that
+      // would only make things worse.
+      final probe = await _listProbe();
+      if (probe != null && PortalDom.isBusyBanner(probe.alert)) {
+        await _yieldIfBusy(probe.alert);
+        if (expectPage != null && (await _listProbe())?.page == expectPage) {
+          return PageAdvance.moved;
+        }
+      }
+
       _pageLoad = Completer<void>();
       final clicked =
           _unwrap(await controller.runJavaScriptReturningResult(_nextJs));
@@ -1491,12 +2151,20 @@ class PortalSyncEngine {
         return PageAdvance.lastPage; // no Next button — genuinely the end
       }
       await _awaitLoad(timeout);
-      await _settle();
+      // No fixed settle here. It cost a flat 350 ms on every one of 48 pages —
+      // 17 s of pure sleeping, about half the page walk — and bought nothing
+      // that _waitForTable does not already prove: it polls until the portal's
+      // OWN page label reads the number we asked for, which is a positive
+      // confirmation rather than a hopeful pause.
       // Confirm the table rendered AND the portal moved to the page we asked
       // for, not merely that a table is on screen.
       if (await _waitForTable(_tableWait(timeout), expectPage: expectPage)) {
         return PageAdvance.moved;
       }
+      // A stalled page is usually the portal being slow, not the click being
+      // lost. Widen the gap before trying again rather than drumming on it.
+      await Future<void>.delayed(backoff);
+      backoff *= 3;
     }
     return PageAdvance.stalled; // clicked, never moved — a real failure
   }
@@ -1527,24 +2195,107 @@ class PortalSyncEngine {
     }
   }
 
-  /// Prevent session timeout by clicking the portal's keep-alive button if present.
+  /// Ask the portal to extend the session, if it is safe to do so right now.
+  ///
+  /// **This navigates.** The control is
+  /// `<input type="Submit" name="Action.Action.Action.PREVENT_SESSION_TIMEOUT__">`
+  /// — clicking it posts the whole form. Fired from a timer while a page walk
+  /// was in flight it raced the walk's own post, and Finacle answered with
+  /// "You clicked on a link or a button when your previous click was still
+  /// being processed", then treated the out-of-sequence token as a replay and
+  /// ended the session. That is the "sync reaches the account list, then says
+  /// Session expired" report: the keep-alive was killing the thing it existed
+  /// to protect.
+  ///
+  /// So it declines whenever anything else owns the page ([isDriving]), and it
+  /// is unnecessary then anyway — every page the walk turns is itself a post,
+  /// and a post is what resets the portal's five-minute idle timer. The
+  /// keep-alive is only for a screen sitting idle with the agent looking at it.
+  ///
+  /// Returns true only if the click actually went out.
   Future<bool> keepSessionAlive() async {
-    const js = '''
-      (function() {
-        var btn = document.querySelector('input[name*="PREVENT_SESSION_TIMEOUT" i]')
-          || document.querySelector('input[value*="Prevent Session Timeout" i]');
-        if (btn && !btn.disabled) {
-          btn.click();
-          return 'true';
-        }
-        return 'false';
-      })();
-    ''';
-    try {
-      final res = _unwrap(await controller.runJavaScriptReturningResult(js));
-      return res.contains('true');
-    } catch (_) {
+    if (isDriving) {
+      _t('keep-alive: DECLINED, the page is busy with a walk');
       return false;
+    }
+    return _drive(() async {
+      try {
+        final js = '(function(){var b=document.querySelector('
+            '${jsonEncode(PortalDom.keepAliveButton)});'
+            'if(b&&!b.disabled){b.click();return "true";}return "false";})();';
+        final res = _unwrap(await controller.runJavaScriptReturningResult(js));
+        if (!res.contains('true')) return false;
+        _t('keep-alive: clicked (this navigates)');
+        // It is a navigation: wait it out so the next thing to touch the page
+        // does not post on top of it.
+        _pageLoad = Completer<void>();
+        await _awaitLoad(const Duration(seconds: 20));
+        await _settle();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    });
+  }
+
+  /// The portal's own idle allowance, in seconds, off the hidden
+  /// `#sessionTimeout` field. 300 (five minutes) on every capture. 0 when the
+  /// field is not there — i.e. we are not on an authenticated page.
+  ///
+  /// Worth reading rather than assuming: it is the budget the whole walk has to
+  /// fit each of its steps inside.
+  Future<int> sessionTimeoutSeconds() async {
+    final js = '(function(){var e=document.querySelector('
+        '${jsonEncode(PortalDom.sessionTimeoutField)});'
+        'return e?String(e.value||""):"0";})();';
+    try {
+      return int.tryParse(
+              _unwrap(await controller.runJavaScriptReturningResult(js))
+                  .replaceAll(RegExp(r'[^0-9]'), '')) ??
+          0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// The full HTML of the page [_waitForTable] last accepted.
+  ///
+  /// The walk needs that exact document to parse, and it has just been fetched
+  /// to validate it — fetching it a second time doubles the cost of the single
+  /// most expensive operation in the loop.
+  String? _validatedHtml;
+
+  /// A few hundred bytes that answer the three questions the page walk asks
+  /// after every click: which page is showing, is the table there, and is the
+  /// portal complaining.
+  ///
+  /// Those used to be answered by serialising the whole document — 56 KB on a
+  /// real listing page — up to three times per page, forty-eight times over.
+  /// The DOM read was the walk, not the portal.
+  ///
+  /// Returns null when neither landmark is present, meaning we are not on a
+  /// listing at all (or the portal was rebuilt) — callers fall back to reading
+  /// the full document rather than trusting a probe that found nothing.
+  Future<({int page, bool table, String alert})?> _listProbe() async {
+    final js = '(function(){'
+        'var l=document.querySelector(${jsonEncode(PortalDom.pageLabel)});'
+        'var t=document.querySelector(${jsonEncode(PortalDom.listTable)});'
+        'if(!l&&!t) return "";'
+        'var a=document.querySelector(\'div[role="alert"]\');'
+        'return JSON.stringify({p:l?(l.textContent||"").trim():"",'
+        't:!!t,m:a?(a.textContent||"").slice(0,200):""});'
+        '})();';
+    try {
+      final raw = _unwrap(await controller.runJavaScriptReturningResult(js));
+      if (raw.isEmpty || raw == 'null' || raw == '""') return null;
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      return (
+        page: currentPage(m['p'] as String? ?? ''),
+        table: m['t'] == true,
+        alert: m['m'] as String? ?? '',
+      );
+    } catch (_) {
+      return null;
     }
   }
 
@@ -1556,13 +2307,23 @@ class PortalSyncEngine {
   /// pass for a successful move. See [currentPage].
   Future<bool> _waitForTable(Duration timeout, {int? expectPage}) async {
     final deadline = DateTime.now().add(timeout);
+    _validatedHtml = null;
     while (DateTime.now().isBefore(deadline)) {
-      final html = await currentPageHtml();
-      if (_hasAccountTable(html) &&
-          (expectPage == null || currentPage(html) == expectPage)) {
-        return true;
+      final probe = await _listProbe();
+      // Poll cheaply; pay for the full document only once, when the cheap
+      // answer says the page we asked for has arrived.
+      final looksRight = probe != null &&
+          probe.table &&
+          (expectPage == null || probe.page == expectPage);
+      if (looksRight || probe == null) {
+        final html = await currentPageHtml();
+        if (_hasAccountTable(html) &&
+            (expectPage == null || currentPage(html) == expectPage)) {
+          _validatedHtml = html;
+          return true;
+        }
       }
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
     }
     return false;
   }
@@ -1570,14 +2331,16 @@ class PortalSyncEngine {
   Future<void> _settle() =>
       Future<void>.delayed(const Duration(milliseconds: 350));
 
-  static const _nextJs = r'''
-    (function() {
-      var el = document.querySelector(
-        'input[name*="GOTO_NEXT"], input[title="Next"], input[alt="Next"]');
-      if (el && !el.disabled) { el.click(); return 'true'; }
-      return 'false';
-    })();
-  ''';
+  /// Click "Next". Exact Finacle action name first, loose fallbacks after.
+  ///
+  /// Never filter these on `[type="submit"]`: the portal writes `type="Submit"`
+  /// and CSS attribute matching is case-sensitive for `type`, so the filter
+  /// would match nothing. The `disabled` check is what keeps us off the
+  /// greyed-out control at the end of the listing.
+  static final _nextJs = '(function(){var els=document.querySelectorAll('
+      '${jsonEncode(PortalDom.nextButton)});'
+      'for(var i=0;i<els.length;i++){if(!els[i].disabled){els[i].click();'
+      'return "true";}}return "false";})();';
 
   String _unwrap(Object result) {
     var s = result.toString();
