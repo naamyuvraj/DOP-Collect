@@ -179,7 +179,13 @@ current build so `identify()` sends them.
 shorebird patch --platforms=android --release-version=0.9.53+27 -- --dart-define-from-file=env.json --no-tree-shake-icons --target-platform=android-arm,android-arm64
 
 # New release (native deps changed). Bump pubspec AND buildVersion together.
-shorebird release android -- --dart-define-from-file=env.json --no-tree-shake-icons --target-platform=android-arm,android-arm64
+shorebird release android -- --dart-define-from-file=env.json --no-tree-shake-icons
+# NOTE: do NOT pass --target-platform to `shorebird release` any more.
+# Shorebird 1.6.x supplies its own (--target-platform=android-arm,android-arm64,
+# android-x64) and ours is appended after it, so the flag is passed twice with
+# different sets. Gradle then copies libapp.so for armeabi-v7a from both and
+# fails: "Entry armeabi-v7a/libapp.so is a duplicate". The resulting bundle is
+# 56.5 MB, which is under the size that made patch downloads time out anyway.
 ```
 
 > **`--target-platform=android-arm,android-arm64` is not optional either.**

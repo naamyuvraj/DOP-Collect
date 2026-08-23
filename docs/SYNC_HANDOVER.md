@@ -295,7 +295,8 @@ is a live banking login — but it does mean the log is the only window in.
 
 ## 5. Release state
 
-- **Release `1.0.0+44`**, patches 1-3 applied → installs report `1.0.0+47`.
+- **Release `1.0.0+48`** (22 Aug 2026) carries all of this session's work.
+  Supersedes `1.0.0+44` + patches 1-3.
   Patch 3 (22 Aug 2026) carries this session: the navigation fix, the
   full-listing fast path, matured accounts, and the login double-submit fix.
 - Branch **`removation`**, **not pushed**. It carries this session's work plus
