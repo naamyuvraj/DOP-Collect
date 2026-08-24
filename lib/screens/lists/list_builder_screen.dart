@@ -6,6 +6,7 @@ import '../../data/account_repository.dart';
 import '../../services/analytics.dart';
 import '../../data/lot_repository.dart';
 import '../../models/account_sort.dart';
+import '../../models/summaries.dart';
 import '../../models/lot.dart';
 import '../../models/lot_packing.dart';
 import '../../models/rd_account.dart';
@@ -28,8 +29,16 @@ class ListBuilderScreen extends StatefulWidget {
   /// A CASH lot's total must not exceed this (cheque lots have no amount cap).
   static const lotCap = 20000;
 
-  /// Max accounts in one list, any mode (portal rule).
-  static const maxAccounts = 50;
+  /// Max accounts in one list, any mode.
+  ///
+  /// NINE, not ten. The portal renders a saved list on a single page of ten
+  /// rows and spends one of them on the total, so a tenth account pushes the
+  /// list onto a second page — which is the thing that must not happen. This
+  /// is a page-geometry rule, not a preference.
+  ///
+  /// It sits alongside [lotCap], it does not replace it: a cash list must
+  /// satisfy BOTH the nine-account ceiling and the ₹20,000 total.
+  static const maxAccounts = 9;
 
   @override
   State<ListBuilderScreen> createState() => _ListBuilderScreenState();
@@ -42,6 +51,15 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
 
   /// null = smart priority (on-time & high-value first); else amount/due sort.
   AccountSort? _sort;
+
+  /// Active standing filter (null = all). Selected accounts are never hidden
+  /// by it — losing sight of something already in the list, because it no
+  /// longer matches a filter he changed after picking it, is how a list gets
+  /// filed with an account he did not mean to include.
+  AccountFilter? _standing;
+
+  /// Last loaded pool, kept so the filter chips can show counts.
+  List<RdAccount> _pool = const [];
 
   /// accountNumber -> installments selected (>=1 means included).
   final Map<String, int> _selected = {};
@@ -81,12 +99,70 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
 
   /// Apply the chosen order. Null = smart priority (most valuable + most
   /// reliable — paid-ahead / on-time first).
+  /// Narrow the pool by how far behind the account is.
+  ///
+  /// Sorting already existed, but sorting a four-hundred-name list still leaves
+  /// four hundred names to scroll. Filtering is what makes "just the ones six
+  /// months behind" a two-tap job. The buckets are the dashboard's, so a filter
+  /// here and a card there always mean the same customers.
+  static const _standingFilters = <String, AccountFilter?>{
+    'All': null,
+    'Super late': AccountFilter.aboutToFreeze,
+    'Late': AccountFilter.defaulters,
+    'Due now': AccountFilter.toCollect,
+    'Advance': AccountFilter.advancedPaid,
+  };
+
+  Widget _filterBar() {
+    final now = DateTime.now();
+    return SizedBox(
+      height: 40,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: _standingFilters.entries.map((e) {
+          final on = _standing == e.value;
+          // Count on the chip: "Late 34" answers "is it even worth tapping?"
+          // before he taps it.
+          final n = e.value == null
+              ? _pool.length
+              : _pool.where((a) => e.value!.test(a, now)).length;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => setState(() => _standing = e.value),
+              child: Container(
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: on
+                    ? AppTheme.panel(AppTheme.ink, radius: 20)
+                    : AppTheme.card(radius: 20),
+                child: Text('${e.key}  $n',
+                    style: AppTheme.body(13,
+                        weight: FontWeight.w700,
+                        color: on ? AppTheme.surface : AppTheme.inkMuted)),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   List<RdAccount> _applySort(List<RdAccount> list) {
-    if (_sort == null) {
-      final now = DateTime.now();
-      return [...list]..sort((a, b) => LotPacking.priorityCompare(a, b, now));
+    final now = DateTime.now();
+    _pool = list;
+    var pool = list;
+    if (_standing != null) {
+      pool = list
+          .where((a) =>
+              _standing!.test(a, now) || _selected.containsKey(a.accountNumber))
+          .toList();
     }
-    return [...list]..sort(_sort!.comparator);
+    if (_sort == null) {
+      return [...pool]..sort((a, b) => LotPacking.priorityCompare(a, b, now));
+    }
+    return [...pool]..sort(_sort!.comparator);
   }
 
   void _setInstallments(RdAccount a, int value) {
@@ -245,6 +321,8 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
         children: [
           _modeSelector(),
           _searchRow(),
+          _filterBar(),
+          const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: AccountSortBar(
@@ -367,11 +445,28 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
     );
   }
 
+  /// How far behind an account is, as a colour.
+  ///
+  /// Building a list is a triage job: he is deciding who to visit today out of
+  /// four hundred names. Reading a due date per row to work that out is the
+  /// slow part, and it is the part the eye can do instantly if the row is
+  /// tinted. Same thresholds as the dashboard buckets, so a row that looks
+  /// urgent here is the same customer the Defaulters card counted.
+  static Color _standingTint(RdAccount a, DateTime now) {
+    final behind = AccountFilter.monthsBehind(a, now);
+    if (behind >= 6) return AppTheme.red.withValues(alpha: 0.22); // super late
+    if (behind >= 1) return AppTheme.amber.withValues(alpha: 0.20); // late
+    if (behind <= -1) return AppTheme.green.withValues(alpha: 0.14); // advance
+    return AppTheme.surface; // neutral
+  }
+
   Widget _row(RdAccount a) {
     final installments = _selected[a.accountNumber] ?? 0;
     final selected = installments > 0;
     return Container(
-      color: selected ? AppTheme.greenSoft : AppTheme.surface,
+      // Selection wins over standing — he needs to see what he has picked
+      // before he needs to see how late they are.
+      color: selected ? AppTheme.greenSoft : _standingTint(a, DateTime.now()),
       padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
       child: Row(
         children: [

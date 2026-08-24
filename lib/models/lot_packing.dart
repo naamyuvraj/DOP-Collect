@@ -89,7 +89,12 @@ class LotPacking {
   }
 
   /// Portal rule: at most this many accounts per list, any mode.
-  static const int maxAccountsPerList = 50;
+  ///
+  /// Nine. The portal shows a saved list on one page of ten rows and uses one
+  /// for the total, so a tenth account spills onto a second page. Auto-build
+  /// and the manual builder must agree on this — if packing produced tens, the
+  /// builder would refuse the lists its own auto-fill had just made.
+  static const int maxAccountsPerList = 9;
 
   /// Postal rule: the rupee ceiling on one list.
   static const int defaultCap = 20000;
