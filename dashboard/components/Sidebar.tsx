@@ -10,6 +10,8 @@ const NAV = [
   { href: "/regions", label: "Regions", icon: "M12 21s-7-6.5-7-11a7 7 0 0114 0c0 4.5-7 11-7 11zM12 12a2 2 0 100-4 2 2 0 000 4" },
   { href: "/activity", label: "Activity", icon: "M3 12h4l3 8 4-16 3 8h4" },
   { href: "/board", label: "Board", icon: "M4 4h16v16H4zM4 9h16M9 9v11" },
+  // The AGENTS' assistant, not the dashboard's own (that is /assistant).
+  { href: "/chat", label: "Agent Chat", icon: "M8 10h8M8 14h5M21 12a9 9 0 11-3.6-7.2L21 3v6h-6" },
   { href: "/errors", label: "Errors", icon: "M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" },
   { href: "/keys", label: "API Keys", icon: "M15 7a4 4 0 11-4 4h-1l-2 2-2-2H3v-3l6-6a4 4 0 016 5z" },
   { href: "/otp", label: "OTP & MSG91", icon: "M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2zM9 10h.01M13 10h.01" },
