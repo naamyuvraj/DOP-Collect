@@ -253,6 +253,28 @@ class PortalSyncEngine {
   /// Public probe so the screen can auto-start once login lands on the list.
   Future<bool> isOnListPage() => _onListPage();
 
+  /// The agent id the PORTAL says this session belongs to, as
+  /// `corpId.cxpsUserId` (e.g. `DOP.MI8472350100005`). Empty when the page is
+  /// not an authenticated one.
+  ///
+  /// This is the identity the backend should bind, not the string the agent
+  /// typed into the login box. Finacle accepted a one-character typo of it,
+  /// which produced a second backend account for the same person — one phone on
+  /// each — and no 1:1 rule can catch that, because the two spellings really
+  /// are two different ids.
+  Future<String> portalAgentId() async {
+    final js = '(function(){'
+        'var c=document.querySelector(${jsonEncode(PortalDom.corpIdField)});'
+        'var u=document.querySelector(${jsonEncode(PortalDom.cxpsUserIdField)});'
+        'if(!u||!u.value) return "";'
+        'return ((c&&c.value)?c.value+".":"")+u.value;})();';
+    try {
+      return _unwrap(await controller.runJavaScriptReturningResult(js)).trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// True once we're inside the authenticated agent portal (Dashboard or list) —
   /// i.e. login succeeded. Detected by the authenticated menu / pagination
   /// controls, which the login page doesn't have.

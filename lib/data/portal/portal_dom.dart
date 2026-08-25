@@ -180,6 +180,22 @@ class PortalDom {
   static const printPreviewLink =
       '#HREF_printPreview, a[name="HREFprintPreview"]';
 
+  /// The agent's TRUE id, as the portal itself states it, on every
+  /// authenticated page:
+  ///
+  /// ```html
+  /// <input type="Hidden" name="corpId"     value="DOP">
+  /// <input type="Hidden" name="cxpsUserId" value="MI8472350100005">
+  /// ```
+  ///
+  /// `corpId.cxpsUserId` is the canonical identity. The one the agent TYPES to
+  /// log in is close enough that Finacle accepts a slip — a real one-character
+  /// typo logged in fine and then bound a second, duplicate account on the
+  /// backend, because two spellings are two identities to a 1:1 rule. Read the
+  /// id, never trust the typing.
+  static const corpIdField = '#corpId';
+  static const cxpsUserIdField = '#cxpsUserId';
+
   // --- Session ------------------------------------------------------------
 
   /// The keep-alive control — and a trap. It is

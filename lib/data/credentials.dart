@@ -74,6 +74,17 @@ class Credentials {
     }
   }
 
+  /// Overwrite just the agent id, keeping the password and the remember flag.
+  ///
+  /// Used to adopt the id the PORTAL reports over the one that was typed. A
+  /// full `save()` here would need the password in hand and would rewrite the
+  /// remember flag as a side effect, neither of which this caller knows about.
+  static Future<void> saveAgentId(String agentId) async {
+    final id = agentId.trim();
+    if (id.isEmpty) return;
+    await _secure.write(key: _kId, value: id);
+  }
+
   static Future<void> clear() async {
     await _secure.delete(key: _kId);
     await _secure.delete(key: _kPw);

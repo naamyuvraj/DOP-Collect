@@ -786,6 +786,33 @@ class _SyncScreenState extends State<SyncScreen> {
     });
   }
 
+  /// Replace the TYPED agent id with the one the portal states for this
+  /// session, whenever they disagree.
+  ///
+  /// Finacle accepts a login id that is a character off, so a typo logs in
+  /// happily — and then the backend binds THAT string. The result was two
+  /// accounts for one agent (`DOP.MI8472350100005` and `DOP.MI847235010005`),
+  /// a phone on each, and a 1:1 rule that could not object because the two
+  /// spellings are genuinely different ids.
+  ///
+  /// The portal knows the answer and puts it on every authenticated page, so
+  /// take it from there. Runs on the page that proved we are logged in, which
+  /// is the first moment the value exists.
+  Future<void> _adoptPortalAgentId() async {
+    try {
+      final real = await _engine.portalAgentId();
+      if (real.isEmpty) return;
+      final typed = (await Credentials.load()).agentId.trim();
+      if (typed == real) return;
+      _t('agent id: portal says "$real", stored was "$typed" — adopting the '
+          'portal\'s');
+      await Credentials.saveAgentId(real);
+    } catch (_) {
+      // Best-effort. A failure here must never block a sync; the next
+      // authenticated page tries again.
+    }
+  }
+
   /// Once login succeeds (we're inside the authenticated portal), kick off the
   /// sync automatically so the agent only has to type the captcha. The sync
   /// itself navigates Dashboard → Accounts → Enquire → the list. Fires once.
@@ -794,6 +821,7 @@ class _SyncScreenState extends State<SyncScreen> {
     final authed = await _engine.isAuthenticated();
     _t('auto-start: authenticated=$authed (A1: probed once, no settle)');
     if (authed) {
+      unawaited(_adoptPortalAgentId());
       // We are inside the portal, so Finacle has accepted a login and cleared
       // its own failed-attempt counter. Ours must clear too, and it must clear
       // for a MANUAL login as well — the old code only ever reset when the app
