@@ -13,6 +13,8 @@ import '../../models/rd_account.dart';
 import '../../theme/app_theme.dart';
 import '../../util/format.dart';
 import '../../widgets/account_sort_bar.dart';
+import '../onboarding_login.dart';
+import '../portal/sync_screen.dart';
 
 /// Build a lot: accounts open sorted most-unpaid first; add installments per
 /// account with a hard ₹20,000 total cap. Saving stores the lot (as a Group)
@@ -95,6 +97,72 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
       }
       return list;
     });
+  }
+
+  /// Offer to fetch missing ASLAAS numbers before the list is written.
+  ///
+  /// Every account has its OWN ASLAAS on the portal, and it is printed against
+  /// its row on the filed list. The number is snapshotted into the lot at save
+  /// time, so an account missing it here produces a list with a blank in that
+  /// column — and the blank is only noticed at the counter, when it is too late
+  /// to go and fetch it.
+  ///
+  /// Fetching is one portal trip for the whole book, not per list, so this asks
+  /// once and then never again for these accounts. Skippable on purpose: a
+  /// blank ASLAAS does not stop a list being filed, and blocking the round for
+  /// a paperwork field would be worse than the blank.
+  ///
+  /// Returns false only if the agent backed out entirely.
+  Future<bool> _offerAslaasFetch() async {
+    final missing = _selected.keys
+        .map((n) => _byNumber[n])
+        .whereType<RdAccount>()
+        .where((a) => (a.aslaas ?? '').trim().isEmpty)
+        .toList();
+    if (missing.isEmpty) return true;
+
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        title: Text('Fetch ASLAAS numbers?', style: AppTheme.display(17)),
+        content: Text(
+          '${missing.length} of ${_selected.length} account'
+          '${_selected.length == 1 ? '' : 's'} in this list have no ASLAAS '
+          'number yet.\n\n'
+          'It is printed against each row on the filed list. Fetching reads '
+          'them from the portal once, for your whole book — not per list.',
+          style: AppTheme.body(13.5, color: AppTheme.inkMuted, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, 'cancel'),
+              child: const Text('Back')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, 'skip'),
+              child: const Text('Skip')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, 'fetch'),
+              child: const Text('Fetch now')),
+        ],
+      ),
+    );
+    if (!mounted || choice == null || choice == 'cancel') return false;
+    if (choice == 'skip') return true;
+
+    if (!await ensureDopLogin(context) || !mounted) return false;
+    await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => SyncScreen(repo: widget.accounts, aslaasSync: true),
+    ));
+    if (!mounted) return false;
+    // Re-read the accounts so the numbers just fetched are the ones
+    // snapshotted into the lot, not the empties we were holding.
+    for (final a in await widget.accounts.all()) {
+      if (_byNumber.containsKey(a.accountNumber)) {
+        _byNumber[a.accountNumber] = a;
+      }
+    }
+    return true;
   }
 
   /// Apply the chosen order. Null = smart priority (most valuable + most
@@ -213,6 +281,11 @@ class _ListBuilderScreenState extends State<ListBuilderScreen> {
       );
       if (cheques == null || !mounted) return; // cancelled
     }
+
+    // Ask about ASLAAS BEFORE the create confirmation. Fetching pushes another
+    // screen, and doing that after "Create" would leave the agent unsure
+    // whether the list had been made.
+    if (!await _offerAslaasFetch() || !mounted) return;
 
     // Creating a lot marks every selected account "Deposited" for this cycle —
     // confirm first, since there's no bulk way to undo that mark.

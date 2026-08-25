@@ -59,6 +59,13 @@ void main() {
     fab.onPressed!();
     await tester.pumpAndSettle();
 
+    // These fixtures carry no ASLAAS, so the builder now offers to fetch it
+    // first. Skip: that path pushes the portal WebView, which this harness has
+    // no platform for, and a blank ASLAAS never blocks a list being filed.
+    expect(find.text('Fetch ASLAAS numbers?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Skip'));
+    await tester.pumpAndSettle();
+
     // Confirm the "Create this lot?" dialog.
     await tester.tap(find.widgetWithText(FilledButton, 'Create'));
     await tester.pumpAndSettle();
