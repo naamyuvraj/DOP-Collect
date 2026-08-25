@@ -296,9 +296,9 @@ is a live banking login — but it does mean the log is the only window in.
 ## 5. Release state
 
 - **Release `1.0.0+48`** (22 Aug 2026) carries all of this session's work,
-  plus patches 1-2 → installs report `1.0.0+50` (list cap of 9, row colours,
-  standing filters, and binding the agent id the portal states rather than the
-  one typed).
+  plus patches 1-3 → installs report `1.0.0+51` (list cap of 9, row colours,
+  standing filters, binding the agent id the portal states rather than the one
+  typed, and the ASLAAS fetch prompt before a list is saved).
   Supersedes `1.0.0+44` + patches 1-3.
   Patch 3 (22 Aug 2026) carries this session: the navigation fix, the
   full-listing fast path, matured accounts, and the login double-submit fix.
