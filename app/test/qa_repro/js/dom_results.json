@@ -1,0 +1,74 @@
+[
+  {
+    "id": "J2-1",
+    "desc": "menu anchor WITHOUT name/id=Enquire: the anchor is clicked, not its cell",
+    "ok": true,
+    "note": "querySelector(\"a\") resolves down to the anchor before closest() walks up; the cell is not clicked"
+  },
+  {
+    "id": "J2-1b",
+    "desc": "a text match on something with no control in it is NOT a click",
+    "ok": true,
+    "note": "a <span> with no anchor or button inside reports false instead of a phantom success"
+  },
+  {
+    "id": "J2-2",
+    "desc": "the same DOM WITH name*=\"Enquire\" is handled correctly by _clickSelector",
+    "ok": true,
+    "note": "the fast path was always fine; J2-1 covers the fallback that was not"
+  },
+  {
+    "id": "J2-3",
+    "desc": "document order is why the fix has to look DOWN, not just up",
+    "ok": true,
+    "note": "querySelectorAll order = [cell,link] — the cell is always seen first, and td.closest('a') === null, so upward resolution alone can never reach the link"
+  },
+  {
+    "id": "J1-1",
+    "desc": "captcha fill focuses the field and fires real key events",
+    "ok": true,
+    "note": "focused, dispatched [keydown,keypress,input,change,keyup,blur] — a portal handler bound to keypress/keydown, or one that requires focus, now runs"
+  },
+  {
+    "id": "J1-2",
+    "desc": "a portal that enables Login on keypress is enabled by our fill",
+    "ok": true,
+    "note": "the keypress handler ran, the button enabled, and _loginJs clicked it on the first poll"
+  },
+  {
+    "id": "J3-1",
+    "desc": "a 120x22 spacer/banner gif is NOT sent to OCR on its shape alone",
+    "ok": true,
+    "note": "dbg=\"1 imgs; top 120x22 s-2\" → scores 4 (size 3 + wide 1) < 5, so no canvas is rendered and no ML Kit pass runs"
+  },
+  {
+    "id": "J3-1b",
+    "desc": "the REAL portal captcha is still picked, by name and by position",
+    "ok": true,
+    "note": "dbg=\"2 imgs; top 120x22 s13; used 120x22 x3\" → the refresh icon is beside the box too, but \"reset\" scores -6 and loses to IMAGECAPTCHA"
+  },
+  {
+    "id": "J3-1c",
+    "desc": "an unnamed captcha beside the verification box still qualifies",
+    "ok": true,
+    "note": "dbg=\"1 imgs; top 120x22 s8; used 120x22 x3\" → 4 (near the field) + 3 (sized) + 1 (wide) = 8 ≥ 5"
+  },
+  {
+    "id": "J3-2",
+    "desc": "an OCR read is never written into the reCAPTCHA token field",
+    "ok": true,
+    "note": "the token field is skipped by name, and it is not a text input either"
+  },
+  {
+    "id": "J3-2b",
+    "desc": "a genuine captcha input is still filled by the loose fallback",
+    "ok": true,
+    "note": "tightening the fallback did not break a deployment that renames the field"
+  },
+  {
+    "id": "C3-1",
+    "desc": "credsFilled returns \"false\" while the Keystore read is still in flight",
+    "ok": true,
+    "note": "empty fields → gate says false → _autofillCaptcha returns with NO retry scheduled"
+  }
+]

@@ -20,13 +20,42 @@ on-device.
   a PII-free schema, never customer data.
 - **OTA updates** via Shorebird.
 
+## Repository layout
+
+```
+app/            Flutter — the agent app. One codebase, two targets:
+                the Android handset and the desktop web build (app/web/).
+admin/          Next.js admin dashboard (analytics, users, releases). Port 3939.
+backend/
+  supabase/     Edge functions — the bridge between app, admin and Postgres.
+  schema/       SQL schema and migrations, applied by hand.
+customer-app/   Placeholder. The customer-facing app, not started.
+docs/
+  ops/          Runbook and scaling notes — how to ship and operate.
+  audits/       Security, payments, sync and UX audits.
+  plans/        Designs and handovers for work in progress.
+  reference/    Portal internals, integration guides, privacy policy.
+brand/          Logos and marks.
+```
+
+**Every Flutter and Shorebird command runs from `app/`,** not the repo root —
+that is where `pubspec.yaml`, `shorebird.yaml` and the git-ignored `env.json`
+live. Supabase CLI commands run from `backend/`, which is where the CLI finds
+`supabase/functions/`.
+
+```bash
+cd app     && flutter test              # the agent app
+cd admin   && npm run dev               # the dashboard
+cd backend && supabase functions deploy <fn> --use-api
+```
+
 ## Stack
 Flutter · SQLite (`sqflite`) · `webview_flutter` · `google_mlkit_text_recognition`
 · `flutter_secure_storage` · Groq (assistant) · Supabase (anonymous analytics).
 
 ## Build
 Secrets are injected at build time from a git-ignored `env.json`
-(see `env.json.example`):
+(see `app/env.json.example`):
 
 ```bash
 cp env.json.example env.json     # then fill in your keys

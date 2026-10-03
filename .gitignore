@@ -14,9 +14,9 @@ build/
 *.iml
 
 # Android
-android/.gradle/
-android/local.properties
-android/key.properties
+app/android/.gradle/
+app/android/local.properties
+app/android/key.properties
 *.keystore
 *.jks
 
@@ -27,8 +27,8 @@ recon/
 # Generated / reference RD report PDFs — contain real customer PII, NEVER commit
 *.pdf
 
-# Supabase CLI local temp
-supabase/.temp/
+# Supabase CLI local temp (project now lives under backend/)
+backend/supabase/.temp/
 
 # Secrets — build-time injected, NEVER commit
 env.json
@@ -40,8 +40,16 @@ prod.md
 production-scaling.md
 chat-agent.md
 
-# Dashboard secrets
+# Admin dashboard secrets (was dashboard/, now admin/)
 admin/keys.js
+
+# OS metadata
+.DS_Store
+*.DS_Store
+
+# Build binaries
+*.apk
 
 # Live portal captures — real customer data, never committed.
 recon/live/
+

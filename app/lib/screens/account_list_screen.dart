@@ -1,0 +1,313 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../data/account_repository.dart';
+import '../data/app_settings.dart';
+import '../data/collection_repository.dart';
+import '../models/account_sort.dart';
+import '../models/rd_account.dart';
+import '../models/summaries.dart';
+import '../theme/app_theme.dart';
+import '../widgets/press.dart';
+import '../widgets/account_row.dart';
+import '../widgets/account_sort_bar.dart';
+import '../widgets/desktop_table.dart';
+import 'portfolio_screen.dart';
+
+/// Accounts list. With [filter] null it is the "All Accounts" tab (search +
+/// Reset); with a [filter] it is a titled bucket list opened from a dashboard
+/// "View" (e.g. Defaulters).
+class AccountListScreen extends StatefulWidget {
+  const AccountListScreen(
+      {super.key,
+      required this.repo,
+      this.collections,
+      this.filter,
+      this.revision = 0});
+  final AccountRepository repo;
+
+  /// Ledger for each account's Khata tab.
+  final CollectionRepository? collections;
+  final AccountFilter? filter;
+
+  /// Bumped by the shell whenever the data may have changed (a Sync, or simply
+  /// re-entering the tab). As a tab this screen lives in an IndexedStack and is
+  /// built once, so without this it would keep showing the very first query —
+  /// a Sync run from Home left it stuck on "No accounts yet".
+  final int revision;
+
+  @override
+  State<AccountListScreen> createState() => _AccountListScreenState();
+}
+
+class _AccountListScreenState extends State<AccountListScreen> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+  Future<List<RdAccount>>? _future;
+  Timer? _debounce;
+
+  /// null = natural (repo) order; else amount/due sort.
+  AccountSort? _sort;
+
+  bool get _isTab => widget.filter == null;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  @override
+  void didUpdateWidget(covariant AccountListScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.revision != widget.revision) setState(_reload);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _reload() {
+    if (_query.isNotEmpty) {
+      _future = widget.repo.search(_query);
+      return;
+    }
+    // The Maturity list is the one place an account that has FINISHED belongs
+    // alongside the ones about to. `repo.all()` returns live accounts only, so
+    // without this the accounts that actually reached term — the whole point of
+    // the bucket — were the ones you could not see here.
+    //
+    // Safe to mix only because Maturity sits under Portfolio, which is
+    // informational. It is not a collection round, and each finished account
+    // renders with a "Matured" chip so it cannot be mistaken for one to visit.
+    if (widget.filter == AccountFilter.maturity) {
+      _future = Future.wait([
+        widget.repo.all(),
+        widget.repo.maturedSince(maturedFrom(DateTime.now())),
+      ]).then((r) => [...r[0], ...r[1]]);
+      return;
+    }
+    _future = widget.repo.all();
+  }
+
+  /// Debounce the SQLite search so it doesn't fire on every keystroke on a
+  /// 500-row DB (the field stuttered on a budget phone).
+  void _onSearchChanged(String v) {
+    setState(() {}); // reflect the clear (✕) button instantly
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      setState(() {
+        _query = v.trim();
+        _reload();
+      });
+    });
+  }
+
+  List<RdAccount> _apply(List<RdAccount> all) {
+    // A closed account has no next installment, so the "installments left"
+    // rule cannot speak for it — it has already arrived. Keep it regardless of
+    // what the filter computes, and let the filter judge the live ones.
+    if (widget.filter == AccountFilter.maturity) {
+      final now = DateTime.now();
+      final live = all.where((a) => !a.isClosed).toList();
+      final done = all.where((a) => a.isClosed).toList();
+      final filtered = [
+        ...done,
+        ...AccountFilter.maturity.filter(live, now),
+      ];
+      if (_sort == null) return filtered;
+      return [...filtered]..sort(_sort!.comparator);
+    }
+    final filtered = widget.filter == null
+        ? all
+        : widget.filter!.filter(all, DateTime.now());
+    if (_sort == null) return filtered;
+    return [...filtered]..sort(_sort!.comparator);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.filter?.title ?? 'All Accounts'),
+        // A centred title is a phone convention — it exists to balance a back
+        // arrow. With a rail there is no back arrow, and a heading floating in
+        // the middle of the window reads as a dialog, not a page.
+        centerTitle: MediaQuery.of(context).size.width < kDesktopBreakpoint,
+        titleSpacing: 20,
+      ),
+      body: Column(
+        children: [
+          if (_isTab) _searchRow(),
+          if (widget.filter == AccountFilter.newAccounts) _monthWindow(),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 4),
+            child: AccountSortBar(
+              value: _sort,
+              smartLabel: 'Default',
+              onChanged: (v) => setState(() => _sort = v),
+            ),
+          ),
+          Expanded(
+            child: FutureBuilder<List<RdAccount>>(
+              future: _future,
+              builder: (context, snap) {
+                if (!snap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final list = _apply(snap.data!);
+                if (list.isEmpty) {
+                  // New Accounts names the window it searched. "Nothing in
+                  // this list" leaves you wondering whether the filter is
+                  // broken or the month was genuinely quiet — and the window
+                  // is a setting, so it is not something you can infer.
+                  final msg = _query.isNotEmpty
+                      ? 'No account matches "$_query".'
+                      : _isTab
+                          ? 'No accounts yet — Sync from the dashboard.'
+                          : widget.filter == AccountFilter.newAccounts
+                              ? 'No new accounts in '
+                                  '${AccountFilter.newAccountsWindowLabel(DateTime.now())}.'
+                              : 'Nothing in this list right now.';
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(msg,
+                          textAlign: TextAlign.center,
+                          style: AppTheme.body(14, color: AppTheme.inkMuted)),
+                    ),
+                  );
+                }
+                void open(RdAccount a) => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => PortfolioScreen(
+                          repo: widget.repo,
+                          accountNumber: a.accountNumber,
+                          collections: widget.collections,
+                        ),
+                      ),
+                    );
+
+                // Same data, two shapes. See [DesktopAccountTable] for why a
+                // desktop gets a table rather than the stacked card.
+                if (MediaQuery.of(context).size.width >= kDesktopBreakpoint) {
+                  return DesktopAccountTable(accounts: list, onOpen: open);
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.only(top: 4, bottom: 120),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) => AccountRow(
+                    account: list[i],
+                    onTap: () => open(list[i]),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// How far back "new" reaches. It lives here rather than on the dashboard
+  /// card because changing the window and seeing which accounts it lets in is
+  /// one glance, and because a summary tile should be a figure to read, not a
+  /// form to operate.
+  Widget _monthWindow() {
+    const options = [1, 2, 3];
+    final current = AccountFilter.newAccountMonths;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Row(
+        children: [
+          Text('Opened in the last',
+              style: AppTheme.body(13, color: AppTheme.inkMuted)),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: AppTheme.panel(AppTheme.surfaceSoft, radius: 12),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final m in options)
+                  PressFace(
+                    onTap: () async {
+                      if (m == AccountFilter.newAccountMonths) return;
+                      AccountFilter.newAccountMonths = m;
+                      await AppSettings.setNewAccountMonths(m);
+                      if (mounted) setState(_reload);
+                    },
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                    rest: m == current ? AppTheme.faceOffsetPressed : 0,
+                    pressedFace: 0,
+                    decoration: (face) => m == current
+                        ? AppTheme.card(
+                            fill: AppTheme.black, radius: 8, offset: face)
+                        : const BoxDecoration(),
+                    child: Text('$m mo',
+                        style: AppTheme.body(13,
+                            weight: FontWeight.w700,
+                            color: m == current
+                                ? AppTheme.onAccent
+                                : AppTheme.inkFaint)),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _searchRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        // A field you type into, so it takes the edge but not the face.
+        decoration: AppTheme.card(radius: 12, offset: 0),
+        child: Row(
+          children: [
+            Icon(Icons.search_rounded, size: 20, color: AppTheme.inkFaint),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _searchCtrl,
+                onChanged: _onSearchChanged,
+                style: AppTheme.body(15),
+                cursorColor: AppTheme.accent,
+                decoration: InputDecoration(
+                  hintText: 'Search name or account number',
+                  hintStyle: AppTheme.body(15, color: AppTheme.inkFaint),
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
+              ),
+            ),
+            if (_searchCtrl.text.isNotEmpty)
+              PressFace(
+                onTap: () => setState(() {
+                  _searchCtrl.clear();
+                  _query = '';
+                  _reload();
+                }),
+                padding: const EdgeInsets.all(6),
+                rest: 0,
+                pressedFace: 0,
+                decoration: (_) => const BoxDecoration(),
+                child: Icon(Icons.close_rounded,
+                    size: 20, color: AppTheme.inkMuted),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
