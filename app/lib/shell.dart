@@ -16,6 +16,7 @@ import 'screens/lists/saved_lists_screen.dart';
 import 'screens/profile_view.dart';
 import 'screens/settings_screen.dart';
 import 'services/analytics.dart';
+import 'services/cloud_sync.dart';
 import 'theme/app_theme.dart';
 import 'widgets/press.dart';
 import 'widgets/product_tour.dart';
@@ -41,7 +42,7 @@ class MainShell extends StatefulWidget {
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _index = 0;
   int _dataVersion = 0;
 
@@ -51,6 +52,7 @@ class _MainShellState extends State<MainShell> {
   // its full width back for the figures.
   String _agentName = '';
   Uint8List? _agentPhoto;
+  StreamSubscription<SyncReport>? _syncSub;
 
   void _loadProfile() {
     AppSettings.agentName().then((v) {
@@ -108,7 +110,14 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadProfile();
+    CloudSync.startAutoSync();
+    _syncSub = CloudSync.syncStream.listen((report) {
+      if (report.changedAnything && mounted) {
+        _refreshData();
+      }
+    });
     // First launch after onboarding: run the guided tour once.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (await AppSettings.tourSeen()) return;
@@ -141,6 +150,21 @@ class _MainShellState extends State<MainShell> {
         await AppSettings.setTourSeen(true);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _syncSub?.cancel();
+    CloudSync.stopAutoSync();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      CloudSync.triggerAutoSync();
+    }
   }
 
   /// Switch tabs then let the new page lay out before the spotlight measures.

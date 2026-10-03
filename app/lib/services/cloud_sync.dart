@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
@@ -67,14 +68,32 @@ class CloudSync {
   @visibleForTesting
   static http.Client client = http.Client();
 
+  static Timer? _autoSyncTimer;
+  static bool _isSyncing = false;
+  static final StreamController<SyncReport> _syncStreamController =
+      StreamController<SyncReport>.broadcast();
+
+  /// Stream of sync reports emitted whenever a sync completes.
+  static Stream<SyncReport> get syncStream => _syncStreamController.stream;
+
+  /// Start background periodic auto-sync (every 3 minutes).
+  static void startAutoSync({Duration interval = const Duration(minutes: 3)}) {
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer.periodic(interval, (_) => triggerAutoSync());
+  }
+
+  /// Stop background periodic auto-sync.
+  static void stopAutoSync() {
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = null;
+  }
+
+  /// Trigger an auto-sync run if not already running.
+  static Future<SyncReport?> triggerAutoSync({Database? db}) async {
+    return run(db: db);
+  }
+
   // Both marks are keyed by the agent whose book they describe.
-  //
-  // One database file per agent means one pair of cursors per agent, or the
-  // two disagree the moment an agent switches: B would inherit A's high-water
-  // mark, and because B's own server rows are older than it, B's pull returns
-  // nothing at all and the app looks broken. Suffixing them instead of
-  // clearing them on logout also means switching back to A is instant — A's
-  // marks come back with A's book, rather than his whole book being re-pushed.
   static String get _suffix {
     final k = AppDatabase.instance.agentKey;
     return k.isEmpty ? '' : '_$k';
@@ -87,10 +106,6 @@ class CloudSync {
   static const _pushChunk = 2000;
 
   /// Tables, in the order a pull must be applied.
-  ///
-  /// Accounts first: a collection references an account number, and the khata
-  /// joins the two. Applying collections first would briefly show handovers
-  /// against customers this device has never heard of.
   static const _tables = ['accounts', 'collections', 'lots'];
 
   static Future<Map<String, dynamic>?> _post(Map<String, Object?> body) async {
@@ -113,31 +128,24 @@ class CloudSync {
   }
 
   /// Push local changes, then pull remote ones. Safe to call repeatedly.
-  ///
-  /// Never throws: a sync failing is a normal condition (no signal at a
-  /// customer's door) and must never take a screen down with it.
-  ///
-  /// [db] is a test seam. Production passes nothing and gets the app's own
-  /// encrypted database; a test passes an in-memory SQLite so the merge rules
-  /// below can be exercised against a REAL engine rather than a mock that
-  /// agrees with them by construction.
   static Future<SyncReport> run({Database? db}) async {
-    // The guard that makes the promise above true.
-    //
-    // It was not true before: `_apply` and `AppDatabase.instance.database` are
-    // both awaited below without one, and `run` is called as `unawaited(...)`
-    // from `main()` and the home dashboard — so a throw became an unhandled
-    // async error that nothing surfaced and nothing logged. Worse, the pull
-    // cursor is only saved AFTER `_apply`, so the same page was re-fetched on
-    // every sync from then on: one bad row stalled the pull permanently and
-    // silently, which reads exactly like "sync does nothing".
+    if (_isSyncing) {
+      return const SyncReport(ok: true, message: 'Sync already in progress.');
+    }
+    _isSyncing = true;
     try {
-      return await _run(db);
+      final report = await _run(db);
+      if (!_syncStreamController.isClosed) {
+        _syncStreamController.add(report);
+      }
+      return report;
     } catch (e, st) {
       Analytics.error('cloud_sync', 'CloudSync.run failed: $e',
           detail: st.toString(), screen: 'cloud_sync');
       return const SyncReport(
           ok: false, code: 'error', message: 'Sync failed. Try again.');
+    } finally {
+      _isSyncing = false;
     }
   }
 
