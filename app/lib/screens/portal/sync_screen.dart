@@ -394,6 +394,15 @@ class _SyncScreenState extends State<SyncScreen> {
               'diagnostics.'
           : 'Portal says: $why');
     }
+
+    if (_loginClicks < 4 && !_awaitingHuman) {
+      _t('auto-login: scheduling auto-retry after rejection (attempt $_loginClicks/4)');
+      Future<void>.delayed(const Duration(milliseconds: 800), () {
+        if (mounted && !_busy && !_loginInFlight && !_autoStarted) {
+          _armCaptchaSolve();
+        }
+      });
+    }
   }
 
   /// Whatever the login page is saying after a rejected submit — Finacle puts
