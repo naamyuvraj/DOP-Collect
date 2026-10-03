@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -92,7 +94,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => SyncScreen(repo: widget.repo)),
     );
-    if (ok == true) widget.onSynced?.call();
+    if (ok == true) {
+      widget.onSynced?.call();
+      unawaited(CloudSync.run());
+    }
   }
 
   /// Deep Sync: crawl per-account detail pages for exact last-deposit dates,
@@ -104,7 +109,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       MaterialPageRoute(
           builder: (_) => SyncScreen(repo: widget.repo, deepSync: true)),
     );
-    if (ok == true) widget.onSynced?.call();
+    if (ok == true) {
+      widget.onSynced?.call();
+      unawaited(CloudSync.run());
+    }
   }
 
   /// Read the portal's "ASLAAS Number Report" and fill each account's ASLAAS
@@ -116,7 +124,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       MaterialPageRoute(
           builder: (_) => SyncScreen(repo: widget.repo, aslaasSync: true)),
     );
-    if (ok == true) widget.onSynced?.call();
+    if (ok == true) {
+      widget.onSynced?.call();
+      unawaited(CloudSync.run());
+    }
   }
 
   /// Real logout: wipe the saved DOP login from the Keystore and drop back to
@@ -207,11 +218,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (!_cloudSyncing) _cloudSync();
             }, primary: true)
           else ...[
-            _btn('Sync Collection (DOP Portal)', _sync, primary: true),
-            _btn(_cloudSyncing ? 'Syncing with Admin…' : 'Cloud Sync (Backup to Admin)',
-                () {
-              if (!_cloudSyncing) _cloudSync();
-            }, primary: false),
+            _btn('Sync Collection', _sync, primary: true),
             _btn('Deep Sync · last deposit', _deepSync),
             _btn('Get ASLAAS numbers', _getAslaas),
           ],

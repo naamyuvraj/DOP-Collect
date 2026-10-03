@@ -23,6 +23,7 @@ import '../../data/portal/portal.dart';
 import '../../data/portal/portal_webview.dart';
 import '../../models/lot.dart';
 import '../../services/analytics.dart';
+import '../../services/cloud_sync.dart';
 import '../../services/supabase_config.dart';
 import '../../data/portal/portal_sync.dart';
 import '../../theme/app_theme.dart';
@@ -1974,6 +1975,7 @@ class _SyncScreenState extends State<SyncScreen> {
       }
 
       await AppSettings.setLastSyncNow();
+      unawaited(CloudSync.run());
       unawaited(Analytics.track('sync_done', {
         'accounts': result.accounts.length,
         // The "Monthly Book" — total ₹ of monthly RD installments across the
