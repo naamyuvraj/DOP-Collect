@@ -10,7 +10,7 @@ Supabase project ref: `ojorpmtptryldizogtkz` · App version: `0.9.53+27`
 > `pubspec.yaml`, `shorebird.yaml` and the git-ignored `env.json` live, and
 > `--dart-define-from-file=env.json` resolves against that directory.
 > Supabase CLI commands run from **`backend/`**. SQL lives in
-> `backend/schema/`. The admin dashboard is **`admin/`** (was `admin/`).
+> `backend/schema/`. The admin dashboard is **`admin/`** (was `dashboard/`).
 
 ---
 

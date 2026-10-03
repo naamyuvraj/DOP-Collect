@@ -17,22 +17,21 @@ class PrivacyScreen extends StatelessWidget {
         children: [
           _intro(),
           const SizedBox(height: 14),
-          _section('What stays on your phone', [
-            'Your customers, their RD account numbers, names, amounts and dues '
-                'are stored only on this device.',
-            'That store is ENCRYPTED with AES-256. The key lives in the '
-                'phone\'s hardware-backed Keystore, so the file is unreadable '
-                'even if someone copies it off the device.',
-            'This data is never uploaded to us or any third party.',
-            'Uninstalling the app erases it — permanently, and we hold no copy '
-                'to restore it from. Keep your phone safe.',
+          _section('Encrypted local store & Cloud Sync', [
+            'Your customers, account numbers, amounts and dues are stored '
+                'encrypted (AES-256) on this device.',
+            'To support multi-device sync between your phone and desktop app, '
+                'your customer book is securely backed up to an isolated, '
+                'encrypted database accessible only via your authenticated session.',
+            'That cloud store has Row Level Security (RLS) enabled, so no '
+                'unauthorized third party can access your book.',
           ], tone: AppTheme.greenSoft, dot: AppTheme.green),
-          _section('Your DOP login', [
-            'Your Agent ID and password are saved in the phone\'s encrypted '
-                'Keystore, not in plain text.',
-            'They are used only to log into the official India Post agent '
-                'portal on your behalf. The captcha is read on-device.',
-            'Tap Logout in Settings to remove them at any time.',
+          _section('Your DOP login (Never Uploaded)', [
+            'Your Agent ID and DOP portal password stay strictly inside your phone\'s '
+                'hardware-backed Keystore in encrypted form.',
+            'They are used ONLY on-device to log into the official India Post '
+                'portal on your behalf. They are NEVER uploaded to our cloud server or any third party.',
+            'Tap Logout in Settings to remove them from your phone at any time.',
           ], tone: AppTheme.blueSoft, dot: AppTheme.accent),
           _section('The AI assistant', [
             'Common questions are answered fully offline, on your phone.',
@@ -42,20 +41,13 @@ class PrivacyScreen extends StatelessWidget {
             'With no network, the assistant answers on-device by itself — there '
                 'is nothing to switch on.',
           ], tone: AppTheme.focal, dot: AppTheme.amberOnFocal),
-          _section('What we do collect', [
+          _section('Account & Telemetry Data', [
             'About you: your Agent name, your Agent ID, your post-office '
                 'region (SOL), your phone model and your mobile number. This '
-                'runs your account and keeps it to your own phones.',
-            'About your usage: a device id, the app version, and event names '
+                'runs your account and limits it to your own devices.',
+            'About usage: device IDs, app version, and event diagnostics '
                 'like "sync completed" or "calculator used".',
-            'Never your customers. No name, account number, amount or due date '
-                'ever leaves your phone — and neither do the questions you ask '
-                'the assistant.',
-            'This usage data is always on, and you accepted it when you created '
-                'your account. It carries nothing about your customers, so '
-                'there is no per-phone switch for it.',
-            'Your mobile number is stored as a one-way code we cannot read '
-                'back.',
+            'Your mobile number is stored as a one-way hashed code.',
           ], tone: AppTheme.surfaceSoft, dot: AppTheme.inkMuted),
           _section('Security', [
             'The account database on this phone is encrypted at rest with '
@@ -63,12 +55,10 @@ class PrivacyScreen extends StatelessWidget {
             'Your DOP password never leaves the encrypted Keystore, and the '
                 'captcha is read on-device.',
             'All network traffic uses HTTPS.',
-            'The app is excluded from cloud backups and device-to-device '
-                'transfer, so your book is never copied off this phone.',
             'No advertising or tracking SDKs are included.',
           ], tone: AppTheme.greenSoft, dot: AppTheme.green),
           _section('Permissions', [
-            'Internet — to reach the DOP portal and the AI assistant.',
+            'Internet — to reach the DOP portal and sync your encrypted book.',
             'Microphone — only when you tap the mic to ask the assistant by '
                 'voice.',
           ], tone: AppTheme.blueSoft, dot: AppTheme.accent),
@@ -97,9 +87,9 @@ class PrivacyScreen extends StatelessWidget {
               style: AppTheme.display(20, weight: FontWeight.w800)),
           const SizedBox(height: 6),
           Text(
-            'DOP Collect is offline-first. Your customers\' information lives '
-            'encrypted on this phone and is never sent to us. Here is exactly '
-            'what happens with your data.',
+            'DOP Collect is designed for privacy and reliability. Your book is '
+            'encrypted on this phone and securely synced to your devices. '
+            'Your DOP portal password never leaves your handset.',
             style: AppTheme.body(13.5, color: AppTheme.inkMuted, height: 1.45),
           ),
         ],

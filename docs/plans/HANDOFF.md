@@ -21,15 +21,13 @@ over an existing one — which wipes the `collections` ledger on every phone.
 ## The three things that will waste your time
 
 **1. `shorebird` exits 0 on failure.** It did this on four failed downloads and
-on a bad-flag run. Never trust `$?` — grep the output for `Published`:
-
-```
-cd /Users/yuvrajmandal/Desktop/papa
+on a bad-flag run. Never trust `$?` — grep the output for `P```
+cd /Users/yuvrajmandal/Projects/papa/app
 shorebird patch --platforms=android --release-version=1.0.0+31 -- \
   --dart-define-from-file=env.json --no-tree-shake-icons
 ```
 
-`--flutter-version` is valid on `release` and **rejected by `patch`** (it prints
+--`--flutter-version` is valid on `release` and **rejected by `patch`** (it prints
 usage and exits 0). On `release`, always pass it — unpinned pulls the newest
 Flutter and downloads a ~960 MB engine first.
 
@@ -42,10 +40,9 @@ work at all. That exclusion lives in `android/app/build.gradle.kts` under
 its `.so` files outside NDK packaging) and **not** `--target-platform` (Shorebird
 injects its own, and a duplicate flag kills the build).
 
-**3. `next build` cannot run locally.** Every `build/` directory inside
-`dashboard/node_modules` is missing. `tsc --noEmit` works, and Vercel installs
-fresh from the lockfile, so deploys are fine. Repair with
-`cd dashboard && rm -rf node_modules && npm install`.
+**3. `next build` local troubleshooting.** If `node_modules` gets corrupted:
+`tsc --noEmit` works, and Vercel installs fresh from the lockfile, so deploys are fine.
+Repair locally with: `cd admin && rm -rf node_modules && npm install`.
 
 ## Outstanding
 
@@ -91,12 +88,12 @@ fresh from the lockfile, so deploys are fine. Repair with
 
 ## Deploy order that matters
 
-`ingest` → dashboard → `admin/schema_one_name.sql`. The old `ingest` writes
+`ingest` → dashboard → `backend/schema/schema_one_name.sql`. The old `ingest` writes
 `devices.name`; drop that column under it and every device upsert fails 42703,
 silently taking `last_seen`, `mobile`, `agent_id` and `model` with it.
 
-`admin/schema_devices_view.sql` must run after `schema.sql`,
+`backend/schema/schema_devices_view.sql` must run after `schema.sql`,
 `schema_accounts.sql`, `schema_regions.sql`, `schema_otp.sql`. Its column order
 is load-bearing: `create or replace view` can only **append**.
 
-RUNBOOK.md is current and covers the rest.
+RUNBOOK.md is current and covers the rest.md is current and covers the rest.

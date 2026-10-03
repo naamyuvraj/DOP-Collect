@@ -67,13 +67,10 @@ Without keys the app still runs — the assistant's cloud tier and analytics
 simply stay off.
 
 ## Privacy
-Customer data (names, account numbers, amounts) never leaves the device.
-Credentials are stored in the Android Keystore. The assistant has an
-**Offline-only** mode and analytics is **anonymous with an opt-out**.
+Customer books (names, account numbers, amounts) are stored encrypted (AES-256) on-device and backed up to an isolated cloud database to enable multi-device sync across an agent's registered devices. DOP Portal credentials (ID & Password) stay strictly in the local hardware-backed Keystore and are **never uploaded**.
 
-## Admin analytics
-`admin/schema.sql` sets up Supabase; `admin/dashboard.html` is a self-contained,
-themed dashboard (open locally with your service-role key).
+## Admin dashboard
+The admin dashboard lives in `admin/` (Next.js 14). Backend SQL schemas live under `backend/schema/` and edge functions under `backend/supabase/functions/`.
 
 ---
 Built by Yuvraj Mandal.

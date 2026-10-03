@@ -24,31 +24,19 @@ Deposit collection agents. It helps an agent organise their own collection lists
 generate reports, and log in to the official India Post agent portal. This policy
 explains what the app stores, what it sends, and to whom.</p>
 
-<h2>1. Data that stays on your device</h2>
-<p>The following is stored <strong>only on your phone</strong> and is never sent to us:</p>
-<ul>
-  <li>Your customers’ names, account numbers, deposit amounts and dues — held in a
-      local database that is <strong>encrypted at rest (SQLCipher, AES-256)</strong>.</li>
-  <li>Your India Post agent portal login (Agent ID and password) — stored in the
-      Android <strong>Keystore</strong> (hardware-backed encrypted storage), used only to
-      sign in to the official portal inside the app.</li>
-</ul>
-<p>We cannot see this data. It leaves your device only when <em>you</em> submit it to
-the official India Post portal or share a report you generate.</p>
+<h2>1. Data storage & Encryption</h2>
+<p>Your customer book is stored in a local database on your device, <strong>encrypted at rest with AES-256 (SQLCipher)</strong>. To enable multi-device sync between your mobile app and desktop portal, your customer records are securely backed up to an isolated, encrypted cloud database accessible only through your authenticated session token via Row Level Security (RLS).</p>
 
-<h2>2. Data we collect</h2>
+<h2>2. Your DOP Portal Credentials (Never Uploaded)</h2>
+<p>Your India Post agent portal login (Agent ID and password) is stored strictly in your device's <strong>hardware-backed Keystore</strong>. They are used <strong>on-device only</strong> to log into the official India Post agent portal on your behalf. <strong>Your portal password is NEVER sent to our servers or any third party.</strong></p>
+
+<h2>3. Data we collect</h2>
 <p>To run your account, secure it, and improve the app, we collect:</p>
 <ul>
-  <li><strong>Account &amp; identity:</strong> your name, India Post Agent ID, and
-      (if phone verification is enabled) your mobile number.</li>
-  <li><strong>Device &amp; usage:</strong> a random device identifier, app version,
-      your post-office region/SOL code, and anonymous usage events (e.g. “sync
-      completed”) — never the contents of your customer data.</li>
-  <li><strong>Payments:</strong> if you subscribe, your plan and payment reference.
-      Card/UPI details are handled entirely by our payment processor; we never see or
-      store them.</li>
+  <li><strong>Account &amp; identity:</strong> your name, India Post Agent ID, and your mobile number for device session verification.</li>
+  <li><strong>Device &amp; usage:</strong> a random device identifier, app version, post-office region/SOL code, and anonymous usage events (e.g. “sync completed”) for operational diagnostics.</li>
+  <li><strong>Payments:</strong> if you subscribe, your plan and payment reference processed securely via Razorpay.</li>
 </ul>
-<p>We do <strong>not</strong> collect your customers’ personal data on our servers.</p>
 
 <h2>3. How we use it</h2>
 <ul>
