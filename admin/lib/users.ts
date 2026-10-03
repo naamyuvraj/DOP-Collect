@@ -82,7 +82,7 @@ export async function computeUsers(): Promise<UsersData> {
   if (!dbConfigured()) return { rows: [], totals: empty, region_labels: {} };
   const sb = admin();
 
-  const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes, sessRes, acctRes, aiRes, payCfgRes, planRes] = await Promise.all([
+  const [baseRes, devRes, subRes, syncRes, submitRes, cfgRes, sessRes, acctRes, aiRes, payCfgRes, planRes, bookAcctRes, bookLotRes] = await Promise.all([
     sb.from("v_devices").select("*"),
     sb.from("devices").select("*"),
     sb.from("v_subscriptions").select("agent_id,plan_name,plan_code,status"),
@@ -96,6 +96,8 @@ export async function computeUsers(): Promise<UsersData> {
     // Every plan, not just the trial: `subscribers` is decided on price now, so
     // it needs to know which codes actually charge.
     sb.from("plans").select("code,name,price_inr,duration_days"),
+    sb.from("book_accounts").select("account_id,denomination_amount").eq("deleted", false),
+    sb.from("book_lots").select("account_id,total_amount").eq("deleted", false),
   ]);
 
   const base = (baseRes.error ? (devRes.data as any[]) : (baseRes.data as any[])) || [];
@@ -103,9 +105,27 @@ export async function computeUsers(): Promise<UsersData> {
   const subs = (subRes.data as any[]) || [];
   const syncs = (syncRes.data as any[]) || [];
   const submits = (submitRes.data as any[]) || [];
+  const bookAccts = (bookAcctRes.data as any[]) || [];
+  const bookLots = (bookLotRes.data as any[]) || [];
 
   const acctToAgent = new Map<string, string>();
   for (const a of (acctRes.data as any[]) || []) if (a.id && a.agent_id) acctToAgent.set(a.id, a.agent_id);
+
+  // Direct database backup aggregation by account_id (agent's primary account UUID)
+  const bookByAccountId = new Map<string, { accounts: number; value: number }>();
+  for (const b of bookAccts) {
+    if (!b.account_id) continue;
+    const cur = bookByAccountId.get(b.account_id) || { accounts: 0, value: 0 };
+    cur.accounts += 1;
+    cur.value += Number(b.denomination_amount) || 0;
+    bookByAccountId.set(b.account_id, cur);
+  }
+
+  const bookLotsByAccountId = new Map<string, number>();
+  for (const l of bookLots) {
+    if (!l.account_id) continue;
+    bookLotsByAccountId.set(l.account_id, (bookLotsByAccountId.get(l.account_id) || 0) + (Number(l.total_amount) || 0));
+  }
 
   const sessByDevice =
     new Map<string, { account_id: string | null; verified: boolean; live: boolean }>();
@@ -202,9 +222,21 @@ export async function computeUsers(): Promise<UsersData> {
       mobile: x.mobile || null,
       model: x.model || null,
       sol_id: x.sol_id || (agentId ? solOf(agentId) || null : null),
-      accounts: accByDevice.has(id) ? accByDevice.get(id)! : null,
-      value: valueByDevice.has(id) ? valueByDevice.get(id)! : null,
-      collected: collByDevice.get(id) || 0,
+      accounts: accByDevice.has(id)
+        ? accByDevice.get(id)!
+        : accountId && bookByAccountId.has(accountId)
+        ? bookByAccountId.get(accountId)!.accounts
+        : null,
+      value: valueByDevice.has(id)
+        ? valueByDevice.get(id)!
+        : accountId && bookByAccountId.has(accountId)
+        ? bookByAccountId.get(accountId)!.value
+        : null,
+      collected: collByDevice.has(id)
+        ? collByDevice.get(id)!
+        : accountId && bookLotsByAccountId.has(accountId)
+        ? bookLotsByAccountId.get(accountId)!
+        : 0,
       phone_verified: !!x.phone_verified || !!sess?.verified,
       session_live: !!sess?.live,
       app_version: b.app_version || null,

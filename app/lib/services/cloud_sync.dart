@@ -275,6 +275,22 @@ class CloudSync {
       if (++guard > 200) break;
     }
 
+    try {
+      final acctRows = await database.rawQuery(
+          'SELECT COUNT(*) as c, SUM(denomination_amount) as s FROM accounts');
+      if (acctRows.isNotEmpty) {
+        final c = (acctRows.first['c'] as num?)?.toInt() ?? 0;
+        final s = (acctRows.first['s'] as num?)?.toInt() ?? 0;
+        if (c > 0) {
+          unawaited(Analytics.track('sync_done', {
+            'accounts': c,
+            'total_amount': s,
+            'source': 'cloud_sync',
+          }));
+        }
+      }
+    } catch (_) {}
+
     return SyncReport(pushed: totalPushed, pulled: totalPulled);
   }
 
