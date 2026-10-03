@@ -173,7 +173,17 @@ class CloudSync {
 
     for (final table in _tables) {
       final since = highWater[table] as String? ?? '';
-      final rows = await _dirtyRows(database, table, since);
+      var rows = await _dirtyRows(database, table, since);
+      if (rows.isEmpty && since.isNotEmpty) {
+        // High-water mark was filtering out local rows, but server may be empty.
+        // If SQLite has local rows, force a full sync pass so book_accounts is populated.
+        final localCount = Sqflite.firstIntValue(
+                await database.rawQuery('SELECT COUNT(*) FROM $table')) ??
+            0;
+        if (localCount > 0) {
+          rows = await _dirtyRows(database, table, '');
+        }
+      }
       if (rows.isEmpty) continue;
       sending[table] = rows;
       // Rule 2: the mark is the newest row we are ACTUALLY sending, read off
