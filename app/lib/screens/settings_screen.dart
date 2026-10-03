@@ -81,9 +81,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       content: Text(!r.ok
           ? r.message
           : r.changedAnything
-              ? 'Synced — ${r.pulled} in, ${r.pushed} out.'
-              : 'Already up to date.'),
-      duration: const Duration(seconds: 3),
+              ? 'Synced to Admin — ${r.pushed} backed up, ${r.pulled} received.'
+              : 'Admin Dashboard is already up to date.'),
+      duration: const Duration(seconds: 4),
     ));
     if (r.pulled > 0) widget.onSynced?.call();
   }
@@ -218,7 +218,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (!_cloudSyncing) _cloudSync();
             }, primary: true)
           else ...[
-            _btn('Sync Collection', _sync, primary: true),
+            _btn('Sync Collection (DOP Portal)', _sync, primary: true),
+            _btn(_cloudSyncing ? 'Syncing to Admin…' : 'Backup to Admin Dashboard',
+                () {
+              if (!_cloudSyncing) _cloudSync();
+            }),
             _btn('Deep Sync · last deposit', _deepSync),
             _btn('Get ASLAAS numbers', _getAslaas),
           ],
