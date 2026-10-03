@@ -79,6 +79,7 @@ class CloudSync {
   /// Start background periodic auto-sync (every 3 minutes).
   static void startAutoSync({Duration interval = const Duration(minutes: 3)}) {
     _autoSyncTimer?.cancel();
+    unawaited(triggerAutoSync());
     _autoSyncTimer = Timer.periodic(interval, (_) => triggerAutoSync());
   }
 

@@ -207,9 +207,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (!_cloudSyncing) _cloudSync();
             }, primary: true)
           else ...[
-            _btn('Sync Collection', _sync, primary: true),
-            _btn('Deep Sync · last deposit', _deepSync, primary: true),
-            _btn('Get ASLAAS numbers', _getAslaas, primary: true),
+            _btn('Sync Collection (DOP Portal)', _sync, primary: true),
+            _btn(_cloudSyncing ? 'Syncing with Admin…' : 'Cloud Sync (Backup to Admin)',
+                () {
+              if (!_cloudSyncing) _cloudSync();
+            }, primary: false),
+            _btn('Deep Sync · last deposit', _deepSync),
+            _btn('Get ASLAAS numbers', _getAslaas),
           ],
           // Matured Accounts lived here and is now on the home screen, under
           // Portfolio → Maturity, where finished accounts sit beside the ones
