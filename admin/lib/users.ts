@@ -111,20 +111,46 @@ export async function computeUsers(): Promise<UsersData> {
   const acctToAgent = new Map<string, string>();
   for (const a of (acctRes.data as any[]) || []) if (a.id && a.agent_id) acctToAgent.set(a.id, a.agent_id);
 
-  // Direct database backup aggregation by account_id (agent's primary account UUID)
+  // Direct database backup aggregation by account_id (UUID) & agent_id (string)
   const bookByAccountId = new Map<string, { accounts: number; value: number }>();
+  const bookByAgentId = new Map<string, { accounts: number; value: number }>();
+  let totalBookAccounts = 0;
+  let totalBookValue = 0;
+
   for (const b of bookAccts) {
     if (!b.account_id) continue;
+    totalBookAccounts += 1;
+    const val = Number(b.denomination_amount) || 0;
+    totalBookValue += val;
+
     const cur = bookByAccountId.get(b.account_id) || { accounts: 0, value: 0 };
     cur.accounts += 1;
-    cur.value += Number(b.denomination_amount) || 0;
+    cur.value += val;
     bookByAccountId.set(b.account_id, cur);
+
+    const ag = acctToAgent.get(b.account_id);
+    if (ag) {
+      const curAg = bookByAgentId.get(ag) || { accounts: 0, value: 0 };
+      curAg.accounts += 1;
+      curAg.value += val;
+      bookByAgentId.set(ag, curAg);
+    }
   }
 
   const bookLotsByAccountId = new Map<string, number>();
+  const bookLotsByAgentId = new Map<string, number>();
+  let totalBookCollected = 0;
+
   for (const l of bookLots) {
     if (!l.account_id) continue;
-    bookLotsByAccountId.set(l.account_id, (bookLotsByAccountId.get(l.account_id) || 0) + (Number(l.total_amount) || 0));
+    const amt = Number(l.total_amount) || 0;
+    totalBookCollected += amt;
+
+    bookLotsByAccountId.set(l.account_id, (bookLotsByAccountId.get(l.account_id) || 0) + amt);
+    const ag = acctToAgent.get(l.account_id);
+    if (ag) {
+      bookLotsByAgentId.set(ag, (bookLotsByAgentId.get(ag) || 0) + amt);
+    }
   }
 
   const sessByDevice =
@@ -213,30 +239,33 @@ export async function computeUsers(): Promise<UsersData> {
     const sess = sessByDevice.get(id);
     const accountId = sess?.account_id || x.account_id || null;
     const agentId = x.agent_id || (accountId ? acctToAgent.get(accountId) || null : null);
-    return {
-      id,
-      account_id: accountId,
-      agentId,
-      // One name, one column. `devices.name` no longer exists.
-      name: b.agent_name || x.agent_name || null,
-      mobile: x.mobile || null,
-      model: x.model || null,
-      sol_id: x.sol_id || (agentId ? solOf(agentId) || null : null),
-      accounts: accByDevice.has(id)
-        ? accByDevice.get(id)!
-        : accountId && bookByAccountId.has(accountId)
-        ? bookByAccountId.get(accountId)!.accounts
-        : null,
-      value: valueByDevice.has(id)
-        ? valueByDevice.get(id)!
-        : accountId && bookByAccountId.has(accountId)
-        ? bookByAccountId.get(accountId)!.value
-        : null,
-      collected: collByDevice.has(id)
-        ? collByDevice.get(id)!
-        : accountId && bookLotsByAccountId.has(accountId)
-        ? bookLotsByAccountId.get(accountId)!
-        : 0,
+      const bookData = (accountId ? bookByAccountId.get(accountId) : null)
+        || (agentId ? bookByAgentId.get(agentId) : null);
+      const bookColl = (accountId ? bookLotsByAccountId.get(accountId) : null)
+        || (agentId ? bookLotsByAgentId.get(agentId) : null);
+
+      return {
+        id,
+        account_id: accountId,
+        agentId,
+        // One name, one column. `devices.name` no longer exists.
+        name: b.agent_name || x.agent_name || null,
+        mobile: x.mobile || null,
+        model: x.model || null,
+        sol_id: x.sol_id || (agentId ? solOf(agentId) || null : null),
+        accounts: accByDevice.has(id)
+          ? accByDevice.get(id)!
+          : bookData
+          ? bookData.accounts
+          : null,
+        value: valueByDevice.has(id)
+          ? valueByDevice.get(id)!
+          : bookData
+          ? bookData.value
+          : null,
+        collected: collByDevice.has(id)
+          ? collByDevice.get(id)!
+          : bookColl ?? 0,
       phone_verified: !!x.phone_verified || !!sess?.verified,
       session_live: !!sess?.live,
       app_version: b.app_version || null,
@@ -370,9 +399,9 @@ export async function computeUsers(): Promise<UsersData> {
     verified: rows.filter((r) => r.phone_verified).length,
     active: agents.filter((r) => r.active).length,
     installs: perDevice.length,
-    accounts: rows.reduce((s, r) => s + (r.accounts || 0), 0),
-    value: rows.reduce((s, r) => s + (r.value || 0), 0),
-    collected: rows.reduce((s, r) => s + r.collected, 0),
+    accounts: rows.reduce((s, r) => s + (r.accounts || 0), 0) || totalBookAccounts,
+    value: rows.reduce((s, r) => s + (r.value || 0), 0) || totalBookValue,
+    collected: rows.reduce((s, r) => s + r.collected, 0) || totalBookCollected,
     lists: submits.length,
     // PAYING subscribers only — see lib/subs.ts for why this is decided on the
     // plan's PRICE and not on `status` or the string 'trial'. Excluding the
