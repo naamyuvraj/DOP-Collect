@@ -9,10 +9,11 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 /// You can also pass them at build time instead of hardcoding:
 ///   flutter build ... --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
 class SupabaseConfig {
-  static const String _envUrl =
-      String.fromEnvironment('SUPABASE_URL', defaultValue: '');
-  static const String _envAnonKey =
-      String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+  static const String _envUrl = String.fromEnvironment('SUPABASE_URL',
+      defaultValue: 'https://ojorpmtptryldizogtkz.supabase.co');
+  static const String _envAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY',
+      defaultValue:
+          'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qb3JwbXRwdHJ5bGRpem9ndGt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5NjUwNzIsImV4cCI6MjEwMDU0MTA3Mn0.6nn9c9LTa9rCW-t5xvXxTKsMlnUSW8yuig9_Wiw-F7w');
 
   /// Test seam. The real values are compile-time `--dart-define`s, so they are
   /// always blank under `flutter test` and every network client short-circuits
